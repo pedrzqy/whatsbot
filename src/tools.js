@@ -89,31 +89,43 @@ const definitions = [
 
 // ─── Formatação segura dos resultados para o modelo ──────────────────
 
-/** Menor valor positivo entre preço e promocional (evita mostrar valor errado). */
-function priceOf(price, promo) {
+const brl = (n) => (n != null ? `R$ ${Number(n).toFixed(2)}` : null);
+
+/** Preço de venda (menor) e, se houver promoção real, o valor "de" (maior) para riscar. */
+function priceParts(price, promo) {
   const nums = [price, promo].map(Number).filter((n) => !Number.isNaN(n) && n > 0);
-  return nums.length ? Math.min(...nums) : null;
+  if (!nums.length) return {};
+  const por = Math.min(...nums);
+  const de = Math.max(...nums);
+  return de > por ? { por, de } : { por };
 }
 
-const brl = (n) => (n != null ? `R$ ${Number(n).toFixed(2)}` : 'consultar');
+/** Formata preço para o modelo: { preco, preco_original? } (preco_original = "de" p/ riscar). */
+function fmtPrice(parts) {
+  if (parts.por == null) return { preco: 'consultar' };
+  const out = { preco: brl(parts.por) };
+  if (parts.de) out.preco_original = brl(parts.de); // há promoção → riscar este valor
+  return out;
+}
 
-/** Formata o catálogo para o modelo (nome, preço, opções/variantes). */
+/** Formata o catálogo para o modelo (nome, preço de/por, opções/variantes, link). */
 function formatProducts(list) {
   return list.slice(0, 8).map((p) => {
     const variantes = (p.variants || [])
       .filter((v) => v.is_active !== false)
-      .map((v) => ({ nome: v.name, preco: priceOf(v.price, v.promotional_price) }));
+      .map((v) => ({ nome: v.name, ...fmtPrice(priceParts(v.price, v.promotional_price)) }));
 
-    let preco = priceOf(p.price, p.promotional_price);
-    if (preco == null && variantes.length) {
-      const vp = variantes.map((v) => v.preco).filter((n) => n != null);
-      preco = vp.length ? Math.min(...vp) : null;
+    let parts = priceParts(p.price, p.promotional_price);
+    if (parts.por == null && variantes.length) {
+      const vals = (p.variants || [])
+        .filter((v) => v.is_active !== false)
+        .map((v) => priceParts(v.price, v.promotional_price).por)
+        .filter((n) => n != null);
+      if (vals.length) parts = { por: Math.min(...vals) };
     }
 
-    const out = { nome: p.name, preco: brl(preco), link: productLink(p.slug) };
-    if (variantes.length) {
-      out.opcoes = variantes.map((v) => `${v.nome}: ${brl(v.preco)}`);
-    }
+    const out = { nome: p.name, ...fmtPrice(parts), link: productLink(p.slug) };
+    if (variantes.length) out.opcoes = variantes;
     return out;
   });
 }
