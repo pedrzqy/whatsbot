@@ -26,16 +26,30 @@ app.post('/webhooks/evolution', async (req, res) => {
     const key = data.key || {};
     if (key.fromMe) return; // ignora mensagens enviadas pelo próprio bot
 
-    // Só atende conversa INDIVIDUAL. Ignora grupos, status/transmissões e newsletters
-    // (senão o bot responde grupo e gasta a cota à toa).
+    // Ignora status/transmissões e newsletters.
     const remoteJid = key.remoteJid || '';
-    if (/@g\.us$|@broadcast$|@newsletter$/i.test(remoteJid)) return;
+    if (/@broadcast$|@newsletter$/i.test(remoteJid)) return;
 
     const message = data.message || {};
     const text =
       message.conversation ||
       message.extendedTextMessage?.text ||
       '';
+
+    // GRUPOS: o agente de comunidade (Fase 2) decide se responde. Ele só age se as
+    // respostas estiverem ligadas e for o grupo certo; senão, ignora. (Por padrão a
+    // Evolution nem entrega msgs de grupo — groupsIgnore=true.) O fluxo 1-a-1 fica intacto.
+    if (/@g\.us$/i.test(remoteJid)) {
+      const ctx = message.extendedTextMessage?.contextInfo || {};
+      await community.handleGroupMessage({
+        groupJid: remoteJid,
+        participant: (key.participant || '').replace('@s.whatsapp.net', ''),
+        text,
+        pushName: data.pushName,
+        mentionedJids: ctx.mentionedJid || [],
+      });
+      return;
+    }
 
     await handlers.onIncomingMessage({
       from: (key.remoteJid || '').replace('@s.whatsapp.net', ''),

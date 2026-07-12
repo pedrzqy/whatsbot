@@ -21,6 +21,7 @@ const nerix = require('./nerix');
 const news = require('./news');
 const sender = require('./sender');
 const variator = require('./variator');
+const ai = require('./ai');
 
 const cfg = config.community;
 const STORE_URL = config.store.url;
@@ -148,12 +149,7 @@ async function genNews() {
   const fresh = latest.filter((n) => !seen[n.link]).sort((a, b) => b.ts - a.ts);
   if (!fresh.length) return null;
   const n = fresh[0];
-  // Marca como visto (cap ~60 links p/ o estado não crescer sem limite).
-  seen[n.link] = Date.now();
-  const keys = Object.keys(seen);
-  if (keys.length > 60) for (const k of keys.slice(0, keys.length - 60)) delete seen[k];
-  state.newsSeen = seen;
-  saveState();
+  markSeen(n.link);
 
   return (
     `${variator.pick(['📰 Saiu novidade no mundo', '📰 Fresquinho do mundo', '🎮 Rolou no mundo'])} ${n.source}!\n\n` +
@@ -162,10 +158,41 @@ async function genNews() {
   );
 }
 
-// Ordem de rotação dos conteúdos.
+/** Marca um link como visto no estado (compartilhado por news/reviews), com cap de 80. */
+function markSeen(link) {
+  const seen = state.newsSeen || {};
+  seen[link] = Date.now();
+  const keys = Object.keys(seen);
+  if (keys.length > 80) for (const k of keys.slice(0, keys.length - 80)) delete seen[k];
+  state.newsSeen = seen;
+  saveState();
+}
+
+async function genReviews() {
+  const items = await news.fetchLatestReviews();
+  if (!items.length) return null;
+  const seen = state.newsSeen || {};
+  const fresh = items.filter((r) => !seen[r.link]);
+  if (!fresh.length) return null;
+  const r = fresh[0];
+  markSeen(r.link);
+
+  // Título costuma ser "Review: Jogo (Plataforma) - Veredito".
+  const m = r.title.match(/^Review:\s*(.+?)\s*\(([^)]+)\)\s*[-–—]\s*(.+)$/i);
+  const body = m
+    ? `🎮 ${m[1]} (${m[2]})\n💬 ${m[3]}`
+    : r.title.replace(/^Review:\s*/i, '');
+  return (
+    `${variator.pick(['⭐ Saiu review', '⭐ Review novinha', '⭐ Analisaram pra você'])} — ${r.source} ${r.emoji}\n\n` +
+    `${body}\n\n` +
+    `👉 ${r.link}`
+  );
+}
+
+// Ordem de rotação dos conteúdos. (genBestSellers segue disponível, mas fora da rotação.)
 const GENERATORS = [
   { key: 'news', fn: genNews },
-  { key: 'bestsellers', fn: genBestSellers },
+  { key: 'reviews', fn: genReviews },
   { key: 'promo', fn: genPromo },
   { key: 'coupon', fn: genCoupon },
 ];
@@ -237,6 +264,43 @@ async function tick() {
   }
 }
 
+// ─── FASE 2: responder no grupo quando marcarem o bot (@) ou usarem gatilho ──
+let lastGroupReplyAt = 0;
+
+/**
+ * Trata uma mensagem recebida no grupo da comunidade (chamado pelo server só p/ grupos).
+ * Só responde se: replies ligados, é o NOSSO grupo, e o bot foi marcado (@) OU citaram o gatilho.
+ * @param {{groupJid:string, participant:string, text:string, pushName?:string, mentionedJids?:string[]}} m
+ */
+async function handleGroupMessage(m) {
+  if (!cfg.replyEnabled || !cfg.groupJid) return;
+  if (!m || m.groupJid !== cfg.groupJid) return; // só o grupo da comunidade
+  const text = (m.text || '').trim();
+  if (!text) return;
+
+  const mentioned = cfg.botNumber && (m.mentionedJids || []).some((j) => String(j).replace(/\D/g, '').startsWith(cfg.botNumber));
+  const lower = text.toLowerCase();
+  const triggered = cfg.trigger && lower.includes(cfg.trigger);
+  if (!mentioned && !triggered) return; // só responde se chamarem o bot
+
+  const now = Date.now();
+  if (now - lastGroupReplyAt < cfg.replyCooldownMs) return; // anti-spam (cooldown)
+  lastGroupReplyAt = now;
+
+  // Remove a menção/gatilho do texto pra deixar só a pergunta.
+  let question = text.replace(new RegExp(`@?${cfg.trigger}`, 'ig'), '').replace(/@\d+/g, '').trim();
+  if (!question) question = text;
+
+  try {
+    const key = m.participant || m.groupJid; // histórico por membro
+    const answer = await ai.reply(key, question, m.pushName);
+    await publish(answer); // respeita dry-run; publica no grupo
+    console.log(`[community] respondeu no grupo (${m.participant || '?'})`);
+  } catch (err) {
+    console.error('[community] erro ao responder no grupo:', err.response?.data || err.message);
+  }
+}
+
 function start() {
   if (!cfg.enabled) { console.log('[community] desligada (COMMUNITY_ENABLED != true)'); return; }
   if (!cfg.groupJid) { console.log('[community] SEM COMMUNITY_GROUP_JID — não vai postar'); return; }
@@ -251,4 +315,4 @@ function start() {
 
 function stop() { if (timer) { clearInterval(timer); timer = null; } }
 
-module.exports = { start, stop, tick, postNext, genBestSellers, genPromo, genCoupon, genNews };
+module.exports = { start, stop, tick, postNext, handleGroupMessage, genBestSellers, genPromo, genCoupon, genNews, genReviews };

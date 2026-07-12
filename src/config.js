@@ -126,6 +126,16 @@ const config = {
     postHours: parseHours(process.env.COMMUNITY_POST_HOURS, '12,19'),
     // Teto de posts por dia (segurança anti-ban).
     maxPerDay: Number(process.env.COMMUNITY_MAX_PER_DAY || 3),
+
+    // ── FASE 2 (interativo): responder no grupo quando marcarem o bot (@) ou usarem gatilho ──
+    // Default OFF. Além disto, a Evolution só entrega msgs de grupo se groupsIgnore=false.
+    replyEnabled: process.env.COMMUNITY_REPLY_ENABLED === 'true',
+    // Número do próprio bot (só dígitos) p/ detectar menção (@). Ex.: 5541999999999.
+    botNumber: (process.env.COMMUNITY_BOT_NUMBER || '').replace(/\D/g, ''),
+    // Palavra-gatilho alternativa (se não marcarem, mas começarem/citarem isto).
+    trigger: (process.env.COMMUNITY_TRIGGER || 'phaze').toLowerCase(),
+    // Intervalo mínimo entre respostas no grupo (anti-spam).
+    replyCooldownMs: Number(process.env.COMMUNITY_REPLY_COOLDOWN_MS || 15000),
   },
 
   // Ritmo humanizado de envio (anti-ban). Todos os valores em milissegundos.

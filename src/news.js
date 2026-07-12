@@ -22,16 +22,25 @@ const DEFAULT_FEEDS = [
   { source: 'Steam/PC', emoji: '⚫', url: 'https://www.pcgamer.com/rss/' },
 ];
 
-/** Lê a config de feeds do env ("Label|emoji|url ; Label2|emoji2|url2") ou usa o padrão. */
-function loadFeeds() {
-  const raw = (process.env.COMMUNITY_NEWS_FEEDS || '').trim();
-  if (!raw) return DEFAULT_FEEDS;
-  const feeds = raw.split(';').map((chunk) => {
-    const [source, emoji, url] = chunk.split('|').map((s) => (s || '').trim());
+// Feeds de REVIEW (o título já traz o veredito — nada de copiar texto).
+const DEFAULT_REVIEW_FEEDS = [
+  { source: 'Nintendo', emoji: '🔴', url: 'https://www.nintendolife.com/feeds/reviews' },
+  { source: 'PlayStation', emoji: '🔵', url: 'https://www.pushsquare.com/feeds/reviews' },
+];
+
+/** Lê "Label|emoji|url ; ..." de uma env, ou usa o default informado. */
+function parseFeedEnv(raw, fallback) {
+  const s = (raw || '').trim();
+  if (!s) return fallback;
+  const feeds = s.split(';').map((chunk) => {
+    const [source, emoji, url] = chunk.split('|').map((x) => (x || '').trim());
     return url ? { source: source || 'Games', emoji: emoji || '📰', url } : null;
   }).filter(Boolean);
-  return feeds.length ? feeds : DEFAULT_FEEDS;
+  return feeds.length ? feeds : fallback;
 }
+
+function loadFeeds() { return parseFeedEnv(process.env.COMMUNITY_NEWS_FEEDS, DEFAULT_FEEDS); }
+function loadReviewFeeds() { return parseFeedEnv(process.env.COMMUNITY_REVIEW_FEEDS, DEFAULT_REVIEW_FEEDS); }
 
 /** Limpa CDATA, tags e entidades HTML de um texto de RSS. */
 function clean(s) {
@@ -88,4 +97,20 @@ async function fetchLatestPerSource() {
   return results.filter(Boolean);
 }
 
-module.exports = { fetchLatestPerSource, parseFeed, loadFeeds };
+/** Busca reviews recentes das fontes (vários por fonte), achatado e ordenado por data desc. */
+async function fetchLatestReviews(perFeed = 5) {
+  const feeds = loadReviewFeeds();
+  const lists = await Promise.all(feeds.map(async (f) => {
+    try {
+      const { data } = await http.get(f.url);
+      const items = parseFeed(String(data)).slice(0, perFeed);
+      return items.map((it) => ({ source: f.source, emoji: f.emoji, ...it }));
+    } catch (err) {
+      console.error(`[news] review ${f.source} falhou:`, err.response?.status || err.code || err.message);
+      return [];
+    }
+  }));
+  return lists.flat().sort((a, b) => b.ts - a.ts);
+}
+
+module.exports = { fetchLatestPerSource, fetchLatestReviews, parseFeed, loadFeeds, loadReviewFeeds };
