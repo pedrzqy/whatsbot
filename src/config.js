@@ -16,6 +16,16 @@ function llmProvider(name, url, apiKey, model, reasoningEffort = '') {
   return { name, url: url.replace(/\/$/, ''), apiKey, model, reasoningEffort };
 }
 
+// Converte "12,19" numa lista de horas válidas (0-23); usa fallback se vazio/inválido.
+function parseHours(raw, fallback) {
+  const src = (raw && String(raw).trim()) || fallback;
+  const hs = String(src)
+    .split(',')
+    .map((n) => parseInt(String(n).trim(), 10))
+    .filter((n) => Number.isInteger(n) && n >= 0 && n < 24);
+  return hs.length ? hs : String(fallback).split(',').map(Number);
+}
+
 // Converte "45,1440" (minutos) num array de estágios em ms; usa fallback se vazio/ inválido.
 function parseStagesMin(raw, fallbackMin) {
   const src = (raw && String(raw).trim()) || fallbackMin;
@@ -97,6 +107,25 @@ const config = {
     // Horário de silêncio (BRT, UTC-3): não cutuca de madrugada. Padrão 22h–8h.
     quietStartHour: Number(process.env.RECOVERY_QUIET_START_HOUR || 22),
     quietEndHour: Number(process.env.RECOVERY_QUIET_END_HOUR || 8),
+  },
+
+  // ── Agente de COMUNIDADE: posta conteúdo no grupo (notícias/promo/top/cupom) ──
+  // Fase 1 = só SAÍDA (posts agendados), sem ler mensagens do grupo. Passa pela
+  // fila anti-ban do sender.js. Default DESLIGADO + dry-run (loga em vez de enviar).
+  community: {
+    enabled: process.env.COMMUNITY_ENABLED === 'true', // opt-in explícito
+    dryRun: process.env.COMMUNITY_DRY_RUN !== 'false',  // padrão: só loga, não envia
+    // JID do grupo destino (ex.: "1203630...@g.us"). Sem isto, não posta.
+    groupJid: process.env.COMMUNITY_GROUP_JID || '',
+    // Instância da Evolution p/ postar. Vazio = mesma do bot (mesmo número).
+    // Ao migrar p/ número dedicado, basta setar COMMUNITY_INSTANCE.
+    instance: process.env.COMMUNITY_INSTANCE || '',
+    // Varredura do agendador.
+    checkIntervalMs: Number(process.env.COMMUNITY_CHECK_INTERVAL_MS || 5 * 60 * 1000),
+    // Horas (BRT) em que pode postar. Padrão: 12h e 19h (pico).
+    postHours: parseHours(process.env.COMMUNITY_POST_HOURS, '12,19'),
+    // Teto de posts por dia (segurança anti-ban).
+    maxPerDay: Number(process.env.COMMUNITY_MAX_PER_DAY || 3),
   },
 
   // Ritmo humanizado de envio (anti-ban). Todos os valores em milissegundos.

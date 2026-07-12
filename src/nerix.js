@@ -66,6 +66,13 @@ async function checkPayment(orderCode) {
   return data;
 }
 
+// ─── Cupons ──────────────────────────────────────────────────────────
+/** Lista os cupons da loja (code, type, value, is_active, is_secret, valid_until...). */
+async function listCoupons(params = {}) {
+  const { data } = await http.get('/coupons', { params });
+  return data;
+}
+
 // ─── Loja ────────────────────────────────────────────────────────────
 async function getStore() {
   const { data } = await http.get('/store');
@@ -80,5 +87,6 @@ module.exports = {
   getOrder,
   listOrders,
   checkPayment,
+  listCoupons,
   getStore,
 };

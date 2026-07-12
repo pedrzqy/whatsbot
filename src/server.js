@@ -4,6 +4,7 @@ const express = require('express');
 const config = require('./config');
 const handlers = require('./handlers');
 const recovery = require('./recovery');
+const community = require('./community');
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -69,4 +70,5 @@ app.post('/webhooks/nerix', async (req, res) => {
 app.listen(config.port, () => {
   console.log(`whatsbot rodando na porta ${config.port}`);
   recovery.start(); // recuperação de venda: cutuca quem sumiu no meio da conversa
+  community.start(); // agente de comunidade: posta conteúdo no grupo (Fase 1: só saída)
 });

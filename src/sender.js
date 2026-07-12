@@ -76,15 +76,17 @@ async function processJob(job) {
     await sleep(rand(p.reactionMinMs, p.reactionMaxMs));
   }
 
+  const evoOpts = opts.instance ? { instance: opts.instance } : {};
+
   // 3) Simulação de digitação.
   if (opts.typing !== false) {
-    try { await evolution.sendPresence(number, 'composing'); } catch { /* não bloqueia o envio */ }
+    try { await evolution.sendPresence(number, 'composing', evoOpts); } catch { /* não bloqueia o envio */ }
     await sleep(typingDurationMs(text));
-    try { await evolution.sendPresence(number, 'paused'); } catch { /* idem */ }
+    try { await evolution.sendPresence(number, 'paused', evoOpts); } catch { /* idem */ }
   }
 
   // 4) Envio.
-  await evolution.sendText(number, text);
+  await evolution.sendText(number, text, evoOpts);
 
   const t = Date.now();
   lastGlobalSendAt = t;

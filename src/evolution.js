@@ -19,16 +19,19 @@ const http = axios.create({
 });
 
 /**
- * Normaliza um número BR para o formato JID esperado pela Evolution.
- * Aceita "5541999999999" ou "+55 (41) 99999-9999".
+ * Normaliza o destino para o formato esperado pela Evolution.
+ * - Número BR ("5541999999999" ou "+55 (41) 99999-9999") → só dígitos.
+ * - JID (contém "@", ex.: grupo "...@g.us") → usado como veio (NÃO remover dígitos/traços).
  */
 function toNumber(raw) {
-  return String(raw).replace(/\D/g, '');
+  const s = String(raw);
+  return s.includes('@') ? s : s.replace(/\D/g, '');
 }
 
-/** Envia uma mensagem de texto simples. */
-async function sendText(number, text) {
-  const { data } = await http.post(`/message/sendText/${config.evolution.instance}`, {
+/** Envia uma mensagem de texto simples. `opts.instance` permite outra instância (ex.: comunidade). */
+async function sendText(number, text, opts = {}) {
+  const instance = opts.instance || config.evolution.instance;
+  const { data } = await http.post(`/message/sendText/${instance}`, {
     number: toNumber(number),
     text,
   });
@@ -40,8 +43,9 @@ async function sendText(number, text) {
  * Deixa o atendimento com cara de humano. Valores: 'composing' | 'paused' |
  * 'recording' | 'available' | 'unavailable'.
  */
-async function sendPresence(number, presence = 'composing') {
-  const { data } = await http.post(`/chat/sendPresence/${config.evolution.instance}`, {
+async function sendPresence(number, presence = 'composing', opts = {}) {
+  const instance = opts.instance || config.evolution.instance;
+  const { data } = await http.post(`/chat/sendPresence/${instance}`, {
     number: toNumber(number),
     presence,
   });
