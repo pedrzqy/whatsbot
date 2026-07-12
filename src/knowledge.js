@@ -32,5 +32,5 @@ module.exports = {
     'Steam entregue em conta, pronto pra jogar. Garantia de 30 dias. 100% original.',
 
   online_perfil_proprio:
-    'Opção de jogar online / no próprio perfil: +40-60% do valor, fechada só com atendente (colete nome e sobrenome).',
+    'Opção de jogar online / no próprio perfil: +40% a 50% do valor, fechada só com atendente (colete nome e sobrenome).',
 };
