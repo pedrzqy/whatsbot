@@ -40,11 +40,11 @@ const definitions = [
     type: 'function',
     function: {
       name: 'consultar_pedido',
-      description: 'Status/detalhes de um pedido. Requer numero_pedido (ex.: NX-1054) e email; se faltarem, peça antes.',
+      description: 'Status/detalhes de um pedido. Requer numero_pedido (o CÓDIGO do pedido) e email; se faltarem, peça antes. Não valide o formato do código: passe exatamente o que o cliente enviar.',
       parameters: {
         type: 'object',
         properties: {
-          numero_pedido: { type: 'string', description: 'Código do pedido, ex.: NX-1054' },
+          numero_pedido: { type: 'string', description: 'Código do pedido, exatamente como o cliente enviou. É um código longo com traços (ex.: 019f4860-e3ea-7341-8a1a-bc39d1876fa5). Aceite como veio, sem exigir formato.' },
           email: { type: 'string', description: 'E-mail usado na compra (validado pela API)' },
         },
         required: ['numero_pedido', 'email'],
@@ -55,11 +55,11 @@ const definitions = [
     type: 'function',
     function: {
       name: 'verificar_pagamento',
-      description: 'Confere se o Pix caiu e libera a entrega. Requer numero_pedido e email. Use quando o cliente disser que pagou.',
+      description: 'Confere se o Pix caiu e libera a entrega. Requer numero_pedido (código em QUALQUER formato) e email. Use quando o cliente disser que pagou.',
       parameters: {
         type: 'object',
         properties: {
-          numero_pedido: { type: 'string' },
+          numero_pedido: { type: 'string', description: 'Código do pedido, exatamente como o cliente enviou (código longo com traços). Aceite como veio, sem exigir formato.' },
           email: { type: 'string' },
         },
         required: ['numero_pedido', 'email'],

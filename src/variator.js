@@ -61,8 +61,8 @@ const HANDOFF = [
   'Perfeito, vou te transferir para um atendente humano. Só um momento! 😊\n\n(Digite *#inicio* para voltar ao autoatendimento.)',
 ];
 const ASK_ORDER = [
-  'Claro! Me passa o *número do pedido* (ex.: NX-1054) e o *e-mail* usado na compra que eu já verifico pra você. 🔎',
-  'Sem problemas! Para consultar, preciso do *número do pedido* (NX-...) e do *e-mail* da compra. Pode mandar? 😊',
+  'Claro! Me passa o *código do pedido* (aquele código longo com traços do e-mail de confirmação) e o *e-mail* usado na compra que eu já verifico pra você. 🔎',
+  'Sem problemas! Para consultar, preciso do *código do pedido* e do *e-mail* da compra. Pode mandar? 😊',
   'Boa! Me envia o *número do pedido* e o *e-mail* da compra que eu confiro o status na hora. 📦',
 ];
 const ASK_PRODUCT = [
