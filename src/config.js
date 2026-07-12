@@ -29,6 +29,8 @@ const config = {
     url: process.env.STORE_URL || 'https://phazegames.com',
     // Grupo do WhatsApp (convidar o cliente).
     groupUrl: process.env.STORE_GROUP_URL || 'https://chat.whatsapp.com/KxQ7jybE7fL4N31C7kpKYp',
+    // Site onde o cliente resgata o código de verificação da conta (ao entrar).
+    codeUrl: process.env.STORE_CODE_URL || 'https://codigons.online/',
   },
 
   // Provedor de LLM (compatível com OpenAI). Padrão: Google Gemini (grátis, limites altos).
