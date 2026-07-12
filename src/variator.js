@@ -76,10 +76,33 @@ const RESUMED = [
   'Tô de volta! Me conta como posso te ajudar. 🙂',
 ];
 
+// ─── Recuperação de venda (cutucada de quem sumiu no meio da conversa) ───
+// Um conjunto de variações por estágio. Tom leve, sem pressão, no máx 1 emoji.
+// `n` já vem como " Nome" (com espaço) ou "" — encaixa no meio da frase.
+const RECOVERY = [
+  [ // estágio 1 (~45 min de silêncio)
+    (n) => `Oi${n}, ainda por aí? 😊 Se quiser, eu vejo aquele jogo pra você ou tiro qualquer dúvida — é só me chamar.`,
+    (n) => `E aí${n}, conseguiu decidir? Qualquer dúvida sobre o jogo, preço ou entrega, tô por aqui pra te ajudar. 🎮`,
+    (n) => `Passando pra saber se ficou alguma dúvida${n}. Se quiser, me chama que a gente resolve rapidinho. 👍`,
+    (n) => `Continuo à disposição${n}! Se ainda tiver interesse, é só responder aqui que eu te ajudo a fechar. 😉`,
+  ],
+  [ // estágio 2 (~24 h) — usado só se você configurar 2+ cutucadas
+    (n) => `Oi${n}! Ainda dá tempo de garantir seu jogo com entrega em até 30 min. Se quiser, é só me chamar. 🎮`,
+    (n) => `Passando de novo${n}: se ainda tiver interesse, me responde aqui. Qualquer dúvida de preço ou garantia eu explico. 😊`,
+  ],
+];
+
+/** Cutucada de recuperação para o estágio (0-based). `firstName` pode ser vazio. */
+function recovery(firstName, stage = 0) {
+  const bucket = RECOVERY[Math.min(stage, RECOVERY.length - 1)];
+  const n = firstName ? ` ${firstName}` : '';
+  return pick(bucket)(n);
+}
+
 const invalidOption = () => pick(INVALID);
 const handoff = () => pick(HANDOFF);
 const askOrder = () => pick(ASK_ORDER);
 const askProduct = () => pick(ASK_PRODUCT);
 const resumed = () => pick(RESUMED);
 
-module.exports = { pick, chance, greeting, error, invalidOption, handoff, askOrder, askProduct, resumed };
+module.exports = { pick, chance, greeting, error, invalidOption, handoff, askOrder, askProduct, resumed, recovery };

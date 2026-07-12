@@ -3,6 +3,7 @@
 const express = require('express');
 const config = require('./config');
 const handlers = require('./handlers');
+const recovery = require('./recovery');
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -67,4 +68,5 @@ app.post('/webhooks/nerix', async (req, res) => {
 
 app.listen(config.port, () => {
   console.log(`whatsbot rodando na porta ${config.port}`);
+  recovery.start(); // recuperação de venda: cutuca quem sumiu no meio da conversa
 });

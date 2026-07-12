@@ -16,6 +16,16 @@ function llmProvider(name, url, apiKey, model, reasoningEffort = '') {
   return { name, url: url.replace(/\/$/, ''), apiKey, model, reasoningEffort };
 }
 
+// Converte "45,1440" (minutos) num array de estágios em ms; usa fallback se vazio/ inválido.
+function parseStagesMin(raw, fallbackMin) {
+  const src = (raw && String(raw).trim()) || fallbackMin;
+  const mins = String(src)
+    .split(',')
+    .map((n) => Number(String(n).trim()))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  return (mins.length ? mins : [Number(fallbackMin)]).map((m) => m * 60 * 1000);
+}
+
 const config = {
   port: Number(process.env.PORT || 3000),
 
@@ -70,6 +80,23 @@ const config = {
 
   webhook: {
     nerixSecret: process.env.NERIX_WEBHOOK_SECRET || '',
+  },
+
+  // ── Recuperação de venda: cutuca quem engajou na conversa e sumiu ──
+  // Só cutuca contato que JÁ conversou com a IA (engaged) e não está com atendente (paused).
+  // Cliente que responde zera o ciclo. Passa pela fila anti-ban do sender.js e respeita horário.
+  recovery: {
+    enabled: process.env.RECOVERY_ENABLED !== 'false', // ligado por padrão
+    // De quanto em quanto tempo o scheduler varre os contatos.
+    checkIntervalMs: Number(process.env.RECOVERY_CHECK_INTERVAL_MS || 5 * 60 * 1000),
+    // Minutos de SILÊNCIO necessários para cada cutucada. Nº de estágios = nº de cutucadas.
+    // Padrão: 1 cutucada após 45 min. Ex.: RECOVERY_STAGES_MIN="45,1440" = 2 (45min e 24h).
+    stages: parseStagesMin(process.env.RECOVERY_STAGES_MIN, 45),
+    // Se o cliente já sumiu há mais que isto, desiste do ciclo (não cutuca gente antiga).
+    staleAfterMs: Number(process.env.RECOVERY_STALE_AFTER_MS || 12 * 60 * 60 * 1000),
+    // Horário de silêncio (BRT, UTC-3): não cutuca de madrugada. Padrão 22h–8h.
+    quietStartHour: Number(process.env.RECOVERY_QUIET_START_HOUR || 22),
+    quietEndHour: Number(process.env.RECOVERY_QUIET_END_HOUR || 8),
   },
 
   // Ritmo humanizado de envio (anti-ban). Todos os valores em milissegundos.

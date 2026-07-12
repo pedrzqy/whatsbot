@@ -47,6 +47,11 @@ function getContact(id) {
   return contacts[id] || null;
 }
 
+/** Snapshot de todos os contatos como pares [id, contato]. Usado pela recuperação de venda. */
+function allContacts() {
+  return Object.entries(contacts);
+}
+
 function saveContact(id, patch) {
   contacts[id] = { ...(contacts[id] || {}), ...patch };
   persist();
@@ -55,4 +60,4 @@ function saveContact(id, patch) {
 
 load();
 
-module.exports = { getContact, saveContact };
+module.exports = { getContact, saveContact, allContacts };

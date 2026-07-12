@@ -67,7 +67,7 @@ async function handleMessage(msg) {
 
   // ─── 2) Palavras de recomeço (#inicio/menu/voltar) — barato, sem IA ───
   if (RESUME.has(lower)) {
-    store.saveContact(from, { paused: false, ...nameFields });
+    store.saveContact(from, { paused: false, followupCount: 0, ...nameFields });
     await sender.send(from, variator.resumed());
     return;
   }
@@ -78,7 +78,9 @@ async function handleMessage(msg) {
     return;
   }
 
-  store.saveContact(from, nameFields);
+  // Cliente entrou na conversa (não é só boas-vindas): vira candidato à recuperação
+  // e, por estar ativo agora, zera qualquer ciclo de cutucada pendente.
+  store.saveContact(from, { ...nameFields, engaged: true, followupCount: 0 });
   if (!trimmed) return;
 
   // ─── 4) Todo o resto → IA (conversa livre; ela transfere p/ atendente se preciso) ───
