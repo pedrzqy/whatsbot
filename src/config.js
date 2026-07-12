@@ -27,6 +27,8 @@ const config = {
   store: {
     // URL do site oficial (as compras são feitas apenas por lá).
     url: process.env.STORE_URL || 'https://phazegames.com',
+    // Grupo do WhatsApp (convidar o cliente).
+    groupUrl: process.env.STORE_GROUP_URL || 'https://chat.whatsapp.com/KxQ7jybE7fL4N31C7kpKYp',
   },
 
   groq: {
@@ -36,7 +38,7 @@ const config = {
     temperature: Number(process.env.GROQ_TEMPERATURE || 0.6),
     maxTokens: Number(process.env.GROQ_MAX_TOKENS || 500),
     // Nº de trocas (par usuário+assistente) mantidas no histórico por contato.
-    maxHistory: Number(process.env.GROQ_MAX_HISTORY || 8),
+    maxHistory: Number(process.env.GROQ_MAX_HISTORY || 5),
   },
 
   webhook: {

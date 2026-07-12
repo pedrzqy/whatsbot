@@ -20,12 +20,6 @@ const variator = require('./variator');
 // Palavras que reativam o autoatendimento quando o cliente está com um humano.
 const RESUME = new Set(['#inicio', '#início', 'inicio', 'início', 'menu', 'voltar', 'atendimento', 'recomecar', 'recomeçar']);
 
-// Detecta pedido explícito para falar com um atendente humano.
-function isHandoffRequest(lower) {
-  return /(atendente|humano|pessoa de verdade|pessoa real|atendimento humano)/.test(lower) ||
-    lower.includes('falar com alguém') || lower.includes('falar com alguem');
-}
-
 // Serializa o processamento das mensagens de um MESMO contato, para não
 // re-saudar nem trocar a ordem quando várias mensagens chegam em sequência.
 const contactLocks = new Map();
@@ -85,14 +79,7 @@ async function handleMessage(msg) {
   store.saveContact(from, nameFields);
   if (!trimmed) return;
 
-  // ─── 3) Pediu um atendente humano → pausa o bot ───
-  if (isHandoffRequest(lower)) {
-    store.saveContact(from, { paused: true });
-    await sender.send(from, variator.handoff());
-    return;
-  }
-
-  // ─── 4) Todo o resto → IA (conversa livre com ferramentas da Nerix) ───
+  // ─── 3) Todo o resto → IA (conversa livre; ela transfere p/ atendente se preciso) ───
   try {
     const answer = await ai.reply(from, trimmed, pushName);
     await sender.send(from, answer);

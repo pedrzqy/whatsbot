@@ -3,56 +3,54 @@
 /**
  * BASE DE CONHECIMENTO da loja (apenas os FATOS).
  *
- * A IA reescreve estes textos de forma humanizada e DIFERENTE a cada resposta,
- * então aqui você só precisa manter o conteúdo CORRETO — não o "jeito de falar".
- *
- * Regras confirmadas pelo lojista (Phaze Games) em 2026-07-11.
+ * A IA reescreve estes textos de forma humanizada e diferente a cada resposta.
+ * Enquadramento definido pelo lojista (Phaze Games): falar sempre de forma
+ * positiva, sem termos técnicos, sem apresentar nada como desvantagem.
  */
 
 module.exports = {
   prazo_envio:
     'A entrega é 100% digital e automática após a confirmação do pagamento — normalmente em ' +
-    'até 30 minutos. Pagamentos via Pix costumam ser aprovados na hora, e os dados de acesso ' +
-    'chegam aqui pelo WhatsApp e no e-mail cadastrado na compra.',
+    'até 30 minutos. No Pix costuma cair na hora, e os dados de acesso chegam aqui pelo WhatsApp ' +
+    'e no e-mail cadastrado na compra. Rapidinho e sem complicação.',
 
   garantia:
-    'Os jogos de Nintendo Switch e PlayStation têm garantia VITALÍCIA. As contas de Steam têm ' +
-    'garantia de 30 dias. Todos os jogos são originais e contam com suporte: se tiver qualquer ' +
-    'problema de acesso dentro da garantia, nossa equipe resolve pra você.',
+    'Os jogos de Nintendo Switch e PlayStation têm garantia VITALÍCIA — é jogar sem interrupção ' +
+    'nenhuma, do jeitinho que você comprou, pra sempre. As contas de Steam têm garantia de 30 dias. ' +
+    'Tudo 100% original e com suporte de verdade: qualquer coisa, a nossa equipe resolve pra você.',
 
   pagamento:
-    'Aceitamos Pix e cartão de crédito. As compras são feitas exclusivamente pelo nosso site ' +
-    'oficial, com checkout seguro.',
+    'Aceitamos Pix e cartão de crédito. As compras são feitas pelo nosso site oficial, com ' +
+    'checkout seguro — rápido e tranquilo.',
 
   troca:
-    'Como se trata de produto digital (os dados de acesso são enviados assim que o pagamento cai), ' +
-    'não trabalhamos com troca ou devolução após a entrega dos dados. Mas fique tranquilo: se houver ' +
-    'qualquer problema com o acesso, a gente resolve pelo suporte e pela garantia.',
+    'Como é um produto digital (os dados de acesso são enviados na hora do pagamento), não ' +
+    'trabalhamos com troca/devolução depois da entrega. Mas pode ficar tranquilo: qualquer problema ' +
+    'de acesso, a gente resolve na hora pelo suporte e pela garantia.',
 
   restricoes:
-    'Para manter a garantia e o bom funcionamento do jogo, não é permitido: alterar a senha ou os ' +
-    'dados da conta recebida, definir a conta como principal quando a modalidade for secundária, nem ' +
-    'revender ou compartilhar os dados com terceiros. Seguindo essas orientações, fica tudo certo!',
+    'Pra manter a garantia e tudo funcionando certinho, é só não alterar a senha/dados da conta ' +
+    'recebida e não repassar os dados pra terceiros. Seguindo isso, é só aproveitar e jogar.',
 
-  // Método de conta (primária/secundária) — confirmado pelas variantes do catálogo.
+  // Enquadramento positivo: "offline", sem termos técnicos. A opção online/perfil próprio é upsell via atendente.
   plataforma_playstation:
-    'Os jogos de PlayStation são digitais, pelo método de conta, com garantia vitalícia. Duas ' +
-    'modalidades: SECUNDÁRIA (mais em conta) — o jogo roda no seu console quando ele está definido ' +
-    'como console principal da conta que enviamos, e em geral exige estar online; e PRIMÁRIA — você ' +
-    'joga na sua própria conta, funciona offline e é mais flexível. Você recebe os dados de acesso ' +
-    'para baixar o jogo direto na PS Store. Todos os jogos são originais.',
+    'Os jogos de PlayStation são digitais, 100% originais e com garantia VITALÍCIA — você joga ' +
+    'offline no seu console, tranquilo e sem interrupção nenhuma. Chega tudo pronto pra baixar ' +
+    'direto na PS Store e começar a jogar. Também existe a opção de jogar ONLINE / no seu próprio ' +
+    'perfil, que sai entre 40% e 60% a mais do valor do jogo e é fechada com um atendente.',
 
   plataforma_nintendo:
-    'Os jogos de Nintendo Switch são digitais, com garantia vitalícia. Enviamos um perfil/conta com ' +
-    'os dados de acesso para você baixar o jogo direto na eShop oficial da Nintendo, no seu Switch. ' +
-    'É tudo original e dentro da loja oficial: você adiciona a conta no console e baixa o jogo desejado.',
+    'Os jogos de Nintendo Switch são digitais, 100% originais e com garantia VITALÍCIA — você joga ' +
+    'offline no seu próprio Switch, tranquilo e sem interrupção nenhuma. Chega rapidinho, direto da ' +
+    'eShop oficial da Nintendo, e é só começar a jogar. Também existe a opção de jogar ONLINE / no ' +
+    'seu próprio perfil, que sai entre 40% e 60% a mais do valor do jogo e é fechada com um atendente.',
 
   plataforma_steam:
-    'Os jogos de Steam são entregues por meio de contas com os dados de acesso para você jogar ' +
-    '(geralmente no modo offline). As contas de Steam têm garantia de 30 dias. Você recebe todas as ' +
-    'instruções junto com a compra. Todos os jogos são originais.',
+    'Os jogos de Steam são entregues em conta, com tudo pronto pra jogar. As contas de Steam têm ' +
+    'garantia de 30 dias. Você recebe todas as instruções junto com a compra. Tudo 100% original.',
 
-  outros:
-    'Posso te ajudar com dúvidas sobre os jogos, formas de pagamento, status do seu pedido e suporte. ' +
-    'Se precisar de algo específico, é só me contar ou pedir para falar com um atendente.',
+  online_perfil_proprio:
+    'Além do padrão (jogar offline no seu console, com garantia vitalícia), temos a opção de jogar ' +
+    'ONLINE e no seu PRÓPRIO perfil. Ela custa entre 40% e 60% a mais do valor do jogo e é fechada ' +
+    'diretamente com um atendente. Se o cliente quiser essa opção, colete nome e sobrenome e transfira.',
 };

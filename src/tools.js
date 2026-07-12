@@ -12,11 +12,12 @@
 
 const nerix = require('./nerix');
 const config = require('./config');
+const store = require('./store');
 
-/** Monta o link direto do produto no site (rota /product/:slug da Nerix). */
+/** Monta o link direto do produto no site (rota /package/:slug da Nerix). */
 function productLink(slug) {
   if (!slug || !config.store.url) return null;
-  return `${config.store.url}/product/${slug}`;
+  return `${config.store.url}/package/${slug}`;
 }
 
 // Esquemas no formato OpenAI/Groq.
@@ -65,6 +66,22 @@ const definitions = [
           email: { type: 'string' },
         },
         required: ['numero_pedido', 'email'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'falar_com_atendente',
+      description:
+        'Transfere o cliente para um atendente humano e pausa o bot. Use quando: o cliente pedir atendente/humano; OU quando ele quiser a opção de jogar ONLINE / no próprio perfil (essa opção só é fechada com atendente). OBRIGATÓRIO: colete o NOME e SOBRENOME do cliente ANTES de chamar. Se ele só deu o primeiro nome, peça o sobrenome.',
+      parameters: {
+        type: 'object',
+        properties: {
+          nome_completo: { type: 'string', description: 'Nome e sobrenome do cliente (obrigatório)' },
+          motivo: { type: 'string', description: 'Motivo resumido (ex.: "opção online/perfil próprio", "dúvida", "pedido")' },
+        },
+        required: ['nome_completo'],
       },
     },
   },
@@ -120,8 +137,16 @@ function formatOrder(o) {
   };
 }
 
-async function execute(name, args = {}) {
+async function execute(name, args = {}, ctx = {}) {
   try {
+    if (name === 'falar_com_atendente') {
+      const nome = (args.nome_completo || '').trim();
+      if (nome.split(/\s+/).length < 2) return { erro: 'falta_sobrenome' };
+      if (ctx.from) store.saveContact(ctx.from, { paused: true, name: nome });
+      console.log(`[handoff] ${ctx.from} -> atendente (${nome}) | motivo: ${args.motivo || '-'}`);
+      return { transferido: true, instrucao: 'Confirme ao cliente, de forma calorosa, que um atendente humano vai continuar o atendimento em instantes.' };
+    }
+
     if (name === 'buscar_produtos') {
       const data = await nerix.listProducts({ search: args.termo || '', limit: 8 });
       const list = data.data || data || [];
