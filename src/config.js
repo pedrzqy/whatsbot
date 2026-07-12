@@ -48,6 +48,16 @@ const config = {
     maxHistory: Number(process.env.GROQ_MAX_HISTORY || 4),
   },
 
+  // Provedor de RESERVA (fallback): usado automaticamente quando o primário (Gemini)
+  // trava por rate limit. Padrão: Groq (llama-3.1-8b-instant). Defina FALLBACK_API_KEY
+  // com a chave do Groq para ativar. Vazio = sem reserva.
+  fallback: {
+    url: (process.env.FALLBACK_API_URL || 'https://api.groq.com/openai/v1').replace(/\/$/, ''),
+    apiKey: process.env.FALLBACK_API_KEY || '',
+    model: process.env.FALLBACK_MODEL || 'llama-3.1-8b-instant',
+    reasoningEffort: process.env.FALLBACK_REASONING_EFFORT || '',
+  },
+
   webhook: {
     nerixSecret: process.env.NERIX_WEBHOOK_SECRET || '',
   },

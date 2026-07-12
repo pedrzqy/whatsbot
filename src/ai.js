@@ -16,6 +16,7 @@ const tools = require('./tools');
 const knowledge = require('./knowledge');
 const store = require('./store');
 
+// Cliente do provedor PRIMÁRIO (Gemini por padrão).
 const http = axios.create({
   baseURL: config.groq.url,
   timeout: 30000,
@@ -24,6 +25,18 @@ const http = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+// Cliente do provedor de RESERVA (Groq), ativado só se FALLBACK_API_KEY estiver definido.
+const fallbackHttp = config.fallback.apiKey
+  ? axios.create({
+      baseURL: config.fallback.url,
+      timeout: 30000,
+      headers: {
+        Authorization: `Bearer ${config.fallback.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+    })
+  : null;
 
 // ─── Histórico de conversa em memória (por contato) ──────────────────
 /** @type {Map<string,{messages:Array,updatedAt:number}>} */
@@ -160,27 +173,46 @@ function parseRetrySeconds(msg = '') {
   return total || null;
 }
 
-// ─── Chamada de baixo nível ao Groq ──────────────────────────────────
-async function chat(messages, opts = {}, retry = 0) {
+// ─── Chamada de baixo nível (compatível com OpenAI) ──────────────────
+function isRateLimit(err) {
+  return err.response?.status === 429 || err.response?.data?.error?.code === 'rate_limit_exceeded';
+}
+
+/** Faz a chamada em um provedor específico (primário ou reserva). */
+async function callProvider(client, provider, messages, opts) {
+  const { data } = await client.post('/chat/completions', {
+    model: opts.model || provider.model,
+    messages,
+    temperature: opts.temperature ?? config.groq.temperature,
+    max_tokens: opts.maxTokens ?? config.groq.maxTokens,
+    ...(provider.reasoningEffort ? { reasoning_effort: provider.reasoningEffort } : {}),
+    ...(opts.tools ? { tools: opts.tools, tool_choice: opts.toolChoice || 'auto' } : {}),
+  });
+  return data.choices?.[0]?.message || { content: '' };
+}
+
+/**
+ * Chama o modelo. Tenta o PRIMÁRIO (Gemini); se travar por rate limit, espera um
+ * pouco e, se ainda travado, cai automaticamente na RESERVA (Groq).
+ */
+async function chat(messages, opts = {}) {
   try {
-    const { data } = await http.post('/chat/completions', {
-      model: opts.model || config.groq.model,
-      messages,
-      temperature: opts.temperature ?? config.groq.temperature,
-      max_tokens: opts.maxTokens ?? config.groq.maxTokens,
-      ...(config.groq.reasoningEffort ? { reasoning_effort: config.groq.reasoningEffort } : {}),
-      ...(opts.tools ? { tools: opts.tools, tool_choice: opts.toolChoice || 'auto' } : {}),
-    });
-    return data.choices?.[0]?.message || { content: '' };
+    return await callProvider(http, config.groq, messages, opts);
   } catch (err) {
-    // Rate limit curto (poucos segundos): espera e tenta de novo (até 2x).
-    const e = err.response?.data?.error;
-    if (e?.code === 'rate_limit_exceeded' && retry < 2) {
-      const wait = parseRetrySeconds(e.message);
-      if (wait != null && wait <= 15) {
-        await sleep((wait + 0.5) * 1000);
-        return chat(messages, opts, retry + 1);
-      }
+    if (!isRateLimit(err)) throw err;
+
+    // 1) Rate limit curto no primário: espera e tenta 1x de novo.
+    const wait = parseRetrySeconds(err.response?.data?.error?.message || '');
+    if (wait != null && wait <= 8) {
+      await sleep((wait + 0.3) * 1000);
+      try { return await callProvider(http, config.groq, messages, opts); }
+      catch (err2) { if (!isRateLimit(err2)) throw err2; }
+    }
+
+    // 2) Ainda travado → cai na RESERVA (Groq), se configurada.
+    if (fallbackHttp) {
+      console.warn('[ai] primário (Gemini) sem cota → usando reserva (Groq)');
+      return await callProvider(fallbackHttp, config.fallback, messages, opts);
     }
     throw err;
   }
