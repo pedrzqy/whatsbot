@@ -18,6 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const config = require('./config');
 const nerix = require('./nerix');
+const news = require('./news');
 const sender = require('./sender');
 const variator = require('./variator');
 
@@ -139,8 +140,31 @@ async function genCoupon() {
   );
 }
 
+async function genNews() {
+  const latest = await news.fetchLatestPerSource();
+  if (!latest.length) return null;
+  const seen = state.newsSeen || {};
+  // Ainda não postados, mais recentes primeiro.
+  const fresh = latest.filter((n) => !seen[n.link]).sort((a, b) => b.ts - a.ts);
+  if (!fresh.length) return null;
+  const n = fresh[0];
+  // Marca como visto (cap ~60 links p/ o estado não crescer sem limite).
+  seen[n.link] = Date.now();
+  const keys = Object.keys(seen);
+  if (keys.length > 60) for (const k of keys.slice(0, keys.length - 60)) delete seen[k];
+  state.newsSeen = seen;
+  saveState();
+
+  return (
+    `${variator.pick(['📰 Saiu novidade no mundo', '📰 Fresquinho do mundo', '🎮 Rolou no mundo'])} ${n.source}!\n\n` +
+    `${n.emoji} ${n.title}\n\n` +
+    `👉 ${n.link}`
+  );
+}
+
 // Ordem de rotação dos conteúdos.
 const GENERATORS = [
+  { key: 'news', fn: genNews },
   { key: 'bestsellers', fn: genBestSellers },
   { key: 'promo', fn: genPromo },
   { key: 'coupon', fn: genCoupon },
@@ -227,4 +251,4 @@ function start() {
 
 function stop() { if (timer) { clearInterval(timer); timer = null; } }
 
-module.exports = { start, stop, tick, postNext, genBestSellers, genPromo, genCoupon };
+module.exports = { start, stop, tick, postNext, genBestSellers, genPromo, genCoupon, genNews };
