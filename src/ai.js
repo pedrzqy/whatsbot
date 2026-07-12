@@ -139,10 +139,10 @@ async function callWithTools(messages) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** Extrai de "try again in 4.525s" / "9m0s" o total em segundos, ou null. */
+/** Extrai o tempo de espera ("try again in 4.5s", "9m0s", "retry in 12s") em segundos, ou null. */
 function parseRetrySeconds(msg = '') {
-  const min = msg.match(/try again in\s+(\d+)m/);
-  const sec = msg.match(/try again in\s+([\d.]+)s/);
+  const min = msg.match(/(?:try again|retry) in\s+(\d+)m/);
+  const sec = msg.match(/(?:try again|retry) in\s+([\d.]+)s/);
   let total = 0;
   if (min) total += parseInt(min[1], 10) * 60;
   if (sec) total += parseFloat(sec[1]);
@@ -157,6 +157,7 @@ async function chat(messages, opts = {}, retry = 0) {
       messages,
       temperature: opts.temperature ?? config.groq.temperature,
       max_tokens: opts.maxTokens ?? config.groq.maxTokens,
+      ...(config.groq.reasoningEffort ? { reasoning_effort: config.groq.reasoningEffort } : {}),
       ...(opts.tools ? { tools: opts.tools, tool_choice: opts.toolChoice || 'auto' } : {}),
     });
     return data.choices?.[0]?.message || { content: '' };

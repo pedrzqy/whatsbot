@@ -31,14 +31,17 @@ const config = {
     groupUrl: process.env.STORE_GROUP_URL || 'https://chat.whatsapp.com/KxQ7jybE7fL4N31C7kpKYp',
   },
 
+  // Provedor de LLM (compatível com OpenAI). Padrão: Google Gemini (grátis, limites altos).
+  // Env override: GROQ_API_URL / GROQ_API_KEY / GROQ_MODEL (nomes GROQ_* mantidos por compatibilidade).
+  // Para voltar ao Groq: GROQ_API_URL=https://api.groq.com/openai/v1, GROQ_MODEL=llama-3.1-8b-instant, GROQ_REASONING_EFFORT=(vazio).
   groq: {
-    url: (process.env.GROQ_API_URL || 'https://api.groq.com/openai/v1').replace(/\/$/, ''),
+    url: (process.env.GROQ_API_URL || 'https://generativelanguage.googleapis.com/v1beta/openai').replace(/\/$/, ''),
     apiKey: required('GROQ_API_KEY'),
-    // 8b-instant: cota grátis bem maior (~500k tokens/dia) e mais rápido. Para a
-    // melhor qualidade do 70b, defina GROQ_MODEL=llama-3.3-70b-versatile (exige upgrade no Groq).
-    model: process.env.GROQ_MODEL || 'llama-3.1-8b-instant',
+    model: process.env.GROQ_MODEL || 'gemini-flash-latest',
+    // Gemini 3.x "pensa" por padrão (gasta tokens e trunca). 'none' desliga → resposta limpa e rápida.
+    reasoningEffort: process.env.GROQ_REASONING_EFFORT ?? 'none',
     temperature: Number(process.env.GROQ_TEMPERATURE || 0.6),
-    maxTokens: Number(process.env.GROQ_MAX_TOKENS || 500),
+    maxTokens: Number(process.env.GROQ_MAX_TOKENS || 600),
     // Nº de trocas (par usuário+assistente) mantidas no histórico por contato.
     maxHistory: Number(process.env.GROQ_MAX_HISTORY || 4),
   },
