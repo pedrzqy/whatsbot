@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:docs.nerix.com.br)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:docs.evolutionfoundation.com.br)"
+    ]
+  }
+}

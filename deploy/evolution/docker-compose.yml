@@ -1,0 +1,56 @@
+# Evolution API v2 + PostgreSQL (SEM Redis, para economizar recursos).
+# Suba com:  docker compose up -d
+# Requer: Docker + Docker Compose no host (VPS, servidor, ou seu PC para testes).
+
+services:
+  evolution-api:
+    image: evoapicloud/evolution-api:latest
+    container_name: evolution_api
+    restart: always
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+    environment:
+      # URL PÚBLICA da API (usada para montar links de QR/mídia). Troque pelo IP/domínio.
+      SERVER_URL: ${SERVER_URL}
+      # Chave global de autenticação (você inventa uma forte). É a EVOLUTION_API_KEY do bot.
+      AUTHENTICATION_API_KEY: ${AUTHENTICATION_API_KEY}
+      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "true"
+
+      # ── Banco de dados (PostgreSQL) ──
+      DATABASE_ENABLED: "true"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      DATABASE_CONNECTION_CLIENT_NAME: evolution
+
+      # Salva só o essencial (a sessão/instância). Desliga histórico p/ poupar disco —
+      # nosso bot não precisa do histórico gravado na Evolution.
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "false"
+      DATABASE_SAVE_MESSAGE_UPDATE: "false"
+      DATABASE_SAVE_DATA_CONTACTS: "false"
+      DATABASE_SAVE_DATA_CHATS: "false"
+      DATABASE_SAVE_DATA_LABELS: "false"
+      DATABASE_SAVE_DATA_HISTORIC: "false"
+
+      # ── Cache local (sem Redis) ──
+      CACHE_REDIS_ENABLED: "false"
+      CACHE_LOCAL_ENABLED: "true"
+    volumes:
+      - evolution_instances:/evolution/instances
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: evolution_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  evolution_instances:
+  postgres_data:

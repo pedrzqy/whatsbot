@@ -1,0 +1,19 @@
+{
+  "name": "whatsbot",
+  "version": "0.1.0",
+  "description": "Bot de automação de WhatsApp (Evolution API) integrado à plataforma de vendas Nerix",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "axios": "^1.7.7",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1"
+  }
+}
