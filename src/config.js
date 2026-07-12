@@ -10,6 +10,12 @@ function required(name) {
   return value;
 }
 
+// Monta um provedor de LLM (compatível com OpenAI). Retorna null se não tiver chave.
+function llmProvider(name, url, apiKey, model, reasoningEffort = '') {
+  if (!apiKey) return null;
+  return { name, url: url.replace(/\/$/, ''), apiKey, model, reasoningEffort };
+}
+
 const config = {
   port: Number(process.env.PORT || 3000),
 
@@ -33,29 +39,33 @@ const config = {
     codeUrl: process.env.STORE_CODE_URL || 'https://codigons.online/',
   },
 
-  // Provedor de LLM (compatível com OpenAI). Padrão: Google Gemini (grátis, limites altos).
-  // Env override: GROQ_API_URL / GROQ_API_KEY / GROQ_MODEL (nomes GROQ_* mantidos por compatibilidade).
-  // Para voltar ao Groq: GROQ_API_URL=https://api.groq.com/openai/v1, GROQ_MODEL=llama-3.1-8b-instant, GROQ_REASONING_EFFORT=(vazio).
-  groq: {
-    url: (process.env.GROQ_API_URL || 'https://generativelanguage.googleapis.com/v1beta/openai').replace(/\/$/, ''),
-    apiKey: required('GROQ_API_KEY'),
-    model: process.env.GROQ_MODEL || 'gemini-flash-latest',
-    // Gemini 3.x "pensa" por padrão (gasta tokens e trunca). 'none' desliga → resposta limpa e rápida.
-    reasoningEffort: process.env.GROQ_REASONING_EFFORT ?? 'none',
-    temperature: Number(process.env.GROQ_TEMPERATURE || 0.6),
-    maxTokens: Number(process.env.GROQ_MAX_TOKENS || 600),
-    // Nº de trocas (par usuário+assistente) mantidas no histórico por contato.
-    maxHistory: Number(process.env.GROQ_MAX_HISTORY || 4),
-  },
-
-  // Provedor de RESERVA (fallback): usado automaticamente quando o primário (Gemini)
-  // trava por rate limit. Padrão: Groq (llama-3.1-8b-instant). Defina FALLBACK_API_KEY
-  // com a chave do Groq para ativar. Vazio = sem reserva.
-  fallback: {
-    url: (process.env.FALLBACK_API_URL || 'https://api.groq.com/openai/v1').replace(/\/$/, ''),
-    apiKey: process.env.FALLBACK_API_KEY || '',
-    model: process.env.FALLBACK_MODEL || 'llama-3.1-8b-instant',
-    reasoningEffort: process.env.FALLBACK_REASONING_EFFORT || '',
+  // ── LLM: COMBO de provedores em CASCATA (todos compatíveis com OpenAI) ──
+  // Ordem = melhor qualidade/velocidade primeiro; rede de segurança por último.
+  // Se um trava (rate limit / erro), cai automaticamente no próximo. Só entram os que têm chave.
+  // (Nomes GROQ_*/FALLBACK_* antigos mantidos por compatibilidade.)
+  llm: {
+    temperature: Number(process.env.LLM_TEMPERATURE || 0.6),
+    maxTokens: Number(process.env.LLM_MAX_TOKENS || 600),
+    // Nº de trocas (usuário+assistente) mantidas no histórico por contato.
+    maxHistory: Number(process.env.LLM_MAX_HISTORY || 4),
+    providers: [
+      llmProvider('Gemini',
+        process.env.GEMINI_API_URL || 'https://generativelanguage.googleapis.com/v1beta/openai',
+        process.env.GEMINI_API_KEY || process.env.GROQ_API_KEY,
+        process.env.GEMINI_MODEL || 'gemini-flash-latest',
+        process.env.GEMINI_REASONING_EFFORT ?? process.env.GROQ_REASONING_EFFORT ?? 'none'),
+      llmProvider('Cerebras', 'https://api.cerebras.ai/v1',
+        process.env.CEREBRAS_API_KEY, process.env.CEREBRAS_MODEL || 'gpt-oss-120b'),
+      llmProvider('Groq', 'https://api.groq.com/openai/v1',
+        process.env.GROQ_FALLBACK_API_KEY || process.env.FALLBACK_API_KEY,
+        process.env.GROQ_FALLBACK_MODEL || process.env.FALLBACK_MODEL || 'llama-3.1-8b-instant'),
+      llmProvider('Mistral', 'https://api.mistral.ai/v1',
+        process.env.MISTRAL_API_KEY, process.env.MISTRAL_MODEL || 'mistral-small-latest'),
+      llmProvider('Cohere', 'https://api.cohere.ai/compatibility/v1',
+        process.env.COHERE_API_KEY, process.env.COHERE_MODEL || 'command-r-08-2024'),
+      llmProvider('OpenRouter', 'https://openrouter.ai/api/v1',
+        process.env.OPENROUTER_API_KEY, process.env.OPENROUTER_MODEL || 'tencent/hy3:free'),
+    ].filter(Boolean),
   },
 
   webhook: {

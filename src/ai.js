@@ -16,27 +16,16 @@ const tools = require('./tools');
 const knowledge = require('./knowledge');
 const store = require('./store');
 
-// Cliente do provedor PRIMÁRIO (Gemini por padrão).
-const http = axios.create({
-  baseURL: config.groq.url,
-  timeout: 30000,
-  headers: {
-    Authorization: `Bearer ${config.groq.apiKey}`,
-    'Content-Type': 'application/json',
-  },
-});
-
-// Cliente do provedor de RESERVA (Groq), ativado só se FALLBACK_API_KEY estiver definido.
-const fallbackHttp = config.fallback.apiKey
-  ? axios.create({
-      baseURL: config.fallback.url,
-      timeout: 30000,
-      headers: {
-        Authorization: `Bearer ${config.fallback.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-    })
-  : null;
+// COMBO de provedores em cascata: um cliente HTTP por provedor com chave.
+const providers = config.llm.providers.map((p) => ({
+  ...p,
+  client: axios.create({
+    baseURL: p.url,
+    timeout: 40000,
+    headers: { Authorization: `Bearer ${p.apiKey}`, 'Content-Type': 'application/json' },
+  }),
+}));
+console.log('[ai] provedores (cascata):', providers.map((p) => `${p.name}(${p.model})`).join(' → ') || 'NENHUM');
 
 // ─── Histórico de conversa em memória (por contato) ──────────────────
 /** @type {Map<string,{messages:Array,updatedAt:number}>} */
@@ -58,7 +47,7 @@ function pushHistory(from, role, content) {
   const entry = histories.get(from) || { messages: [], updatedAt: Date.now() };
   entry.messages.push({ role, content });
   // Mantém só as últimas N trocas (user+assistant) para não estourar contexto/custo.
-  const max = config.groq.maxHistory * 2;
+  const max = config.llm.maxHistory * 2;
   if (entry.messages.length > max) {
     entry.messages = entry.messages.slice(-max);
   }
@@ -151,44 +140,19 @@ function recoverToolCalls(err) {
   return calls.length ? calls : null;
 }
 
-/** Chama o modelo com ferramentas, recuperando o bug tool_use_failed. */
-async function callWithTools(messages) {
-  try {
-    return await chat(messages, { tools: tools.definitions });
-  } catch (err) {
-    if (err.response?.data?.error?.code === 'tool_use_failed') {
-      const recovered = recoverToolCalls(err);
-      if (recovered) return { role: 'assistant', content: null, tool_calls: recovered };
-      return await chat(messages); // sem ferramentas, ao menos responde
-    }
-    throw err;
-  }
+/** Chama o modelo com as ferramentas do bot (o chat() já faz o fallback em cascata). */
+function callWithTools(messages) {
+  return chat(messages, { tools: tools.definitions });
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-/** Extrai o tempo de espera ("try again in 4.5s", "9m0s", "retry in 12s") em segundos, ou null. */
-function parseRetrySeconds(msg = '') {
-  const min = msg.match(/(?:try again|retry) in\s+(\d+)m/);
-  const sec = msg.match(/(?:try again|retry) in\s+([\d.]+)s/);
-  let total = 0;
-  if (min) total += parseInt(min[1], 10) * 60;
-  if (sec) total += parseFloat(sec[1]);
-  return total || null;
-}
-
-// ─── Chamada de baixo nível (compatível com OpenAI) ──────────────────
-function isRateLimit(err) {
-  return err.response?.status === 429 || err.response?.data?.error?.code === 'rate_limit_exceeded';
-}
-
-/** Faz a chamada em um provedor específico (primário ou reserva). */
-async function callProvider(client, provider, messages, opts) {
-  const { data } = await client.post('/chat/completions', {
+// ─── Chamada de baixo nível (combo de provedores em cascata) ─────────
+/** Faz a chamada em um provedor específico do combo. */
+async function callProvider(provider, messages, opts) {
+  const { data } = await provider.client.post('/chat/completions', {
     model: opts.model || provider.model,
     messages,
-    temperature: opts.temperature ?? config.groq.temperature,
-    max_tokens: opts.maxTokens ?? config.groq.maxTokens,
+    temperature: opts.temperature ?? config.llm.temperature,
+    max_tokens: opts.maxTokens ?? config.llm.maxTokens,
     ...(provider.reasoningEffort ? { reasoning_effort: provider.reasoningEffort } : {}),
     ...(opts.tools ? { tools: opts.tools, tool_choice: opts.toolChoice || 'auto' } : {}),
   });
@@ -196,30 +160,24 @@ async function callProvider(client, provider, messages, opts) {
 }
 
 /**
- * Chama o modelo. Tenta o PRIMÁRIO (Gemini); se travar por rate limit, espera um
- * pouco e, se ainda travado, cai automaticamente na RESERVA (Groq).
+ * Chama o modelo tentando os provedores do COMBO em ordem. Se um falha (rate limit
+ * ou qualquer erro), cai automaticamente no próximo. Recupera o bug tool_use_failed do Groq.
  */
 async function chat(messages, opts = {}) {
-  try {
-    return await callProvider(http, config.groq, messages, opts);
-  } catch (err) {
-    if (!isRateLimit(err)) throw err;
-
-    // 1) Rate limit curto no primário: espera e tenta 1x de novo.
-    const wait = parseRetrySeconds(err.response?.data?.error?.message || '');
-    if (wait != null && wait <= 8) {
-      await sleep((wait + 0.3) * 1000);
-      try { return await callProvider(http, config.groq, messages, opts); }
-      catch (err2) { if (!isRateLimit(err2)) throw err2; }
+  let lastErr;
+  for (const p of providers) {
+    try {
+      return await callProvider(p, messages, opts);
+    } catch (err) {
+      lastErr = err;
+      const recovered = recoverToolCalls(err); // Groq: chamada de ferramenta malformada
+      if (recovered) return { role: 'assistant', content: null, tool_calls: recovered };
+      if (providers.length > 1) {
+        console.warn(`[ai] ${p.name} indisponível (${err.response?.status || err.code || err.message}) → próximo`);
+      }
     }
-
-    // 2) Ainda travado → cai na RESERVA (Groq), se configurada.
-    if (fallbackHttp) {
-      console.warn('[ai] primário (Gemini) sem cota → usando reserva (Groq)');
-      return await callProvider(fallbackHttp, config.fallback, messages, opts);
-    }
-    throw err;
   }
+  throw lastErr || new Error('nenhum provedor de LLM disponível');
 }
 
 /**
