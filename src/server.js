@@ -24,6 +24,11 @@ app.post('/webhooks/evolution', async (req, res) => {
     const key = data.key || {};
     if (key.fromMe) return; // ignora mensagens enviadas pelo próprio bot
 
+    // Só atende conversa INDIVIDUAL. Ignora grupos, status/transmissões e newsletters
+    // (senão o bot responde grupo e gasta a cota à toa).
+    const remoteJid = key.remoteJid || '';
+    if (/@g\.us$|@broadcast$|@newsletter$/i.test(remoteJid)) return;
+
     const message = data.message || {};
     const text =
       message.conversation ||
