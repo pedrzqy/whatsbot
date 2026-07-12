@@ -70,7 +70,7 @@ const definitions = [
     type: 'function',
     function: {
       name: 'falar_com_atendente',
-      description: 'Transfere p/ atendente humano e pausa o bot. OBRIGATÓRIO colete NOME e SOBRENOME antes. Use p/ pedido de atendente OU opção online/perfil próprio. Se só tiver o primeiro nome, peça o sobrenome.',
+      description: 'Transfere p/ atendente humano e pausa o bot. OBRIGATÓRIO colete NOME e SOBRENOME antes. Use p/ ENTREGA/recebimento do pedido (login da conta é entregue pelo atendente), pedido de atendente, ou opção online/perfil próprio. Se só tiver o primeiro nome, peça o sobrenome.',
       parameters: {
         type: 'object',
         properties: {
