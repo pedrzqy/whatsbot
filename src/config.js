@@ -44,21 +44,22 @@ const config = {
   },
 
   // Ritmo humanizado de envio (anti-ban). Todos os valores em milissegundos.
+  // Ajustado para respostas RÁPIDAS, mantendo um mínimo de comportamento natural.
   pacing: {
     // "Pensar" antes de começar a digitar após receber uma mensagem.
-    reactionMinMs: Number(process.env.PACING_REACTION_MIN_MS || 2000),
-    reactionMaxMs: Number(process.env.PACING_REACTION_MAX_MS || 6000),
+    reactionMinMs: Number(process.env.PACING_REACTION_MIN_MS || 600),
+    reactionMaxMs: Number(process.env.PACING_REACTION_MAX_MS || 1600),
     // Intervalo entre mensagens consecutivas para o MESMO contato.
-    consecutiveMinMs: Number(process.env.PACING_CONSECUTIVE_MIN_MS || 3000),
-    consecutiveMaxMs: Number(process.env.PACING_CONSECUTIVE_MAX_MS || 10000),
+    consecutiveMinMs: Number(process.env.PACING_CONSECUTIVE_MIN_MS || 1000),
+    consecutiveMaxMs: Number(process.env.PACING_CONSECUTIVE_MAX_MS || 2500),
     // Intervalo entre envios para contatos DIFERENTES (throttle global).
-    crossContactMinMs: Number(process.env.PACING_CROSS_MIN_MS || 5000),
-    crossContactMaxMs: Number(process.env.PACING_CROSS_MAX_MS || 15000),
+    crossContactMinMs: Number(process.env.PACING_CROSS_MIN_MS || 1200),
+    crossContactMaxMs: Number(process.env.PACING_CROSS_MAX_MS || 3500),
     // Velocidade de digitação: letras por segundo (define o tempo "digitando...").
-    charsPerSecond: Number(process.env.PACING_CHARS_PER_SECOND || 3),
+    charsPerSecond: Number(process.env.PACING_CHARS_PER_SECOND || 25),
     // Limites do tempo de digitação (para não travar em textos muito longos).
-    typingMinMs: Number(process.env.PACING_TYPING_MIN_MS || 1500),
-    typingMaxMs: Number(process.env.PACING_TYPING_MAX_MS || 12000),
+    typingMinMs: Number(process.env.PACING_TYPING_MIN_MS || 400),
+    typingMaxMs: Number(process.env.PACING_TYPING_MAX_MS || 3000),
   },
 
   welcome: {

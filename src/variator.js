@@ -23,20 +23,20 @@ const WELCOME_INTRO = [
   (loja) => `Que bom te ver por aqui na *${loja}*.`,
   (loja) => `Bem-vindo(a) à *${loja}*, estou aqui pra te ajudar.`,
 ];
-const INSTRUCTION = [
-  'Para ser atendido, responda com o *número* da opção desejada. 👇',
-  'É só responder com o *número* da opção que você precisa. 👇',
-  'Me diz o *número* da opção que combina com o que você procura. 👇',
-  'Para começar, responda com o *número* da opção desejada. 👇',
+const INVITE = [
+  'Pode me perguntar o que quiser — qual jogo você procura, preço, como funciona, status do seu pedido... eu te ajudo com tudo por aqui. 😊 O que você tá precisando?',
+  'Me conta o que você tá procurando! Posso te ajudar com jogos e preços, como funciona a entrega, seu pedido e mais. É só perguntar. 🎮',
+  'Manda sua pergunta que eu já te respondo: jogos, preços, como funciona, pagamento, seu pedido... o que precisar. 👍 O que você quer saber?',
+  'Tô aqui pra te ajudar! Pergunta à vontade sobre qualquer jogo, preço, como funciona ou seu pedido. O que você procura? 😉',
 ];
 
-/** Saudação personalizada (sem o menu — o menu é enviado logo em seguida). */
+/** Saudação personalizada que convida o cliente a perguntar (sem menu). */
 function greeting(firstName, storeName) {
   const g = pick(GREETINGS);
   const wave = pick(WAVE);
   const nome = firstName ? ` ${firstName}` : '';
   const hi = `${g}${nome}!${wave ? ' ' + wave : ''}`;
-  return `${hi} ${pick(WELCOME_INTRO)(storeName)}\n\n${pick(INSTRUCTION)}`;
+  return `${hi} ${pick(WELCOME_INTRO)(storeName)}\n\n${pick(INVITE)}`;
 }
 
 // ─── Mensagens de erro / fallback ────────────────────────────────────
@@ -57,7 +57,7 @@ const INVALID = [
 ];
 const HANDOFF = [
   'Beleza! Já vou chamar um atendente pra continuar seu atendimento. Aguarde só um pouquinho, por favor. 🧑‍💼\n\n(Digite *#inicio* para voltar ao autoatendimento.)',
-  'Combinado! Um de nossos atendentes vai te responder em instantes. 🙌\n\n(Se preferir voltar ao menu, digite *#inicio*.)',
+  'Combinado! Um de nossos atendentes vai te responder em instantes. 🙌\n\n(Se quiser voltar ao autoatendimento, digite *#inicio*.)',
   'Perfeito, vou te transferir para um atendente humano. Só um momento! 😊\n\n(Digite *#inicio* para voltar ao autoatendimento.)',
 ];
 const ASK_ORDER = [
@@ -70,9 +70,16 @@ const ASK_PRODUCT = [
   'Boa! Me fala o nome do jogo que você quer que eu consulto o preço aqui. 😉 (As compras são feitas pelo site.)',
   'Perfeito! Qual título você quer? Manda o nome que eu pesquiso. 🕹️ (Depois é só finalizar no site.)',
 ];
+const RESUMED = [
+  'Prontinho, voltei pra te ajudar! 😊 O que você precisa?',
+  'Voltamos ao atendimento automático! Pode perguntar o que quiser. 👍',
+  'Tô de volta! Me conta como posso te ajudar. 🙂',
+];
+
 const invalidOption = () => pick(INVALID);
 const handoff = () => pick(HANDOFF);
 const askOrder = () => pick(ASK_ORDER);
 const askProduct = () => pick(ASK_PRODUCT);
+const resumed = () => pick(RESUMED);
 
-module.exports = { pick, chance, greeting, error, invalidOption, handoff, askOrder, askProduct };
+module.exports = { pick, chance, greeting, error, invalidOption, handoff, askOrder, askProduct, resumed };

@@ -16,11 +16,15 @@ const welcome = require('./welcome');
 const ai = require('./ai');
 const sender = require('./sender');
 const variator = require('./variator');
-const menu = require('./menu');
-const knowledge = require('./knowledge');
 
-// Palavras que voltam ao menu principal / recomeçam o autoatendimento.
-const RESET = new Set(['#inicio', '#início', 'inicio', 'início', 'menu', '#menu', 'voltar']);
+// Palavras que reativam o autoatendimento quando o cliente está com um humano.
+const RESUME = new Set(['#inicio', '#início', 'inicio', 'início', 'menu', 'voltar', 'atendimento', 'recomecar', 'recomeçar']);
+
+// Detecta pedido explícito para falar com um atendente humano.
+function isHandoffRequest(lower) {
+  return /(atendente|humano|pessoa de verdade|pessoa real|atendimento humano)/.test(lower) ||
+    lower.includes('falar com alguém') || lower.includes('falar com alguem');
+}
 
 // Serializa o processamento das mensagens de um MESMO contato, para não
 // re-saudar nem trocar a ordem quando várias mensagens chegam em sequência.
@@ -53,89 +57,48 @@ async function handleMessage(msg) {
   const now = Date.now();
   const nameFields = { lastSeen: now, name: pushName || contact?.name };
 
-  // ─── 1) Boas-vindas / primeiro contato (saudação + menu) ───
+  // ─── 1) Boas-vindas / primeiro contato (convida a perguntar, sem menu) ───
   if (welcome.shouldWelcome(contact)) {
     ai.clearHistory(from);
-    const greeting = await welcome.buildGreeting(pushName);
-    await sender.send(from, greeting);
-    await sender.send(from, menu.render('main'));
     store.saveContact(from, {
       firstSeen: contact?.firstSeen || now,
       greetedAt: now,
-      menuNode: 'main',
       paused: false,
       ...nameFields,
     });
+    const greeting = await welcome.buildGreeting(pushName);
+    await sender.send(from, greeting);
     return;
   }
 
-  // ─── 2) Voltar ao menu principal ───
-  if (RESET.has(lower)) {
-    ai.clearHistory(from);
-    await sender.send(from, menu.render('main'));
-    store.saveContact(from, { menuNode: 'main', paused: false, ...nameFields });
-    return;
-  }
-
-  // ─── 3) Atendimento humano em andamento → bot fica em silêncio ───
+  // ─── 2) Atendimento humano em andamento ───
   if (contact?.paused) {
-    store.saveContact(from, nameFields);
+    if (RESUME.has(lower)) {
+      store.saveContact(from, { paused: false, ...nameFields });
+      await sender.send(from, variator.resumed());
+      return;
+    }
+    store.saveContact(from, nameFields); // silêncio: um humano está atendendo
     return;
   }
 
   store.saveContact(from, nameFields);
   if (!trimmed) return;
 
-  // ─── 4) Seleção no menu por número ───
-  const node = contact?.menuNode;
-  if (node && /^\d{1,2}$/.test(trimmed)) {
-    const opt = menu.resolve(node, trimmed);
-    if (!opt) {
-      await sender.send(from, variator.invalidOption());
-      await sender.send(from, menu.render(node));
-      return;
-    }
-    if (opt.goto) {
-      store.saveContact(from, { menuNode: opt.goto });
-      await sender.send(from, menu.render(opt.goto));
-      return;
-    }
-    if (opt.topic) {
-      const fact = knowledge[opt.topic];
-      const answer = fact ? await ai.humanizeAnswer(fact) : variator.error();
-      await sender.send(from, answer);
-      return;
-    }
-    if (opt.action) {
-      await handleAction(from, opt.action);
-      return;
-    }
+  // ─── 3) Pediu um atendente humano → pausa o bot ───
+  if (isHandoffRequest(lower)) {
+    store.saveContact(from, { paused: true });
+    await sender.send(from, variator.handoff());
+    return;
   }
 
-  // ─── 5) Texto livre → IA com ferramentas (catálogo, pedidos...) ───
+  // ─── 4) Todo o resto → IA (conversa livre com ferramentas da Nerix) ───
   try {
     const answer = await ai.reply(from, trimmed, pushName);
     await sender.send(from, answer);
   } catch (err) {
     console.error('[ai] erro ao responder:', err.response?.data || err.message);
     await sender.send(from, variator.error());
-  }
-}
-
-/** Executa uma ação do menu (atendente, pedido, comprar). */
-async function handleAction(from, action) {
-  if (action === 'atendente') {
-    store.saveContact(from, { paused: true });
-    await sender.send(from, variator.handoff());
-    return;
-  }
-  if (action === 'pedido') {
-    await sender.send(from, variator.askOrder());
-    return;
-  }
-  if (action === 'comprar') {
-    await sender.send(from, variator.askProduct());
-    return;
   }
 }
 
