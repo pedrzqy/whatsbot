@@ -22,12 +22,29 @@ const knowledge = require('./knowledge');
 // Palavras que voltam ao menu principal / recomeçam o autoatendimento.
 const RESET = new Set(['#inicio', '#início', 'inicio', 'início', 'menu', '#menu', 'voltar']);
 
+// Serializa o processamento das mensagens de um MESMO contato, para não
+// re-saudar nem trocar a ordem quando várias mensagens chegam em sequência.
+const contactLocks = new Map();
+
 /**
  * @param {object} msg  Mensagem normalizada { from, text, pushName, raw }
  */
-async function onIncomingMessage(msg) {
+function onIncomingMessage(msg) {
+  const from = msg && msg.from;
+  if (!from) return Promise.resolve();
+  const prev = contactLocks.get(from) || Promise.resolve();
+  const next = prev
+    .then(() => handleMessage(msg))
+    .catch((err) => console.error('[handler] erro:', err.message));
+  contactLocks.set(
+    from,
+    next.finally(() => { if (contactLocks.get(from) === next) contactLocks.delete(from); })
+  );
+  return next;
+}
+
+async function handleMessage(msg) {
   const { from, text, pushName } = msg;
-  if (!from) return;
   const trimmed = (text || '').trim();
   const lower = trimmed.toLowerCase();
   console.log(`[msg] de ${from} (${pushName || '?'}): ${trimmed}`);
