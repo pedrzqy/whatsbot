@@ -65,21 +65,23 @@ async function handleMessage(msg) {
     return;
   }
 
-  // ─── 2) Atendimento humano em andamento ───
+  // ─── 2) Palavras de recomeço (#inicio/menu/voltar) — barato, sem IA ───
+  if (RESUME.has(lower)) {
+    store.saveContact(from, { paused: false, ...nameFields });
+    await sender.send(from, variator.resumed());
+    return;
+  }
+
+  // ─── 3) Atendimento humano em andamento → silêncio (um humano atende) ───
   if (contact?.paused) {
-    if (RESUME.has(lower)) {
-      store.saveContact(from, { paused: false, ...nameFields });
-      await sender.send(from, variator.resumed());
-      return;
-    }
-    store.saveContact(from, nameFields); // silêncio: um humano está atendendo
+    store.saveContact(from, nameFields);
     return;
   }
 
   store.saveContact(from, nameFields);
   if (!trimmed) return;
 
-  // ─── 3) Todo o resto → IA (conversa livre; ela transfere p/ atendente se preciso) ───
+  // ─── 4) Todo o resto → IA (conversa livre; ela transfere p/ atendente se preciso) ───
   try {
     const answer = await ai.reply(from, trimmed, pushName);
     await sender.send(from, answer);

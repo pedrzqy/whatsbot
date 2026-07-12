@@ -34,11 +34,13 @@ const config = {
   groq: {
     url: (process.env.GROQ_API_URL || 'https://api.groq.com/openai/v1').replace(/\/$/, ''),
     apiKey: required('GROQ_API_KEY'),
-    model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+    // 8b-instant: cota grátis bem maior (~500k tokens/dia) e mais rápido. Para a
+    // melhor qualidade do 70b, defina GROQ_MODEL=llama-3.3-70b-versatile (exige upgrade no Groq).
+    model: process.env.GROQ_MODEL || 'llama-3.1-8b-instant',
     temperature: Number(process.env.GROQ_TEMPERATURE || 0.6),
     maxTokens: Number(process.env.GROQ_MAX_TOKENS || 500),
     // Nº de trocas (par usuário+assistente) mantidas no histórico por contato.
-    maxHistory: Number(process.env.GROQ_MAX_HISTORY || 5),
+    maxHistory: Number(process.env.GROQ_MAX_HISTORY || 4),
   },
 
   webhook: {

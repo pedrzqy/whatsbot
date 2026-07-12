@@ -26,8 +26,7 @@ const definitions = [
     type: 'function',
     function: {
       name: 'buscar_produtos',
-      description:
-        'Busca produtos no catálogo da loja por termo. Use quando o cliente perguntar sobre produtos, preços, estoque ou o que a loja vende.',
+      description: 'Busca produtos por termo (nome). Retorna preço, promoção, link e opções.',
       parameters: {
         type: 'object',
         properties: {
@@ -41,8 +40,7 @@ const definitions = [
     type: 'function',
     function: {
       name: 'consultar_pedido',
-      description:
-        'Consulta detalhes e status de um pedido específico. Exige o número do pedido (ex.: NX-1054) e o e-mail usado na compra. Se o cliente não informar os dois, PEÇA antes de chamar.',
+      description: 'Status/detalhes de um pedido. Requer numero_pedido (ex.: NX-1054) e email; se faltarem, peça antes.',
       parameters: {
         type: 'object',
         properties: {
@@ -57,8 +55,7 @@ const definitions = [
     type: 'function',
     function: {
       name: 'verificar_pagamento',
-      description:
-        'Verifica em tempo real se o pagamento (Pix) de um pedido caiu e libera a entrega. Exige número do pedido e e-mail. Use quando o cliente disser que pagou e quer o produto.',
+      description: 'Confere se o Pix caiu e libera a entrega. Requer numero_pedido e email. Use quando o cliente disser que pagou.',
       parameters: {
         type: 'object',
         properties: {
@@ -73,8 +70,7 @@ const definitions = [
     type: 'function',
     function: {
       name: 'falar_com_atendente',
-      description:
-        'Transfere o cliente para um atendente humano e pausa o bot. Use quando: o cliente pedir atendente/humano; OU quando ele quiser a opção de jogar ONLINE / no próprio perfil (essa opção só é fechada com atendente). OBRIGATÓRIO: colete o NOME e SOBRENOME do cliente ANTES de chamar. Se ele só deu o primeiro nome, peça o sobrenome.',
+      description: 'Transfere p/ atendente humano e pausa o bot. OBRIGATÓRIO colete NOME e SOBRENOME antes. Use p/ pedido de atendente OU opção online/perfil próprio. Se só tiver o primeiro nome, peça o sobrenome.',
       parameters: {
         type: 'object',
         properties: {
