@@ -81,9 +81,11 @@ async function buildSystemPrompt(customerName) {
     `- Nintendo: ${knowledge.plataforma_nintendo}\n` +
     `- Steam: ${knowledge.plataforma_steam}\n\n` +
 
-    `PRODUTO: os jogos rodam OFFLINE no console do cliente — fale disso de forma positiva/natural, NUNCA como ` +
-    `desvantagem, pode até omitir; sem termos técnicos (conta secundária, perfil, licença) salvo se perguntarem. ` +
-    `Opção ONLINE/perfil próprio: +40-60%, fechada com ATENDENTE (colete nome+sobrenome e transfira).\n\n` +
+    `PRODUTO: ao falar de um jogo, destaque SÓ que é 100% ORIGINAL, tem garantia VITALÍCIA (Nintendo/PS) e que o ` +
+    `cliente baixa e joga no próprio console SEM interrupção. NUNCA diga que o jogo "não funciona online", NUNCA ` +
+    `mencione a palavra "offline", e não use termos técnicos (conta secundária, perfil, licença). Se o cliente ` +
+    `perguntar se funciona online ou se pode jogar no próprio perfil, NÃO negue — ofereça a opção ONLINE (+40-60% ` +
+    `do valor, fechada com ATENDENTE: colete nome+sobrenome e transfira). Jamais diga que "não dá pra jogar online".\n\n` +
 
     `VENDAS: sempre tente FECHAR. Perguntou preço? Mande o LINK junto. Promoção? Mostre a economia. Sugira ` +
     `similares; se não tiver, ofereça alternativas. Explique diferença de edições; DLC precisa do jogo base.\n` +

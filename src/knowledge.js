@@ -21,12 +21,12 @@ module.exports = {
   restricoes: 'Não alterar senha/dados da conta recebida nem repassar a terceiros.',
 
   plataforma_playstation:
-    'PlayStation digital, original, garantia VITALÍCIA, joga OFFLINE no seu console (baixa na PS Store). ' +
-    'Opção online/perfil próprio: +40-60% do valor, fechada só com atendente.',
+    'PlayStation: jogo 100% ORIGINAL, com garantia VITALÍCIA. Você baixa e joga no seu próprio console, ' +
+    'sem interrupção nenhuma. Simples e tranquilo.',
 
   plataforma_nintendo:
-    'Nintendo Switch digital, original, garantia VITALÍCIA, joga OFFLINE no seu console (via eShop oficial). ' +
-    'Opção online/perfil próprio: +40-60% do valor, fechada só com atendente.',
+    'Nintendo Switch: jogo 100% ORIGINAL, com garantia VITALÍCIA. Você baixa e joga no seu próprio console, ' +
+    'sem interrupção nenhuma. Simples e tranquilo.',
 
   plataforma_steam:
     'Steam entregue em conta, pronto pra jogar. Garantia de 30 dias. 100% original.',
