@@ -9,6 +9,8 @@
  * curto por contato e conversa com o cliente na persona da loja.
  */
 
+const fs = require('fs');
+const path = require('path');
 const axios = require('axios');
 const config = require('./config');
 const welcome = require('./welcome');
@@ -27,9 +29,50 @@ const providers = config.llm.providers.map((p) => ({
 }));
 console.log('[ai] provedores (cascata):', providers.map((p) => `${p.name}(${p.model})`).join(' → ') || 'NENHUM');
 
-// ─── Histórico de conversa em memória (por contato) ──────────────────
+// ─── Histórico de conversa (por contato), persistido em arquivo ──────
+// Fica em data/histories.json (mesma pasta do store) → com volume montado em
+// /app/data, o bot LEMBRA a conversa mesmo depois de um redeploy.
 /** @type {Map<string,{messages:Array,updatedAt:number}>} */
 const histories = new Map();
+
+const HIST_DIR = path.join(__dirname, '..', 'data');
+const HIST_FILE = path.join(HIST_DIR, 'histories.json');
+
+(function loadHistories() {
+  try {
+    if (fs.existsSync(HIST_FILE)) {
+      const raw = JSON.parse(fs.readFileSync(HIST_FILE, 'utf8')) || {};
+      for (const [from, entry] of Object.entries(raw)) {
+        if (entry && Array.isArray(entry.messages)) histories.set(from, entry);
+      }
+      console.log(`[ai] histórico carregado: ${histories.size} contatos`);
+    }
+  } catch (err) {
+    console.error('[ai] falha ao carregar histórico:', err.message);
+  }
+})();
+
+let histSaveTimer = null;
+function persistHistories() {
+  if (histSaveTimer) return; // debounce: agrupa gravações em rajada
+  histSaveTimer = setTimeout(() => {
+    histSaveTimer = null;
+    try {
+      // Poda conversas expiradas antes de salvar (mantém o arquivo enxuto).
+      const gapMs = config.welcome.sessionWindowHours * 60 * 60 * 1000;
+      const now = Date.now();
+      const obj = {};
+      for (const [from, entry] of histories) {
+        if (now - entry.updatedAt <= gapMs) obj[from] = entry;
+        else histories.delete(from);
+      }
+      fs.mkdirSync(HIST_DIR, { recursive: true });
+      fs.writeFileSync(HIST_FILE, JSON.stringify(obj), 'utf8');
+    } catch (err) {
+      console.error('[ai] falha ao salvar histórico:', err.message);
+    }
+  }, 1000);
+}
 
 function getHistory(from) {
   const entry = histories.get(from);
@@ -53,10 +96,12 @@ function pushHistory(from, role, content) {
   }
   entry.updatedAt = Date.now();
   histories.set(from, entry);
+  persistHistories();
 }
 
 function clearHistory(from) {
   histories.delete(from);
+  persistHistories();
 }
 
 // ─── Persona / instruções do assistente ──────────────────────────────
