@@ -164,7 +164,7 @@ async function genCoupon() {
 async function genNews() {
   const latest = await news.fetchLatestNews();
   const seen = state.newsSeen || {};
-  const fresh = latest.filter((n) => !seen[n.link]).slice(0, 10);
+  const fresh = latest.filter((n) => !seen[n.link]).sort(nintendoFirst).slice(0, 10);
   for (const n of fresh) {
     if (!(await news.imageOk(n.image))) continue; // SÓ posta com imagem que funciona
     markSeen(n.link);
@@ -176,6 +176,13 @@ async function genNews() {
     return { text, image: n.image };
   }
   return null; // nada com imagem agora
+}
+
+// Ordena colocando Nintendo PRIMEIRO (o grupo é ~97% nintendista), depois por data desc.
+function nintendoFirst(a, b) {
+  const na = a.source === 'Nintendo' ? 1 : 0;
+  const nb = b.source === 'Nintendo' ? 1 : 0;
+  return (nb - na) || ((b.ts || 0) - (a.ts || 0));
 }
 
 /** Marca um link como visto no estado (compartilhado por news/reviews), com cap de 80. */
@@ -191,7 +198,7 @@ function markSeen(link) {
 async function genReviews() {
   const items = await news.fetchLatestReviews();
   const seen = state.newsSeen || {};
-  const fresh = items.filter((r) => !seen[r.link]).slice(0, 8);
+  const fresh = items.filter((r) => !seen[r.link]).sort(nintendoFirst).slice(0, 8);
   for (const r of fresh) {
     // Título: "Review: Jogo (Plataforma) - Veredito".
     const m = r.title.match(/^Review:\s*(.+?)\s*\(([^)]+)\)\s*[-–—]\s*(.+)$/i);

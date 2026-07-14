@@ -17,7 +17,8 @@ const http = axios.create({
 
 // Fontes padrão (RSS). Podem ser trocadas por env sem mexer no código.
 const DEFAULT_FEEDS = [
-  { source: 'Nintendo', emoji: '🔴', url: 'https://www.nintendolife.com/feeds/latest' },
+  // Nintendo Everything: focado em Nintendo E com imagem acessível (Nintendo Life bloqueia).
+  { source: 'Nintendo', emoji: '🔴', url: 'https://nintendoeverything.com/feed/' },
   { source: 'PlayStation', emoji: '🔵', url: 'https://www.pushsquare.com/feeds/latest' },
   { source: 'Steam/PC', emoji: '⚫', url: 'https://www.pcgamer.com/rss/' },
 ];

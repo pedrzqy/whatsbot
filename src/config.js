@@ -125,8 +125,8 @@ const config = {
     // AGENDA por tipo de conteúdo: cada um tem sua CADÊNCIA (a cada N dias) e HORÁRIO (BRT).
     // Padrão: 1 review por dia (12h) e 1 notícia a cada 2 dias (19h). everyDays=0 desativa o tipo.
     schedule: [
-      { key: 'reviews', everyDays: Number(process.env.COMMUNITY_REVIEWS_EVERY_DAYS ?? 1), hour: Number(process.env.COMMUNITY_REVIEWS_HOUR ?? 12) },
-      { key: 'news', everyDays: Number(process.env.COMMUNITY_NEWS_EVERY_DAYS ?? 2), hour: Number(process.env.COMMUNITY_NEWS_HOUR ?? 19) },
+      { key: 'reviews', everyDays: Number(process.env.COMMUNITY_REVIEWS_EVERY_DAYS ?? 1), hour: Number(process.env.COMMUNITY_REVIEWS_HOUR ?? 10) },
+      { key: 'news', everyDays: Number(process.env.COMMUNITY_NEWS_EVERY_DAYS ?? 2), hour: Number(process.env.COMMUNITY_NEWS_HOUR ?? 20) },
       { key: 'promo', everyDays: Number(process.env.COMMUNITY_PROMO_EVERY_DAYS ?? 0), hour: Number(process.env.COMMUNITY_PROMO_HOUR ?? 15) },
       { key: 'coupon', everyDays: Number(process.env.COMMUNITY_COUPON_EVERY_DAYS ?? 0), hour: Number(process.env.COMMUNITY_COUPON_HOUR ?? 17) },
     ].filter((s) => s.everyDays > 0 && s.hour >= 0 && s.hour < 24),
