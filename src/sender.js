@@ -94,11 +94,12 @@ async function processJob(job) {
     try { await evolution.sendPresence(number, 'paused', evoOpts); } catch { /* idem */ }
   }
 
-  // 4) Envio. Com imagem → card de mídia (fallback p/ texto se a mídia falhar).
+  // 4) Envio. Com imagem → card de mídia. Se opts.imageOnly, NÃO cai pra texto (lança).
   if (opts.image) {
     try {
       await evolution.sendMedia(number, { mediatype: 'image', media: opts.image, caption: text }, evoOpts);
     } catch (err) {
+      if (opts.imageOnly) throw err; // só imagem: se falhar, não manda texto
       console.warn('[sender] mídia falhou, enviando só texto:', err.response?.status || err.message);
       await evolution.sendText(number, text, evoOpts);
     }

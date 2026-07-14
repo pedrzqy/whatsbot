@@ -105,20 +105,39 @@ async function fetchLatestPerSource() {
   return results.filter(Boolean);
 }
 
-/** Busca reviews recentes das fontes (vários por fonte), achatado e ordenado por data desc. */
-async function fetchLatestReviews(perFeed = 5) {
-  const feeds = loadReviewFeeds();
+/** Busca vários itens de uma lista de feeds (achatado, ordenado por data desc). */
+async function fetchItems(feeds, perFeed) {
   const lists = await Promise.all(feeds.map(async (f) => {
     try {
       const { data } = await http.get(f.url);
       const items = parseFeed(String(data)).slice(0, perFeed);
       return items.map((it) => ({ source: f.source, emoji: f.emoji, ...it }));
     } catch (err) {
-      console.error(`[news] review ${f.source} falhou:`, err.response?.status || err.code || err.message);
+      console.error(`[news] ${f.source} falhou:`, err.response?.status || err.code || err.message);
       return [];
     }
   }));
   return lists.flat().sort((a, b) => b.ts - a.ts);
 }
 
-module.exports = { fetchLatestPerSource, fetchLatestReviews, parseFeed, loadFeeds, loadReviewFeeds };
+/** Notícias recentes (várias por fonte). */
+function fetchLatestNews(perFeed = 6) { return fetchItems(loadFeeds(), perFeed); }
+/** Reviews recentes (várias por fonte). */
+function fetchLatestReviews(perFeed = 6) { return fetchItems(loadReviewFeeds(), perFeed); }
+
+/** Confere se a imagem é ACESSÍVEL (200 + content-type image). Bloqueadas por Cloudflare → false. */
+async function imageOk(url) {
+  if (!url || !/^https?:\/\//i.test(url)) return false;
+  try {
+    const r = await axios.get(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      timeout: 10000,
+      responseType: 'arraybuffer',
+      maxContentLength: 12 * 1024 * 1024,
+      validateStatus: () => true,
+    });
+    return r.status === 200 && /^image\//i.test(String(r.headers['content-type'] || ''));
+  } catch { return false; }
+}
+
+module.exports = { fetchLatestPerSource, fetchLatestNews, fetchLatestReviews, imageOk, parseFeed, loadFeeds, loadReviewFeeds };

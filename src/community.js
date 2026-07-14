@@ -162,21 +162,20 @@ async function genCoupon() {
 }
 
 async function genNews() {
-  const latest = await news.fetchLatestPerSource();
-  if (!latest.length) return null;
+  const latest = await news.fetchLatestNews();
   const seen = state.newsSeen || {};
-  // Ainda não postados, mais recentes primeiro.
-  const fresh = latest.filter((n) => !seen[n.link]).sort((a, b) => b.ts - a.ts);
-  if (!fresh.length) return null;
-  const n = fresh[0];
-  markSeen(n.link);
-
-  const tituloPt = await ai.translate(n.title);
-  const text =
-    `${variator.pick(['📰 Saiu novidade no mundo', '📰 Fresquinho do mundo', '🎮 Rolou no mundo'])} ${n.source}!\n\n` +
-    `${n.emoji} ${tituloPt}\n\n` +
-    `👉 ${n.link}`;
-  return { text, image: n.image || null };
+  const fresh = latest.filter((n) => !seen[n.link]).slice(0, 10);
+  for (const n of fresh) {
+    if (!(await news.imageOk(n.image))) continue; // SÓ posta com imagem que funciona
+    markSeen(n.link);
+    const tituloPt = await ai.translate(n.title);
+    const text =
+      `${variator.pick(['📰 Saiu novidade no mundo', '📰 Fresquinho do mundo', '🎮 Rolou no mundo'])} ${n.source}!\n\n` +
+      `${n.emoji} ${tituloPt}\n\n` +
+      `👉 ${n.link}`;
+    return { text, image: n.image };
+  }
+  return null; // nada com imagem agora
 }
 
 /** Marca um link como visto no estado (compartilhado por news/reviews), com cap de 80. */
@@ -191,35 +190,33 @@ function markSeen(link) {
 
 async function genReviews() {
   const items = await news.fetchLatestReviews();
-  if (!items.length) return null;
   const seen = state.newsSeen || {};
-  const fresh = items.filter((r) => !seen[r.link]);
-  if (!fresh.length) return null;
-  const r = fresh[0];
-  markSeen(r.link);
+  const fresh = items.filter((r) => !seen[r.link]).slice(0, 8);
+  for (const r of fresh) {
+    // Título: "Review: Jogo (Plataforma) - Veredito".
+    const m = r.title.match(/^Review:\s*(.+?)\s*\(([^)]+)\)\s*[-–—]\s*(.+)$/i);
+    const jogo = (m ? m[1] : r.title.replace(/^Review:\s*/i, '')).trim();
+    const plataforma = m ? m[2].trim() : '';
+    const veredito = m ? m[3].trim() : '';
 
-  // Título: "Review: Jogo (Plataforma) - Veredito".
-  const m = r.title.match(/^Review:\s*(.+?)\s*\(([^)]+)\)\s*[-–—]\s*(.+)$/i);
-  const jogo = (m ? m[1] : r.title.replace(/^Review:\s*/i, '')).trim();
-  const plataforma = m ? m[2].trim() : '';
-  const veredito = m ? m[3].trim() : '';
+    // Imagem: prefere a da LOJA (Nerix, acessível + vira link de compra);
+    // a imagem do site é bloqueada por Cloudflare. SÓ posta se a imagem funcionar.
+    const loja = await storeMatch(jogo);
+    const image = (loja && loja.image) || r.image || null;
+    if (!(await news.imageOk(image))) continue; // sem imagem boa → próximo candidato
+    markSeen(r.link);
 
-  // Veredito traduzido p/ pt-br (nome do jogo fica no original).
-  const veredictoPt = veredito ? await ai.translate(veredito) : '';
-
-  // Imagem + link de compra da loja (a imagem do site é bloqueada por Cloudflare;
-  // a da loja Nerix é acessível e ainda vira oportunidade de venda).
-  const loja = await storeMatch(jogo);
-  const image = (loja && loja.image) || r.image || null;
-  const compra = loja ? `\n🛒 Tá na *Phaze Games*: ${loja.link}` : '';
-
-  const text =
-    `⭐ *Avaliação* — ${r.source} ${r.emoji}\n\n` +
-    `🎮 *${jogo}*${plataforma ? ` — ${plataforma}` : ''}\n` +
-    (veredictoPt ? `\n💬 _${veredictoPt}_\n` : '') +
-    compra +
-    `\n\n👉 Review completa: ${r.link}`;
-  return { text, image };
+    const veredictoPt = veredito ? await ai.translate(veredito) : '';
+    const compra = loja ? `\n🛒 Tá na *Phaze Games*: ${loja.link}` : '';
+    const text =
+      `⭐ *Avaliação* — ${r.source} ${r.emoji}\n\n` +
+      `🎮 *${jogo}*${plataforma ? ` — ${plataforma}` : ''}\n` +
+      (veredictoPt ? `\n💬 _${veredictoPt}_\n` : '') +
+      compra +
+      `\n\n👉 Review completa: ${r.link}`;
+    return { text, image };
+  }
+  return null; // nada com imagem agora
 }
 
 // Geradores por chave (usados pela AGENDA de cadência em config.community.schedule).
@@ -240,7 +237,7 @@ async function publish(text, image) {
   await sender.send(cfg.groupJid, text, {
     typing: false, // não simular "digitando" em grupo
     reaction: false,
-    ...(image ? { image } : {}), // manda como card com imagem
+    ...(image ? { image, imageOnly: true } : {}), // card com imagem; NÃO cai pra texto
     ...(cfg.instance ? { instance: cfg.instance } : {}),
   });
   console.log(`[community] post publicado no grupo${image ? ' (c/ imagem)' : ''}`);
