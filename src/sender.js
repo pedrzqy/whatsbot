@@ -19,6 +19,15 @@ const evolution = require('./evolution');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const rand = (min, max) => Math.floor(min + Math.random() * (max - min));
 
+/**
+ * Ajusta a formatação pro padrão do WhatsApp. Principal: negrito é UM asterisco
+ * (*assim*), não dois. Modelos de IA às vezes soltam **markdown** — colapsamos
+ * qualquer sequência de 2+ asteriscos num só pra não aparecer literal no chat.
+ */
+function normalizeWhatsApp(text) {
+  return String(text == null ? '' : text).replace(/\*{2,}/g, '*');
+}
+
 /** @type {Array<{number:string,text:string,opts:object,resolve:Function,reject:Function}>} */
 const queue = [];
 let running = false;
@@ -41,7 +50,7 @@ function typingDurationMs(text) {
  */
 function send(number, text, opts = {}) {
   return new Promise((resolve, reject) => {
-    queue.push({ number, text, opts, resolve, reject });
+    queue.push({ number, text: normalizeWhatsApp(text), opts, resolve, reject });
     if (!running) run();
   });
 }
