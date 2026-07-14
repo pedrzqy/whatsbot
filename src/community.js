@@ -71,6 +71,26 @@ function productLink(slug) {
   return slug && STORE_URL ? `${STORE_URL}/package/${slug}` : STORE_URL;
 }
 
+/** URL completa da imagem de um produto da Nerix (caminho relativo → CDN). */
+function storeImage(images) {
+  const p = Array.isArray(images) ? images[0] : null;
+  if (!p) return null;
+  return /^https?:\/\//i.test(p) ? p : `https://cdn.nerix.com.br/${String(p).replace(/^\/+/, '')}`;
+}
+
+/** Procura o jogo na loja Nerix pelo nome. Retorna { image, link } se achar. */
+async function storeMatch(gameName) {
+  const nome = (gameName || '').trim();
+  if (!nome) return null;
+  try {
+    const data = await nerix.listProducts({ search: nome, limit: 3 });
+    const list = data.data || data || [];
+    const hit = list[0];
+    if (!hit) return null;
+    return { image: storeImage(hit.images), link: productLink(hit.slug) };
+  } catch { return null; }
+}
+
 // ─── Geradores de conteúdo (retornam texto ou null se não há conteúdo) ──
 async function genBestSellers() {
   const prods = await nerix.listProducts();
@@ -151,9 +171,10 @@ async function genNews() {
   const n = fresh[0];
   markSeen(n.link);
 
+  const tituloPt = await ai.translate(n.title);
   const text =
     `${variator.pick(['📰 Saiu novidade no mundo', '📰 Fresquinho do mundo', '🎮 Rolou no mundo'])} ${n.source}!\n\n` +
-    `${n.emoji} ${n.title}\n\n` +
+    `${n.emoji} ${tituloPt}\n\n` +
     `👉 ${n.link}`;
   return { text, image: n.image || null };
 }
@@ -177,16 +198,28 @@ async function genReviews() {
   const r = fresh[0];
   markSeen(r.link);
 
-  // Título costuma ser "Review: Jogo (Plataforma) - Veredito".
+  // Título: "Review: Jogo (Plataforma) - Veredito".
   const m = r.title.match(/^Review:\s*(.+?)\s*\(([^)]+)\)\s*[-–—]\s*(.+)$/i);
-  const body = m
-    ? `🎮 ${m[1]} (${m[2]})\n💬 ${m[3]}`
-    : r.title.replace(/^Review:\s*/i, '');
+  const jogo = (m ? m[1] : r.title.replace(/^Review:\s*/i, '')).trim();
+  const plataforma = m ? m[2].trim() : '';
+  const veredito = m ? m[3].trim() : '';
+
+  // Veredito traduzido p/ pt-br (nome do jogo fica no original).
+  const veredictoPt = veredito ? await ai.translate(veredito) : '';
+
+  // Imagem + link de compra da loja (a imagem do site é bloqueada por Cloudflare;
+  // a da loja Nerix é acessível e ainda vira oportunidade de venda).
+  const loja = await storeMatch(jogo);
+  const image = (loja && loja.image) || r.image || null;
+  const compra = loja ? `\n🛒 Tá na *Phaze Games*: ${loja.link}` : '';
+
   const text =
-    `${variator.pick(['⭐ Saiu review', '⭐ Review novinha', '⭐ Analisaram pra você'])} — ${r.source} ${r.emoji}\n\n` +
-    `${body}\n\n` +
-    `👉 ${r.link}`;
-  return { text, image: r.image || null };
+    `⭐ *Avaliação* — ${r.source} ${r.emoji}\n\n` +
+    `🎮 *${jogo}*${plataforma ? ` — ${plataforma}` : ''}\n` +
+    (veredictoPt ? `\n💬 _${veredictoPt}_\n` : '') +
+    compra +
+    `\n\n👉 Review completa: ${r.link}`;
+  return { text, image };
 }
 
 // Geradores por chave (usados pela AGENDA de cadência em config.community.schedule).
@@ -308,6 +341,25 @@ function start() {
   );
   timer = setInterval(tick, cfg.checkIntervalMs);
   if (timer.unref) timer.unref();
+
+  // Force-post imediato (uma vez), p/ teste: COMMUNITY_FORCE_NOW="reviews,news".
+  // Ignora cadência/slot (mas respeita dry-run). Remova a env depois de usar.
+  const force = String(process.env.COMMUNITY_FORCE_NOW || '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (force.length) {
+    (async () => {
+      for (const key of force) {
+        const gen = GENERATORS[key];
+        if (!gen) { console.warn(`[community] FORCE: gerador "${key}" não existe`); continue; }
+        try {
+          const result = await gen();
+          const text = typeof result === 'string' ? result : (result && result.text);
+          const image = typeof result === 'string' ? null : (result && result.image);
+          if (text) { await publish(text, image); console.log(`[community] FORCE post "${key}"`); }
+          else console.warn(`[community] FORCE: "${key}" sem conteúdo`);
+        } catch (err) { console.error(`[community] FORCE "${key}" falhou:`, err.message); }
+      }
+    })();
+  }
 }
 
 function stop() { if (timer) { clearInterval(timer); timer = null; } }

@@ -328,4 +328,30 @@ async function humanizeAnswer(fact) {
   return (msg.content || '').trim() || fact;
 }
 
-module.exports = { chat, reply, humanizeAnswer, clearHistory, buildSystemPrompt };
+/**
+ * Traduz um texto para português do Brasil (nomes de jogos/consoles ficam no original).
+ * Resiliente: se a IA falhar, devolve o texto original.
+ * @returns {Promise<string>}
+ */
+async function translate(text) {
+  const src = (text || '').trim();
+  if (!src) return text;
+  try {
+    const msg = await chat([
+      {
+        role: 'system',
+        content:
+          'Você traduz para PORTUGUÊS DO BRASIL. Traduza a mensagem do usuário de forma natural e fluida. ' +
+          'MANTENHA no original os nomes próprios de jogos, franquias, consoles e marcas (não traduza títulos). ' +
+          'Responda SOMENTE com a tradução, sem aspas, sem comentários, sem explicações.',
+      },
+      { role: 'user', content: src },
+    ], { temperature: 0.3, maxTokens: 400 });
+    return (msg.content || '').trim() || text;
+  } catch (err) {
+    console.error('[ai] translate falhou:', err.response?.status || err.message);
+    return text;
+  }
+}
+
+module.exports = { chat, reply, humanizeAnswer, translate, clearHistory, buildSystemPrompt };
