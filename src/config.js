@@ -122,10 +122,14 @@ const config = {
     instance: process.env.COMMUNITY_INSTANCE || '',
     // Varredura do agendador.
     checkIntervalMs: Number(process.env.COMMUNITY_CHECK_INTERVAL_MS || 5 * 60 * 1000),
-    // Horas (BRT) em que pode postar. Padrão: 12h e 19h (pico).
-    postHours: parseHours(process.env.COMMUNITY_POST_HOURS, '12,19'),
-    // Teto de posts por dia (segurança anti-ban).
-    maxPerDay: Number(process.env.COMMUNITY_MAX_PER_DAY || 3),
+    // AGENDA por tipo de conteúdo: cada um tem sua CADÊNCIA (a cada N dias) e HORÁRIO (BRT).
+    // Padrão: 1 review por dia (12h) e 1 notícia a cada 2 dias (19h). everyDays=0 desativa o tipo.
+    schedule: [
+      { key: 'reviews', everyDays: Number(process.env.COMMUNITY_REVIEWS_EVERY_DAYS ?? 1), hour: Number(process.env.COMMUNITY_REVIEWS_HOUR ?? 12) },
+      { key: 'news', everyDays: Number(process.env.COMMUNITY_NEWS_EVERY_DAYS ?? 2), hour: Number(process.env.COMMUNITY_NEWS_HOUR ?? 19) },
+      { key: 'promo', everyDays: Number(process.env.COMMUNITY_PROMO_EVERY_DAYS ?? 0), hour: Number(process.env.COMMUNITY_PROMO_HOUR ?? 15) },
+      { key: 'coupon', everyDays: Number(process.env.COMMUNITY_COUPON_EVERY_DAYS ?? 0), hour: Number(process.env.COMMUNITY_COUPON_HOUR ?? 17) },
+    ].filter((s) => s.everyDays > 0 && s.hour >= 0 && s.hour < 24),
 
     // ── FASE 2 (interativo): responder no grupo quando marcarem o bot (@) ou usarem gatilho ──
     // Default OFF. Além disto, a Evolution só entrega msgs de grupo se groupsIgnore=false.

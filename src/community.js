@@ -189,13 +189,14 @@ async function genReviews() {
   );
 }
 
-// Ordem de rotação dos conteúdos. (genBestSellers segue disponível, mas fora da rotação.)
-const GENERATORS = [
-  { key: 'news', fn: genNews },
-  { key: 'reviews', fn: genReviews },
-  { key: 'promo', fn: genPromo },
-  { key: 'coupon', fn: genCoupon },
-];
+// Geradores por chave (usados pela AGENDA de cadência em config.community.schedule).
+const GENERATORS = {
+  news: genNews,
+  reviews: genReviews,
+  promo: genPromo,
+  coupon: genCoupon,
+  bestsellers: genBestSellers,
+};
 
 // ─── Envio ───────────────────────────────────────────────────────────
 async function publish(text) {
@@ -211,52 +212,44 @@ async function publish(text) {
   console.log('[community] post publicado no grupo');
 }
 
-/**
- * Gera o próximo conteúdo disponível (rotativo, pulando os vazios) e publica.
- * @returns {Promise<string|null>} a chave do conteúdo postado, ou null se nada disponível
- */
-async function postNext() {
-  for (let i = 0; i < GENERATORS.length; i++) {
-    const idx = (state.rotation + i) % GENERATORS.length;
-    const g = GENERATORS[idx];
-    let text = null;
-    try {
-      text = await g.fn();
-    } catch (err) {
-      console.error(`[community] gerador ${g.key} falhou:`, err.response?.status || err.message);
-    }
-    if (text) {
-      await publish(text);
-      state.rotation = (idx + 1) % GENERATORS.length;
-      saveState();
-      return g.key;
-    }
-  }
-  return null; // nenhum conteúdo disponível agora
-}
-
-// ─── Agendador ───────────────────────────────────────────────────────
+// ─── Agendador (CADÊNCIA por tipo: cada conteúdo tem intervalo e horário) ──
 async function tick() {
   if (running || !cfg.enabled || !cfg.groupJid) return;
   running = true;
   try {
     const now = Date.now();
     const { hour, dateKey } = brt(now);
-    if (!cfg.postHours.includes(hour)) return; // fora dos horários de post
+    state.lastPostAt = state.lastPostAt || {};
+    state.slots = state.slots || {};
 
-    const slotKey = `${dateKey}-${hour}`;
-    if (state.posts[slotKey]) return; // este slot já postou hoje
+    // Poda slots antigos (mantém o estado enxuto).
+    for (const k of Object.keys(state.slots)) {
+      if (now - state.slots[k] > 15 * 24 * 60 * 60 * 1000) delete state.slots[k];
+    }
 
-    const postedToday = Object.keys(state.posts).filter((k) => k.startsWith(dateKey)).length;
-    if (postedToday >= cfg.maxPerDay) return; // teto diário
+    for (const item of cfg.schedule) {
+      if (hour !== item.hour) continue;             // cada tipo posta no SEU horário
+      const slotKey = `${item.key}-${dateKey}`;     // no máx 1 desse tipo por dia
+      if (state.slots[slotKey]) continue;           // já postou hoje
+      const last = state.lastPostAt[item.key] || 0;
+      const dueMs = (item.everyDays - 0.5) * 24 * 60 * 60 * 1000; // tolerância de meio dia
+      if (last && now - last < dueMs) continue;     // ainda não completou a cadência
 
-    // Marca ANTES de publicar (otimista) p/ não duplicar entre ticks/reinícios.
-    state.posts[slotKey] = now;
-    saveState();
+      const gen = GENERATORS[item.key];
+      if (!gen) continue;
+      let text = null;
+      try { text = await gen(); }
+      catch (err) { console.error(`[community] gerador ${item.key} falhou:`, err.response?.status || err.message); }
+      if (!text) continue; // sem conteúdo agora → tenta no próximo tick/dia
 
-    const key = await postNext();
-    if (key) console.log(`[community] slot ${slotKey}: postado "${key}"`);
-    else { delete state.posts[slotKey]; saveState(); } // nada p/ postar → libera o slot
+      // Marca ANTES de publicar (otimista) p/ não duplicar entre ticks/reinícios.
+      state.slots[slotKey] = now;
+      state.lastPostAt[item.key] = now;
+      saveState();
+      await publish(text);
+      console.log(`[community] postado "${item.key}" (cada ${item.everyDays}d @${item.hour}h)`);
+      break; // um post por tick
+    }
   } catch (err) {
     console.error('[community] erro no tick:', err.message);
   } finally {
@@ -305,9 +298,10 @@ function start() {
   if (!cfg.enabled) { console.log('[community] desligada (COMMUNITY_ENABLED != true)'); return; }
   if (!cfg.groupJid) { console.log('[community] SEM COMMUNITY_GROUP_JID — não vai postar'); return; }
   if (timer) return;
+  const agenda = cfg.schedule.map((s) => `${s.key} a cada ${s.everyDays}d @${s.hour}h`).join(', ') || '(vazia)';
   console.log(
     `[community] ligada — grupo ${cfg.groupJid}${cfg.instance ? ` (instância ${cfg.instance})` : ''}; ` +
-    `posta ${cfg.postHours.join('h, ')}h (BRT); máx ${cfg.maxPerDay}/dia; ${cfg.dryRun ? 'DRY-RUN' : 'AO VIVO'}`
+    `agenda: ${agenda} (BRT); ${cfg.dryRun ? 'DRY-RUN' : 'AO VIVO'}`
   );
   timer = setInterval(tick, cfg.checkIntervalMs);
   if (timer.unref) timer.unref();
@@ -315,4 +309,4 @@ function start() {
 
 function stop() { if (timer) { clearInterval(timer); timer = null; } }
 
-module.exports = { start, stop, tick, postNext, handleGroupMessage, genBestSellers, genPromo, genCoupon, genNews, genReviews };
+module.exports = { start, stop, tick, handleGroupMessage, genBestSellers, genPromo, genCoupon, genNews, genReviews };
