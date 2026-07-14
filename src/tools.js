@@ -39,43 +39,14 @@ const definitions = [
   {
     type: 'function',
     function: {
-      name: 'consultar_pedido',
-      description: 'Status/detalhes de um pedido. Requer numero_pedido (o CÓDIGO do pedido) e email; se faltarem, peça antes. Não valide o formato do código: passe exatamente o que o cliente enviar.',
-      parameters: {
-        type: 'object',
-        properties: {
-          numero_pedido: { type: 'string', description: 'Código do pedido, exatamente como o cliente enviou. É um código longo com traços (ex.: 019f4860-e3ea-7341-8a1a-bc39d1876fa5). Aceite como veio, sem exigir formato.' },
-          email: { type: 'string', description: 'E-mail usado na compra (validado pela API)' },
-        },
-        required: ['numero_pedido', 'email'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'verificar_pagamento',
-      description: 'Confere se o Pix caiu e libera a entrega. Requer numero_pedido (código em QUALQUER formato) e email. Use quando o cliente disser que pagou.',
-      parameters: {
-        type: 'object',
-        properties: {
-          numero_pedido: { type: 'string', description: 'Código do pedido, exatamente como o cliente enviou (código longo com traços). Aceite como veio, sem exigir formato.' },
-          email: { type: 'string' },
-        },
-        required: ['numero_pedido', 'email'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
       name: 'falar_com_atendente',
-      description: 'Transfere p/ atendente humano e pausa o bot. OBRIGATÓRIO colete NOME e SOBRENOME antes. Use p/ ENTREGA/recebimento do pedido (login da conta é entregue pelo atendente), pedido de atendente, ou opção online/perfil próprio. Se só tiver o primeiro nome, peça o sobrenome.',
+      description: 'Transfere p/ atendente humano e pausa o bot. OBRIGATÓRIO colete NOME e SOBRENOME antes. Use p/ qualquer questão de PEDIDO (cliente disse que comprou, quer receber o jogo/login, entrega não chegou, dúvida/problema de pedido), opção online/perfil próprio, ou pedido de atendente. Se só tiver o primeiro nome, peça o sobrenome. Se o cliente tiver informado, passe também o e-mail OU o código da compra em "contato".',
       parameters: {
         type: 'object',
         properties: {
           nome_completo: { type: 'string', description: 'Nome e sobrenome do cliente (obrigatório)' },
-          motivo: { type: 'string', description: 'Motivo resumido (ex.: "opção online/perfil próprio", "dúvida", "pedido")' },
+          contato: { type: 'string', description: 'E-mail OU código da compra informado pelo cliente (se houver), pra facilitar o atendente.' },
+          motivo: { type: 'string', description: 'Motivo resumido (ex.: "recebimento de pedido", "opção online/perfil próprio", "dúvida")' },
         },
         required: ['nome_completo'],
       },
@@ -126,32 +97,14 @@ function formatProducts(list) {
   });
 }
 
-function formatOrder(o) {
-  return {
-    numero_pedido: o.order_number,
-    cliente: o.customer_name,
-    status: o.status,
-    status_pagamento: o.payment_status,
-    metodo_pagamento: o.payment_method,
-    total: o.total,
-    pago_em: o.paid_at || null,
-    itens: (o.items || []).map((it) => ({
-      produto: it.name,
-      quantidade: it.quantity,
-      preco: it.price,
-      // A chave só chega aqui após validação de e-mail pela API.
-      chave: it.product_key || null,
-    })),
-  };
-}
-
 async function execute(name, args = {}, ctx = {}) {
   try {
     if (name === 'falar_com_atendente') {
       const nome = (args.nome_completo || '').trim();
       if (nome.split(/\s+/).length < 2) return { erro: 'falta_sobrenome' };
-      if (ctx.from) store.saveContact(ctx.from, { paused: true, name: nome });
-      console.log(`[handoff] ${ctx.from} -> atendente (${nome}) | motivo: ${args.motivo || '-'}`);
+      const contato = (args.contato || '').trim();
+      if (ctx.from) store.saveContact(ctx.from, { paused: true, name: nome, ...(contato ? { pedidoContato: contato } : {}) });
+      console.log(`[handoff] ${ctx.from} -> atendente (${nome})${contato ? ` | contato: ${contato}` : ''} | motivo: ${args.motivo || '-'}`);
       return { transferido: true, instrucao: 'Confirme ao cliente, de forma calorosa, que um atendente humano vai continuar o atendimento em instantes.' };
     }
 
@@ -159,25 +112,6 @@ async function execute(name, args = {}, ctx = {}) {
       const data = await nerix.listProducts({ search: args.termo || '', limit: 8 });
       const list = data.data || data || [];
       return { total_encontrados: list.length, produtos: formatProducts(list) };
-    }
-
-    if (name === 'consultar_pedido') {
-      const o = await nerix.getOrder(args.numero_pedido, { email: args.email });
-      return formatOrder(o);
-    }
-
-    if (name === 'verificar_pagamento') {
-      // 1) valida posse pelo e-mail (lança se não confere)
-      await nerix.getOrder(args.numero_pedido, { email: args.email });
-      // 2) confirma o pagamento junto ao gateway
-      const r = await nerix.checkPayment(args.numero_pedido);
-      return {
-        numero_pedido: r.order_number,
-        status_pagamento: r.payment_status,
-        status: r.status,
-        pagamento_confirmado_agora: !!r.updated,
-        chaves_entregues: !!r.keys_delivered,
-      };
     }
 
     return { erro: 'ferramenta_desconhecida' };
