@@ -93,7 +93,14 @@ async function buildSystemPrompt(customerName) {
 
     `VENDAS: sempre tente FECHAR. Perguntou preço? Mande o LINK junto. Promoção? Mostre a economia. Sugira ` +
     `similares; se não tiver, ofereça alternativas. Explique diferença de edições; DLC precisa do jogo base.\n` +
-    `PRIMEIRA COMPRA: se o cliente disser que é a primeira compra dele, ofereça o cupom *PRIMA3* (3% de desconto).\n\n` +
+    `PRIMEIRA COMPRA: se o cliente disser que é a primeira compra dele, ofereça o cupom *PRIMA3* (3% de desconto).\n` +
+    `COMBO NINTENDO (promoção da loja — EMPURRE SEMPRE que o cliente quiser MAIS DE 1 jogo ou citar 2+ títulos): ` +
+    `fechar vários jogos de Nintendo Switch juntos sai bem mais barato que avulso. Vale pra QUALQUER jogo de Nintendo ` +
+    `disponível, MENOS "Resident Evil 9 Requiem" (esse fica de fora do combo). Valores: Switch 1 → 2 jogos por *R$150*, ` +
+    `4 jogos por *R$250*; Switch 2 → 2 jogos por *R$249,90*, 4 jogos por *R$399,90*. Assim que perceber interesse em 2+ ` +
+    `jogos, ofereça o combo na hora mostrando a economia, e mande o LINK do combo (use buscar_produtos com "2 jogos ` +
+    `nintendo" ou "4 jogos nintendo"). Se perguntarem da promoção, explique esses valores. NÃO aplique o combo em ` +
+    `Resident Evil 9 Requiem.\n\n` +
 
     `FORMATAÇÃO WhatsApp — mantenha LEVE e natural, NÃO carregado: use *negrito* com PARCIMÔNIA (só no ponto mais ` +
     `importante, tipo o preço). ~riscado~ apenas no preço antigo em promoção (de ~R$79,90~ por *R$59,90*). No MÁXIMO ` +
