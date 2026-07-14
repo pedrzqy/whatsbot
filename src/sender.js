@@ -94,8 +94,17 @@ async function processJob(job) {
     try { await evolution.sendPresence(number, 'paused', evoOpts); } catch { /* idem */ }
   }
 
-  // 4) Envio.
-  await evolution.sendText(number, text, evoOpts);
+  // 4) Envio. Com imagem → card de mídia (fallback p/ texto se a mídia falhar).
+  if (opts.image) {
+    try {
+      await evolution.sendMedia(number, { mediatype: 'image', media: opts.image, caption: text }, evoOpts);
+    } catch (err) {
+      console.warn('[sender] mídia falhou, enviando só texto:', err.response?.status || err.message);
+      await evolution.sendText(number, text, evoOpts);
+    }
+  } else {
+    await evolution.sendText(number, text, evoOpts);
+  }
 
   const t = Date.now();
   lastGlobalSendAt = t;

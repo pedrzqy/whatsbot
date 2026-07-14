@@ -151,11 +151,11 @@ async function genNews() {
   const n = fresh[0];
   markSeen(n.link);
 
-  return (
+  const text =
     `${variator.pick(['📰 Saiu novidade no mundo', '📰 Fresquinho do mundo', '🎮 Rolou no mundo'])} ${n.source}!\n\n` +
     `${n.emoji} ${n.title}\n\n` +
-    `👉 ${n.link}`
-  );
+    `👉 ${n.link}`;
+  return { text, image: n.image || null };
 }
 
 /** Marca um link como visto no estado (compartilhado por news/reviews), com cap de 80. */
@@ -182,11 +182,11 @@ async function genReviews() {
   const body = m
     ? `🎮 ${m[1]} (${m[2]})\n💬 ${m[3]}`
     : r.title.replace(/^Review:\s*/i, '');
-  return (
+  const text =
     `${variator.pick(['⭐ Saiu review', '⭐ Review novinha', '⭐ Analisaram pra você'])} — ${r.source} ${r.emoji}\n\n` +
     `${body}\n\n` +
-    `👉 ${r.link}`
-  );
+    `👉 ${r.link}`;
+  return { text, image: r.image || null };
 }
 
 // Geradores por chave (usados pela AGENDA de cadência em config.community.schedule).
@@ -199,17 +199,18 @@ const GENERATORS = {
 };
 
 // ─── Envio ───────────────────────────────────────────────────────────
-async function publish(text) {
+async function publish(text, image) {
   if (cfg.dryRun) {
-    console.log(`[community] (DRY-RUN, não enviado) →\n${text}\n`);
+    console.log(`[community] (DRY-RUN, não enviado)${image ? ` [imagem: ${image}]` : ''} →\n${text}\n`);
     return;
   }
   await sender.send(cfg.groupJid, text, {
     typing: false, // não simular "digitando" em grupo
     reaction: false,
+    ...(image ? { image } : {}), // manda como card com imagem
     ...(cfg.instance ? { instance: cfg.instance } : {}),
   });
-  console.log('[community] post publicado no grupo');
+  console.log(`[community] post publicado no grupo${image ? ' (c/ imagem)' : ''}`);
 }
 
 // ─── Agendador (CADÊNCIA por tipo: cada conteúdo tem intervalo e horário) ──
@@ -237,16 +238,18 @@ async function tick() {
 
       const gen = GENERATORS[item.key];
       if (!gen) continue;
-      let text = null;
-      try { text = await gen(); }
+      let result = null;
+      try { result = await gen(); }
       catch (err) { console.error(`[community] gerador ${item.key} falhou:`, err.response?.status || err.message); }
+      const text = typeof result === 'string' ? result : (result && result.text);
+      const image = typeof result === 'string' ? null : (result && result.image);
       if (!text) continue; // sem conteúdo agora → tenta no próximo tick/dia
 
       // Marca ANTES de publicar (otimista) p/ não duplicar entre ticks/reinícios.
       state.slots[slotKey] = now;
       state.lastPostAt[item.key] = now;
       saveState();
-      await publish(text);
+      await publish(text, image);
       console.log(`[community] postado "${item.key}" (cada ${item.everyDays}d @${item.hour}h)`);
       break; // um post por tick
     }

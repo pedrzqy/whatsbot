@@ -52,9 +52,10 @@ async function sendPresence(number, presence = 'composing', opts = {}) {
   return data;
 }
 
-/** Envia mídia (imagem/documento) por URL. */
-async function sendMedia(number, { mediatype, media, caption, fileName }) {
-  const { data } = await http.post(`/message/sendMedia/${config.evolution.instance}`, {
+/** Envia mídia (imagem/documento) por URL. `opts.instance` permite outra instância. */
+async function sendMedia(number, { mediatype, media, caption, fileName }, opts = {}) {
+  const instance = opts.instance || config.evolution.instance;
+  const { data } = await http.post(`/message/sendMedia/${instance}`, {
     number: toNumber(number),
     mediatype, // 'image' | 'document' | 'video'
     media, // URL ou base64

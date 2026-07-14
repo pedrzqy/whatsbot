@@ -18,7 +18,7 @@ const http = axios.create({
 // Fontes padrão (RSS). Podem ser trocadas por env sem mexer no código.
 const DEFAULT_FEEDS = [
   { source: 'Nintendo', emoji: '🔴', url: 'https://www.nintendolife.com/feeds/latest' },
-  { source: 'PlayStation', emoji: '🔵', url: 'https://blog.playstation.com/feed/' },
+  { source: 'PlayStation', emoji: '🔵', url: 'https://www.pushsquare.com/feeds/latest' },
   { source: 'Steam/PC', emoji: '⚫', url: 'https://www.pcgamer.com/rss/' },
 ];
 
@@ -68,10 +68,18 @@ function parseFeed(xml) {
     const dateRaw = (b.match(/<pubDate>([\s\S]*?)<\/pubDate>/i) || [])[1]
       || (b.match(/<updated>([\s\S]*?)<\/updated>/i) || [])[1]
       || (b.match(/<published>([\s\S]*?)<\/published>/i) || [])[1];
+    // Imagem do item (preferência: media:content > media:thumbnail > enclosure).
+    const rawImg =
+      (b.match(/<media:content[^>]*url="([^"]+)"/i) || [])[1] ||
+      (b.match(/<media:thumbnail[^>]*url="([^"]+)"/i) || [])[1] ||
+      (b.match(/<enclosure[^>]*url="([^"]+)"/i) || [])[1] ||
+      null;
+    const image = rawImg && /^https?:\/\//i.test(rawImg) ? rawImg.replace(/&amp;/g, '&') : null;
+
     const t = clean(title);
     const l = clean(link);
     if (t && /^https?:\/\//i.test(l)) {
-      items.push({ title: t, link: l, ts: dateRaw ? (Date.parse(dateRaw) || 0) : 0 });
+      items.push({ title: t, link: l, ts: dateRaw ? (Date.parse(dateRaw) || 0) : 0, image });
     }
   }
   return items;
@@ -88,7 +96,7 @@ async function fetchLatestPerSource() {
       // Ordena por data desc (itens sem data mantêm a ordem do feed).
       items.sort((a, b) => b.ts - a.ts);
       const top = items[0];
-      return { source: f.source, emoji: f.emoji, title: top.title, link: top.link, ts: top.ts };
+      return { source: f.source, emoji: f.emoji, title: top.title, link: top.link, ts: top.ts, image: top.image || null };
     } catch (err) {
       console.error(`[news] falha em ${f.source}:`, err.response?.status || err.code || err.message);
       return null;
