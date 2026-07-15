@@ -83,6 +83,7 @@ app.post('/webhooks/nerix', async (req, res) => {
 
 app.listen(config.port, () => {
   console.log(`whatsbot rodando na porta ${config.port}`);
+  if (!config.autoReply) console.log('[bot] AUTO-RESPOSTA DESLIGADA (BOT_AUTOREPLY=false) — não responde no 1-a-1');
   recovery.start(); // recuperação de venda: cutuca quem sumiu no meio da conversa
   community.start(); // agente de comunidade: posta conteúdo no grupo (Fase 1: só saída)
 });

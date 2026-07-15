@@ -11,6 +11,7 @@
  * a implementação entra aqui.
  */
 
+const config = require('./config');
 const store = require('./store');
 const welcome = require('./welcome');
 const ai = require('./ai');
@@ -46,6 +47,13 @@ async function handleMessage(msg) {
   const trimmed = (text || '').trim();
   const lower = trimmed.toLowerCase();
   console.log(`[msg] de ${from} (${pushName || '?'}): ${trimmed}`);
+
+  // Auto-resposta DESLIGADA (BOT_AUTOREPLY=false): o bot não responde no 1-a-1
+  // (um humano atende). Só registra que viu a mensagem, sem enviar nada.
+  if (!config.autoReply) {
+    store.saveContact(from, { lastSeen: Date.now(), name: pushName || store.getContact(from)?.name });
+    return;
+  }
 
   const contact = store.getContact(from);
   const now = Date.now();

@@ -39,6 +39,10 @@ function parseStagesMin(raw, fallbackMin) {
 const config = {
   port: Number(process.env.PORT || 3000),
 
+  // Responder automaticamente as mensagens 1-a-1 (IA de vendas). Ligado por padrão.
+  // BOT_AUTOREPLY=false desliga (o bot recebe/loga a msg, mas NÃO responde — humano atende).
+  autoReply: process.env.BOT_AUTOREPLY !== 'false',
+
   evolution: {
     url: (process.env.EVOLUTION_API_URL || 'http://localhost:8080').replace(/\/$/, ''),
     apiKey: required('EVOLUTION_API_KEY'),
