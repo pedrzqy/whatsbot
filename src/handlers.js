@@ -48,10 +48,16 @@ async function handleMessage(msg) {
   const lower = trimmed.toLowerCase();
   console.log(`[msg] de ${from} (${pushName || '?'}): ${trimmed}`);
 
-  // Auto-resposta DESLIGADA (BOT_AUTOREPLY=false): o bot não responde no 1-a-1
-  // (um humano atende). Só registra que viu a mensagem, sem enviar nada.
+  // Auto-resposta DESLIGADA (BOT_AUTOREPLY=false): o bot não RESPONDE no 1-a-1
+  // (um humano atende). Mas marca o contato como engajado, pra a RECUPERAÇÃO DE
+  // VENDA ainda cutucar quem mandou mensagem e sumiu. Não envia nada agora.
   if (!config.autoReply) {
-    store.saveContact(from, { lastSeen: Date.now(), name: pushName || store.getContact(from)?.name });
+    store.saveContact(from, {
+      lastSeen: Date.now(),
+      name: pushName || store.getContact(from)?.name,
+      engaged: true,
+      followupCount: 0,
+    });
     return;
   }
 
