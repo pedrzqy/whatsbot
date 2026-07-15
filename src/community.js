@@ -110,38 +110,57 @@ async function genBestSellers() {
   );
 }
 
-async function genPromo() {
-  const prods = await nerix.listProducts();
-  const list = Array.isArray(prods) ? prods : (prods.data || []);
-  const deals = [];
-  for (const p of list) {
-    // melhor desconto entre o produto e suas variantes.
-    // Na Nerix: price = preço de VENDA (menor); promotional_price = preço "de" (maior).
-    // Usamos por=min, de=max (robusto p/ qualquer ordem) — igual a tools.js priceParts.
-    const cand = [{ price: p.price, promo: p.promotional_price }, ...(p.variants || []).map((v) => ({ price: v.price, promo: v.promotional_price }))];
-    let best = null;
-    for (const c of cand) {
-      const nums = [Number(c.price), Number(c.promo)].filter((n) => n > 0);
-      if (nums.length < 2) continue;
-      const por = Math.min(...nums);
-      const de = Math.max(...nums);
-      if (de > por) {
-        const pct = Math.round((1 - por / de) * 100);
-        if (!best || pct > best.pct) best = { de, por, pct };
-      }
-    }
-    if (best) deals.push({ nome: cleanName(p.name), slug: p.slug, ...best });
+/** Menor preço de venda de um produto + o "de" (se tiver desconto). */
+function bestPrice(p) {
+  const cands = [{ price: p.price, promo: p.promotional_price }, ...(p.variants || []).map((v) => ({ price: v.price, promo: v.promotional_price }))];
+  let por = Infinity;
+  let de = null;
+  for (const c of cands) {
+    const nums = [Number(c.price), Number(c.promo)].filter((n) => n > 0);
+    if (!nums.length) continue;
+    const lo = Math.min(...nums);
+    const hi = Math.max(...nums);
+    if (lo < por) { por = lo; de = hi > lo ? hi : null; }
   }
-  if (!deals.length) return null;
-  deals.sort((a, b) => b.pct - a.pct);
-  const top = deals.slice(0, 3);
+  return por === Infinity ? null : { por, de };
+}
 
-  const linhas = top.map((d) => `🎮 ${d.nome}\nde ~${brl(d.de)}~ por *${brl(d.por)}* (${d.pct}% OFF)\n👉 ${productLink(d.slug)}`);
-  return (
-    `${variator.pick(['💰 *Baixou de preço* na Phaze Games:', '💰 Promoção rolando na Phaze Games:', '🔻 Preço baixo por tempo limitado:'])}\n\n` +
-    linhas.join('\n\n') +
-    `\n\nEntrega em até 30 min ⚡`
+/** PROMOÇÃO: sorteia um jogo de NINTENDO da loja (com imagem + preço) e faz um card p/ vender. */
+async function genPromo() {
+  const data = await nerix.listProducts();
+  const list = Array.isArray(data) ? data : (data.data || []);
+  const recent = new Set(state.promoRecent || []);
+  const nintendo = list.filter((p) =>
+    /nintendo|switch/i.test(p.name || '') &&
+    bestPrice(p) &&
+    Array.isArray(p.images) && p.images[0] &&
+    p.slug && !recent.has(p.slug)
   );
+  // Embaralha (Fisher-Yates) → jogo aleatório.
+  for (let i = nintendo.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [nintendo[i], nintendo[j]] = [nintendo[j], nintendo[i]];
+  }
+  for (const p of nintendo.slice(0, 15)) {
+    const image = storeImage(p.images);
+    if (!(await news.imageOk(image))) continue; // só posta com imagem que funciona
+    // Marca como promovido recentemente (cap 25) p/ não repetir seguido.
+    state.promoRecent = [...(state.promoRecent || []).filter((s) => s !== p.slug), p.slug].slice(-25);
+    saveState();
+
+    const pr = bestPrice(p);
+    const precoLinha = pr.de
+      ? `💰 de ~${brl(pr.de)}~ por *${brl(pr.por)}*`
+      : `💰 *${brl(pr.por)}*`;
+    const text =
+      `${variator.pick(['🎮 Destaque do dia na *Phaze Games*', '🔥 Bora jogar?', '🎮 Que tal esse hoje?'])} — Nintendo Switch\n\n` +
+      `*${cleanName(p.name)}*\n` +
+      `${precoLinha}\n` +
+      `✅ 100% original · garantia vitalícia · entrega em até 30 min\n\n` +
+      `👉 Garanta o seu: ${productLink(p.slug)}`;
+    return { text, image };
+  }
+  return null;
 }
 
 async function genCoupon() {
@@ -266,10 +285,11 @@ async function tick() {
     }
 
     for (const item of cfg.schedule) {
-      if (hour !== item.hour) continue;             // cada tipo posta no SEU horário
-      const slotKey = `${item.key}-${dateKey}`;     // no máx 1 desse tipo por dia
-      if (state.slots[slotKey]) continue;           // já postou hoje
-      const last = state.lastPostAt[item.key] || 0;
+      if (hour !== item.hour) continue;             // cada entrada posta no SEU horário
+      const entryId = `${item.key}@${item.hour}`;   // por HORÁRIO → permite 2/dia do mesmo tipo
+      const slotKey = `${entryId}-${dateKey}`;      // no máx 1 dessa entrada por dia
+      if (state.slots[slotKey]) continue;           // já postou hoje nesse horário
+      const last = state.lastPostAt[entryId] || 0;
       const dueMs = (item.everyDays - 0.5) * 24 * 60 * 60 * 1000; // tolerância de meio dia
       if (last && now - last < dueMs) continue;     // ainda não completou a cadência
 
@@ -284,7 +304,7 @@ async function tick() {
 
       // Marca ANTES de publicar (otimista) p/ não duplicar entre ticks/reinícios.
       state.slots[slotKey] = now;
-      state.lastPostAt[item.key] = now;
+      state.lastPostAt[entryId] = now;
       saveState();
       await publish(text, image);
       console.log(`[community] postado "${item.key}" (cada ${item.everyDays}d @${item.hour}h)`);
