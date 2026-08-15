@@ -237,41 +237,176 @@ class Chat {
     await this.checarBloqueio();
   }
 
+  /** Quantas mensagens NOSSAS existem agora. Serve para saber se algo saiu. */
+  async _quantasMinhas() {
+    const classeSelf = SEL.minhaMensagem.classe;
+    return this.frame
+      .evaluate((c) => document.querySelectorAll(`.message-item.${c}`).length, classeSelf)
+      .catch(() => 0);
+  }
+
   /**
-   * Anexa uma imagem.
+   * Descreve cada input[type=file] do chat.
    *
-   * Os ids html5_* dos inputs são gerados pelo plupload a CADA carregamento —
-   * usar id aqui quebraria na próxima sessão. Por isso pegamos todos os
-   * input[type=file] e tentamos um por um até algum aceitar.
+   * Vai para o log a cada envio de propósito: os ids html5_* mudam a cada
+   * carregamento, então não dá para fixar seletor — mas o log conta como o DOM
+   * estava NA HORA em que a foto saiu errada, sem precisar de outra inspeção.
+   */
+  async _mapearInputs() {
+    return this.frame
+      .$$eval("input[type='file']", (els) =>
+        els.map((el) => ({
+          accept: el.getAttribute('accept') || '',
+          nome: el.getAttribute('name') || '',
+          classe: el.className || '',
+          paiClasse: el.parentElement ? el.parentElement.className || '' : '',
+          paiTitulo: el.parentElement ? el.parentElement.getAttribute('title') || '' : '',
+        })),
+      )
+      .catch(() => []);
+  }
+
+  /**
+   * Anexa uma imagem — como IMAGEM, não como arquivo.
+   *
+   * Esta distinção é o ponto todo. O chat da Taobao tem dois uploaders: 图片
+   * (imagem, aparece inline no balão) e 文件 (arquivo, aparece como cartão com
+   * "下载文件"). Pegar o input errado manda um cartão que o fornecedor teria de
+   * baixar — e ele simplesmente não baixa. A foto chega e é como se não tivesse
+   * chegado.
+   *
+   * Os ids html5_* são gerados pelo plupload a CADA carregamento, então a
+   * escolha não pode ser por id nem por posição. Vamos por ordem de confiança:
+   *
+   *   1. input com accept de imagem — é o uploader de imagem se declarando;
+   *   2. colar a imagem no campo de texto, como um humano faz com print;
+   *   3. primeiro input que aceitar — melhor mandar como arquivo do que nada.
+   *
+   * O passo 2 só entra se o 1 falhar, e só avança para o 3 se nada tiver saído:
+   * assim uma tentativa frustrada não deixa lixo no chat do fornecedor.
+   *
+   * @returns {Promise<{via:string, comoArquivo:boolean}>}
    */
   async enviarFoto(caminhoLocal) {
     await this.checarBloqueio();
 
-    const inputs = await this.frame.$$(SEL.inputArquivo.candidatos[0]);
-    if (!inputs.length) {
-      throw new SeletorNaoEncontrado('nenhum input[type=file] no frame do chat');
-    }
+    const mapa = await this._mapearInputs();
+    console.log(`[chat] ${mapa.length} input[type=file]: ${JSON.stringify(mapa)}`);
 
-    let anexou = false;
-    for (const input of inputs) {
+    const antes = await this._quantasMinhas();
+    let via = null;
+
+    // ── 1. O uploader de imagem se declara pelo accept ────────
+    const iImagem = mapa.findIndex((m) => /image|jpg|jpeg|png|gif|bmp/i.test(m.accept));
+    if (iImagem !== -1) {
+      const inputs = await this.frame.$$("input[type='file']");
       try {
-        await input.setInputFiles(caminhoLocal);
-        anexou = true;
-        break;
-      } catch {
-        // input escondido/desconectado — tenta o próximo
+        await inputs[iImagem].setInputFiles(caminhoLocal);
+        via = `accept "${mapa[iImagem].accept}"`;
+      } catch (err) {
+        console.warn(`[chat] input de imagem recusou: ${err.message}`);
       }
     }
-    if (!anexou) {
-      throw new SeletorNaoEncontrado(
-        `nenhum dos ${inputs.length} input[type=file] aceitou o arquivo`,
-      );
+
+    // ── 2. Colar, como quem dá Ctrl+V num print ───────────────
+    if (!via) {
+      try {
+        await this._colarImagem(caminhoLocal);
+        via = 'colagem';
+      } catch (err) {
+        console.warn(`[chat] colagem falhou: ${err.message}`);
+      }
     }
 
-    // O upload precisa terminar antes de mandar o texto, senão a foto chega
-    // depois da pergunta e o fornecedor responde "qual foto?".
     await this.pagina.waitForTimeout(humaniza.ms(2500, 5000));
+
+    // ── 3. Último recurso: só se NADA saiu ────────────────────
+    // A checagem evita mandar a mesma foto duas vezes quando a colagem
+    // funcionou mas demorou a aparecer.
+    if ((await this._quantasMinhas()) === antes) {
+      const inputs = await this.frame.$$("input[type='file']");
+      if (!inputs.length) {
+        throw new SeletorNaoEncontrado('nenhum input[type=file] no frame do chat');
+      }
+      let anexou = false;
+      for (const input of inputs) {
+        try {
+          await input.setInputFiles(caminhoLocal);
+          anexou = true;
+          break;
+        } catch {
+          // input escondido/desconectado — tenta o próximo
+        }
+      }
+      if (!anexou) {
+        throw new SeletorNaoEncontrado(
+          `nenhum dos ${inputs.length} input[type=file] aceitou o arquivo`,
+        );
+      }
+      via = 'input genérico (fallback)';
+      await this.pagina.waitForTimeout(humaniza.ms(2500, 5000));
+    }
+
     await this.checarBloqueio();
+
+    const comoArquivo = await this._ultimaSaiuComoArquivo();
+    console.log(`[chat] foto enviada via ${via}${comoArquivo ? ' — SAIU COMO ARQUIVO' : ''}`);
+    return { via: via || 'desconhecida', comoArquivo };
+  }
+
+  /**
+   * Cola a imagem no campo de texto.
+   *
+   * É o caminho que um humano usa para mandar print: recorta e dá Ctrl+V. O
+   * chat trata a colagem como imagem, nunca como anexo — por isso ela serve de
+   * plano B quando não dá para identificar o uploader de imagem pelo accept.
+   */
+  async _colarImagem(caminhoLocal) {
+    const b64 = fs.readFileSync(caminhoLocal).toString('base64');
+    const nome = path.basename(caminhoLocal);
+    const seletores = SEL.campoTexto.candidatos;
+
+    const ok = await this.frame.evaluate(
+      ({ b64, nome, seletores }) => {
+        const alvo = seletores.map((s) => document.querySelector(s)).find(Boolean);
+        if (!alvo) return false;
+
+        const bin = atob(b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+
+        const dt = new DataTransfer();
+        dt.items.add(new File([bytes], nome, { type: 'image/jpeg' }));
+
+        alvo.focus();
+        return alvo.dispatchEvent(
+          new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }),
+        );
+      },
+      { b64, nome, seletores },
+    );
+
+    if (!ok) throw new SeletorNaoEncontrado('campo de texto não aceitou a colagem');
+  }
+
+  /**
+   * A última mensagem nossa virou cartão de arquivo em vez de imagem?
+   *
+   * Precisa ser conferido: quando dá errado, o envio "funciona" — a mensagem
+   * sai, o braço reporta sucesso, e só o fornecedor descobre que recebeu um
+   * anexo que não vai abrir. Sem esta checagem ninguém fica sabendo.
+   */
+  async _ultimaSaiuComoArquivo() {
+    const classeSelf = SEL.minhaMensagem.classe;
+    return this.frame
+      .evaluate((c) => {
+        const meus = document.querySelectorAll(`.message-item.${c}`);
+        const ultimo = meus[meus.length - 1];
+        if (!ultimo) return false;
+        if (ultimo.querySelector('img')) return false; // imagem de verdade
+        return /下载文件|下載檔案|未读文件/.test(ultimo.innerText || '');
+      }, classeSelf)
+      .catch(() => false);
   }
 
   // ----------------------------------------------------------

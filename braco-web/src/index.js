@@ -183,7 +183,21 @@ async function executarTarefa(chat, tarefa, titulo) {
     if (tarefa.imagem) {
       temp = await baixarFoto(tarefa.imagem);
       // Foto primeiro: o fornecedor vê a tela e já lê o usuário embaixo.
-      await chat.enviarFoto(temp);
+      const r = await chat.enviarFoto(temp);
+      await evento('info', 'foto', `enviada via ${r.via}`);
+
+      // Saiu como cartão de download em vez de imagem: para o fornecedor é o
+      // mesmo que não ter chegado, porque ele não baixa anexo. Ninguém
+      // descobriria sozinho — o braço reportaria sucesso e o cliente esperaria
+      // à toa até o timeout de 4h.
+      if (r.comoArquivo) {
+        await evento(
+          'warn',
+          'foto_como_arquivo',
+          'A foto saiu como ARQUIVO, não como imagem — o fornecedor não abre. ' +
+            'Manda o print na mão pelo chat da Taobao.',
+        );
+      }
     }
 
     await chat.enviarTexto(tarefa.usuario);
