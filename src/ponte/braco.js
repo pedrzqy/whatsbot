@@ -88,9 +88,17 @@ router.get('/proxima', async (req, res) => {
   req.on('close', () => { vivo = false; });
 
   for (;;) {
+    if (!vivo) break;
+
     const t = pegar();
-    if (t) return res.json(t);
-    if (!vivo || Date.now() >= limite) break;
+    if (t) {
+      // proximaTarefa() já marcou 'executando'. Se a conexão morreu no meio
+      // do caminho, a tarefa ficaria com dono nenhum para sempre — devolve.
+      if (!vivo) { ponte.devolverTarefa(t.id); break; }
+      return res.json(t);
+    }
+
+    if (Date.now() >= limite) break;
     await new Promise((r) => setTimeout(r, 500));
   }
 

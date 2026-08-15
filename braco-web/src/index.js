@@ -283,7 +283,10 @@ async function main() {
   // errado, para o próximo ciclo reabrir em vez de escrever no vazio.
   let conversaAberta = false;
 
+  console.log('[braço] long-poll ligado (espera 25s ocioso · 6s com cliente aguardando)');
+
   while (rodando) {
+    const inicioCiclo = Date.now();
     try {
       const { data: st } = await api.get('/estado');
 
@@ -364,7 +367,13 @@ async function main() {
         if (achou) marcaAtual = null; // vez encerrada; o bot promove o próximo
       }
 
-      // Sem dormir aqui: a espera do ciclo é a do long-poll acima.
+      // Piso de ciclo. A espera normal é a do long-poll, mas se o bot
+      // responder na hora — versão antiga sem long-poll, ou 204 imediato — o
+      // laço giraria sem pausa nenhuma, martelando o bot e reabrindo o iframe
+      // sem parar. Este piso garante que isso nunca aconteça, mesmo com os dois
+      // serviços em versões diferentes.
+      const gasto = Date.now() - inicioCiclo;
+      if (gasto < 5000) await dormir(5000 - gasto);
     } catch (err) {
       // Qualquer erro pode ter deixado a tela noutro estado — força reabrir
       // a conversa no próximo ciclo em vez de escrever achando que está lá.

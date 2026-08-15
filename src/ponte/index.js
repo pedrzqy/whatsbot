@@ -269,6 +269,24 @@ function proximaTarefa() {
   };
 }
 
+/**
+ * Devolve à fila uma tarefa que foi pega mas não chegou ao braço.
+ *
+ * Faz falta por causa do long-polling: proximaTarefa() já marca 'executando' e
+ * conta tentativa, e agora a conexão fica pendurada até 25s — tempo de sobra
+ * para o braço cair, reiniciar ou estourar timeout entre o "peguei" e o
+ * "recebi". Sem isto a tarefa ficaria 'executando' sem dono, invisível para
+ * todo mundo, até o próximo restart do bot — e o cliente esperaria as 4h do
+ * timeout por um envio que ninguém ia fazer.
+ */
+function devolverTarefa(id) {
+  const t = dados.tarefas.find((x) => x.id === id);
+  if (!t || t.estado !== 'executando') return;
+  t.estado = 'pendente';
+  t.tentativas = Math.max(0, t.tentativas - 1); // não foi tentativa de verdade
+  persistAgora();
+}
+
 async function resultadoTarefa(id, ok, erro, printPath) {
   const t = dados.tarefas.find((x) => x.id === id);
   if (!t) return { ok: false, motivo: 'tarefa desconhecida' };
@@ -378,6 +396,7 @@ module.exports = {
   receberDoFornecedor,
   entregarCodigo,
   proximaTarefa,
+  devolverTarefa,
   resultadoTarefa,
   bloqueioDetectado,
   promoverProximo,
