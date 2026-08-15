@@ -133,7 +133,16 @@ t('lembrou o usuário', r2.usuario === 'rrtt9321');
 t('e a foto nova', r2.imagem === 'foto2.jpg');
 t('não repete o pedido', recepcao.avaliar(CLI2, '', 'foto3.jpg').acao === 'ignorar');
 
+bloco('recepção — foto PRIMEIRO (o fluxo real)');
+const CLI3 = '5541977775555';
+r2 = recepcao.avaliar(CLI3, '', 'print.jpg');
+t('foto sozinha não responde nada', r2.acao === 'ignorar', r2.acao);
+r2 = recepcao.avaliar(CLI3, 'rrtt9321', null);
+t('usuário depois fecha o par', r2.acao === 'pedir', r2.acao);
+t('guardou a foto que veio antes', r2.imagem === 'print.jpg');
+
 bloco('recepção — o que NÃO pode disparar');
+t('palavra sem dígito não é usuário', recepcao.avaliar('5541966665555', 'rwad', null).acao === 'ignorar');
 t('"oi" não dispara', recepcao.avaliar('5541977776666', 'oi', null).acao === 'ignorar');
 t('"quero um jogo" não dispara',
   recepcao.avaliar('5541977776666', 'quero um jogo', null).acao === 'ignorar');

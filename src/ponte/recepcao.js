@@ -108,15 +108,19 @@ function avaliar(from, texto, imagem) {
   }
 
   // ── Caso 5: veio só a foto ─────────────────────────────────
-  // Só trata como pedido se o cliente já estava nesse assunto — foto solta de
-  // quem está perguntando preço de jogo não é pedido de código.
-  if (imagem && guardado) {
-    p[from] = { usuario: guardado.usuario, imagem, em: Date.now() };
+  //
+  // O fluxo real é FOTO PRIMEIRO, usuário depois. Então guardamos a foto
+  // sempre, mesmo sem conversa prévia sobre código — a versão anterior exigia
+  // contexto anterior e por isso descartava a primeira metade de todo pedido.
+  //
+  // Mas guardamos em SILÊNCIO, sem responder. Assim uma foto solta de quem
+  // está só perguntando preço de jogo não recebe um "manda o usuário" sem
+  // sentido. Se o usuário chegar em até 10 minutos, o Caso 2 fecha o par; se
+  // não chegar, a foto expira e nada aconteceu.
+  if (imagem) {
+    p[from] = { usuario: guardado?.usuario || null, imagem, em: Date.now() };
     persist();
-    return {
-      acao: 'responder',
-      mensagem: 'Recebi o print! Agora me manda o *usuário da conta* (ex.: rrrtsr223).',
-    };
+    return { acao: 'ignorar' };
   }
 
   return { acao: 'ignorar' };
