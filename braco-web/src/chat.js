@@ -147,16 +147,46 @@ class Chat {
 
   // ----------------------------------------------------------
 
+  /**
+   * Abre a conversa do fornecedor.
+   *
+   * O chat é uma SPA: trocar de conversa não muda a URL, então não dá para
+   * navegar direto — tem que clicar no item da lista.
+   *
+   * Clica no PRIMEIRO da lista, não no que casa com o título. O fornecedor
+   * fica sempre no topo por ser a conversa mais recente, e clicar por posição
+   * não depende de casar texto chinês (que quebra se a loja mudar de nome ou
+   * o seletor `:has-text` falhar).
+   *
+   * MAS confere o título depois de abrir. Se outro fornecedor mandar mensagem,
+   * ele pula para o topo — e sem essa conferência o braço mandaria o usuário
+   * de um cliente para a loja errada. Posição para clicar, título para
+   * confirmar.
+   */
   async abrirConversa(titulo) {
     await this.prender();
     await this.checarBloqueio();
 
-    const { el } = await this._achar('conversaNaLista', { titulo, timeout: 12000 });
-    await el.click({ delay: humaniza.msCurto() });
+    const primeiro = await this._achar('conversaNaLista', { timeout: 12000 });
+    await primeiro.el.click({ delay: humaniza.msCurto() });
     await this.pagina.waitForTimeout(humaniza.ms(900, 2000));
 
-    // Confirma que o painel de digitação carregou antes de seguir.
+    // Painel de digitação carregado = conversa aberta de verdade.
     await this._achar('campoTexto', { timeout: 10000 });
+
+    if (titulo) {
+      const abriu = await this.frame
+        .evaluate(() => document.body.innerText || '')
+        .catch(() => '');
+      if (!abriu.includes(titulo)) {
+        throw new SeletorNaoEncontrado(
+          `Abri a primeira conversa da lista, mas ela não é "${titulo}". ` +
+            `Provavelmente outro fornecedor mandou mensagem e subiu para o topo. ` +
+            `NÃO enviei nada para não escrever na loja errada.`,
+        );
+      }
+    }
+
     await this.checarBloqueio();
   }
 

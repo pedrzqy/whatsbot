@@ -14,10 +14,10 @@
   ],
 
   "conversaNaLista": {
-    "_o_que_e": "Item da lista lateral. {titulo} é trocado pelo nome da loja (山王电玩).",
+    "_o_que_e": "PRIMEIRO item da lista lateral. O fornecedor fica sempre no topo por ser a conversa mais recente. Clicar por posição não depende de casar texto chinês. O título é conferido DEPOIS de abrir, no chat.js — se outra loja tiver subido para o topo, o braço para em vez de escrever no lugar errado.",
     "candidatos": [
-      ".conversation-item:has-text('{titulo}')",
-      ".content:has-text('{titulo}')"
+      ".conversation-item",
+      ".chat-list .item"
     ]
   },
 
