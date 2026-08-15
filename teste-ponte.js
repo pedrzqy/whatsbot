@@ -141,6 +141,81 @@ r2 = recepcao.avaliar(CLI3, 'rrtt9321', null);
 t('usuário depois fecha o par', r2.acao === 'pedir', r2.acao);
 t('guardou a foto que veio antes', r2.imagem === 'print.jpg');
 
+// ── Fluxo guiado: "preciso do código" ───────────────────────
+// Este é o caminho do cliente que não sabe o que mandar. Sem ele, a mensagem
+// cai no ignorar e — com BOT_AUTOREPLY=false — ninguém responde nada.
+bloco('recepção — fluxo guiado passo a passo');
+const CLI4 = '5541966661111';
+
+r2 = recepcao.avaliar(CLI4, 'preciso do código', null);
+t('"preciso do código" responde', r2.acao === 'responder', r2.acao);
+t('pede a FOTO primeiro', /foto da tela do console/i.test(r2.mensagem || ''), r2.mensagem);
+t('não pede o usuário ainda', !/login\/usu/i.test(r2.mensagem || ''));
+
+r2 = recepcao.avaliar(CLI4, '', 'tela.jpg');
+t('a foto agora tem resposta', r2.acao === 'responder', r2.acao);
+t('e pede o login/usuário', /login\/usu/i.test(r2.mensagem || ''), r2.mensagem);
+t('avisa para não mandar senha', /senha/i.test(r2.mensagem || ''));
+
+r2 = recepcao.avaliar(CLI4, 'rsd32', null);
+t('o usuário fecha o fluxo', r2.acao === 'pedir', r2.acao);
+t('com o usuário certo', r2.usuario === 'rsd32', r2.usuario);
+t('e a foto do passo 1', r2.imagem === 'tela.jpg', r2.imagem);
+
+bloco('fluxo guiado — usuário sem dígito');
+// Fora do fluxo "joaozinho" é ignorado; dentro dele o bot ACABOU de pedir o
+// login, então a palavra solta é o login.
+const CLI5 = '5541966662222';
+recepcao.avaliar(CLI5, 'preciso do codigo', null);
+recepcao.avaliar(CLI5, '', 'tela2.jpg');
+r2 = recepcao.avaliar(CLI5, 'joaozinho', null);
+t('aceita usuário só de letras dentro do fluxo', r2.acao === 'pedir', r2.acao);
+t('usuário correto', r2.usuario === 'joaozinho', r2.usuario);
+t('fora do fluxo continua ignorando',
+  recepcao.avaliar('5541966663333', 'joaozinho', null).acao === 'ignorar');
+
+bloco('fluxo guiado — não repete tutorial em rajada');
+const CLI6 = '5541966664444';
+t('1ª vez responde', recepcao.avaliar(CLI6, 'codigo', null).acao === 'responder');
+t('2ª vez seguida cala', recepcao.avaliar(CLI6, 'codigo', null).acao === 'ignorar');
+t('3ª vez seguida cala', recepcao.avaliar(CLI6, 'preciso do codigo', null).acao === 'ignorar');
+
+bloco('fluxo guiado — corrige usuário inválido');
+const CLI7 = '5541966667777';
+recepcao.avaliar(CLI7, 'preciso do codigo', null);
+recepcao.avaliar(CLI7, '', 'tela3.jpg');
+r2 = recepcao.avaliar(CLI7, 'meu email', null);
+t('explica o formato', r2.acao === 'responder', r2.acao);
+t('dá exemplo de usuário', /rrrtsr223/.test(r2.mensagem || ''));
+
+bloco('fluxo guiado — foto antes do pedido');
+const CLI8 = '5541966666666';
+t('foto solta segue calada', recepcao.avaliar(CLI8, '', 'tela4.jpg').acao === 'ignorar');
+r2 = recepcao.avaliar(CLI8, 'preciso do codigo', null);
+t('pedido depois pula direto pro usuário', /login\/usu/i.test(r2.mensagem || ''), r2.mensagem);
+
+bloco('detecção de "quero o código"');
+t('preciso do codigo', recepcao.pedeCodigo('preciso do codigo') === true);
+t('com acento', recepcao.pedeCodigo('preciso do código') === true);
+t('codigo pfv', recepcao.pedeCodigo('codigo pfv') === true);
+t('cade o codigo', recepcao.pedeCodigo('cadê o código?') === true);
+t('me manda o codigo de verificacao por favor',
+  recepcao.pedeCodigo('me manda o codigo de verificacao por favor') === true);
+t('o codigo nao chegou ainda, faz tempo que to esperando',
+  recepcao.pedeCodigo('o codigo nao chegou ainda, faz tempo que to esperando') === true);
+t('MAIÚSCULA', recepcao.pedeCodigo('PRECISO DO CÓDIGO') === true);
+
+bloco('detecção — o que NÃO é pedido de código');
+t('quanto custa o codigo do fifa',
+  recepcao.pedeCodigo('quanto custa o codigo do fifa') === false);
+t('quero comprar codigo de jogo',
+  recepcao.pedeCodigo('quero comprar um codigo de jogo') === false);
+t('codigo de barras', recepcao.pedeCodigo('codigo de barras da nota') === false);
+t('cupom de desconto', recepcao.pedeCodigo('tem cupom de codigo de desconto?') === false);
+t('oi', recepcao.pedeCodigo('oi') === false);
+t('quero um jogo', recepcao.pedeCodigo('quero um jogo') === false);
+t('call of duty não vira "cod"', recepcao.pedeCodigo('vcs tem call of duty?') === false);
+
 bloco('recepção — o que NÃO pode disparar');
 t('palavra sem dígito não é usuário', recepcao.avaliar('5541966665555', 'rwad', null).acao === 'ignorar');
 t('"oi" não dispara', recepcao.avaliar('5541977776666', 'oi', null).acao === 'ignorar');
