@@ -20,6 +20,10 @@ RUN npx playwright install chrome
 
 COPY src ./src
 COPY seletores.json ./
+COPY entrypoint.sh ./
+# chmod aqui e não no repositório: o bit de execução não sobrevive a clone
+# feito de Windows, então confiar no permissionamento do git quebraria o build.
+RUN chmod +x entrypoint.sh
 
 # O perfil do Chrome guarda cookies e os tokens de device da Taobao. Sem
 # volume montado aqui, todo deploy vira "dispositivo novo" numa conta com
@@ -30,8 +34,7 @@ VOLUME ["/app/perfil-chrome"]
 # (UA HeadlessChrome, plugins vazios, WebGL irreal) que patch de JS não cobre
 # bem. xvfb-run custa ~200MB de RAM e resolve na raiz.
 #
-# O echo e o teste de xvfb-run vêm antes de propósito: sem eles, container que
-# sobe e não imprime nada não diz se o problema é a imagem, o xvfb ou o Node.
-# Com estas linhas, silêncio total passa a significar "nem o container subiu",
-# que é um diagnóstico diferente.
-CMD ["sh", "-c", "echo '[docker] container subiu'; command -v xvfb-run >/dev/null || echo '[docker] ERRO: xvfb-run ausente na imagem'; exec xvfb-run --auto-servernum --server-args='-screen 0 1440x900x24' node src/index.js"]
+# O entrypoint sobe o Xvfb à mão em vez de usar xvfb-run. O wrapper redireciona
+# saída por padrão e falha calado — o container subia, imprimia uma linha e
+# ficava mudo, sem dizer se o problema era o Xvfb, o Node ou a imagem.
+ENTRYPOINT ["/app/entrypoint.sh"]

@@ -1,0 +1,13 @@
+# Script de shell PRECISA de quebra de linha LF.
+#
+# Clonado com CRLF, o shebang vira "#!/bin/sh\r" e o Linux procura um
+# interpretador chamado "sh\r". O erro que aparece é "no such file or
+# directory" apontando para o script — e a pessoa vai procurar o arquivo
+# errado por meia hora.
+*.sh text eol=lf
+
+# Dockerfile e configs seguem o mesmo caminho por segurança.
+Dockerfile text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
