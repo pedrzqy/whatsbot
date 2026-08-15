@@ -388,7 +388,7 @@ class Chat {
     } catch {
       // sem botão visível: se a colagem não pegou, não há o que enviar
     }
-    await this.pagina.waitForTimeout(humaniza.ms(2000, 3500));
+    await this.pagina.waitForTimeout(humaniza.ms(1200, 2200));
     return (await this._quantasMinhas()) > antes;
   }
 

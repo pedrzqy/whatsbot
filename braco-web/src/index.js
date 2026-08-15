@@ -72,14 +72,21 @@ async function alertarComPrint(pagina, texto) {
  * histórico é o caminho mais rápido para verificação. Quem escaneia é humano.
  */
 let smsPedidoEm = 0;
+// Só loga quando MUDA. O laço agora gira a cada 6s enquanto alguém espera
+// resposta, e um "sessão ok" por volta afogaria os logs que interessam.
+let sessaoLogada = null;
 
 async function garantirLogin(pagina, chat) {
   try {
     await chat.prender(); // achou o iframe chat-core = está logado
-    console.log('[braço] sessão ok (iframe do chat encontrado)');
+    if (sessaoLogada !== true) {
+      console.log('[braço] sessão ok (iframe do chat encontrado)');
+      sessaoLogada = true;
+    }
     smsPedidoEm = 0;
     return true;
   } catch (err) {
+    sessaoLogada = false;
     // Diz POR QUE achou que não está logado. Sem isto, o log só informa que
     // um print foi enviado — e a tela pode estar perfeitamente carregada
     // enquanto o problema é outro (frame com outro nome, página errada,
@@ -324,7 +331,16 @@ async function main() {
       }
 
       // 1) Tarefa pendente?
-      const resp = await api.get('/proxima', { validateStatus: (s) => s === 200 || s === 204 });
+      //
+      // LONG-POLLING: o bot segura a resposta até aparecer tarefa. É o que faz
+      // o #ok sair na hora em vez de esperar o próximo ciclo. Espera curta
+      // quando alguém já aguarda resposta, para reler o chat com frequência.
+      const esperando = Array.isArray(marcaAtual);
+      const resp = await api.get('/proxima', {
+        params: { espera: esperando ? 6 : 25 },
+        timeout: 45_000,
+        validateStatus: (s) => s === 200 || s === 204,
+      });
       if (resp.status === 200) {
         marcaAtual = await executarTarefa(chat, resp.data, titulo);
         await dormir(humaniza.pausaLonga());
@@ -337,13 +353,18 @@ async function main() {
       // undefined, `undefined !== null` passaria, a marca viraria conjunto
       // vazio e TODO o histórico seria lido como novo — justamente o que a
       // marca existe para impedir.
-      if (st.temAtendimentoAtivo && Array.isArray(marcaAtual)) {
-        await chat.abrirConversa(titulo);
+      //
+      // Não reabre a conversa aqui: o topo do laço já garante que ela está
+      // aberta, e clicar de novo a cada leitura seria atividade repetida e
+      // regular na tela — exatamente o padrão que a Taobao usa para separar
+      // script de gente. Ler é só varrer o DOM: não gera clique nem requisição,
+      // então pode ser frequente sem custo nenhum.
+      if (st.temAtendimentoAtivo && esperando) {
         const achou = await lerRespostas(chat, marcaAtual);
         if (achou) marcaAtual = null; // vez encerrada; o bot promove o próximo
       }
 
-      await dormir(humaniza.intervaloLeitura());
+      // Sem dormir aqui: a espera do ciclo é a do long-poll acima.
     } catch (err) {
       // Qualquer erro pode ter deixado a tela noutro estado — força reabrir
       // a conversa no próximo ciclo em vez de escrever achando que está lá.

@@ -17,6 +17,21 @@ process.env.PONTE_SELLER_CHAT_TITLE = '山王电玩';
 process.env.PONTE_SELLER_TZ = 'America/Sao_Paulo';
 process.env.PONTE_SELLER_JANELAS = '00:00-15:30,17:15-23:59';
 
+// Estado limpo antes de qualquer coisa.
+//
+// O data/ponte.json sobrevive entre execuções — é o que faz um cliente no meio
+// do fluxo atravessar um deploy. Só que num teste isso vira contaminação: a
+// foto guardada na rodada anterior ainda está lá dentro dos 10 min de validade,
+// e o "usuário sozinho pede a foto" passa a fechar o par com uma foto fantasma.
+const estadoPonte = require('./src/ponte/estado');
+Object.assign(estadoPonte.dados, {
+  pendentes: {},
+  testeOperador: null,
+  atendimentos: [],
+  tarefas: [],
+  aprovacoes: [],
+});
+
 const tools = require('./src/tools');
 const codigo = require('./src/ponte/codigo');
 const politica = require('./src/ponte/politica');

@@ -62,16 +62,39 @@ router.post('/sms-usado', (_req, res) => {
   res.json({ ok: true });
 });
 
-/** Próxima tarefa de envio. 204 quando não há nada a fazer. */
-router.get('/proxima', (_req, res) => {
-  const d = limites.disjuntor();
-  if (d.estado === 'aberto') return res.status(204).end();
-  if (!janela.estado().aberta) return res.status(204).end();
+/**
+ * Próxima tarefa de envio. 204 quando não há nada a fazer.
+ *
+ * ATENDE EM LONG-POLLING: com ?espera=25 a resposta fica pendurada até 25s
+ * esperando surgir tarefa, e volta no instante em que o operador dá #ok.
+ *
+ * Antes o braço perguntava e dormia até 110s, então um #ok podia levar quase
+ * dois minutos só para ser NOTADO. Segurar aqui não custa risco nenhum: esta
+ * conversa é entre o bot e o braço, a Taobao não vê nada dela. O ritmo humano
+ * que importa é o das ações no navegador, e esse continua igual.
+ */
+router.get('/proxima', async (req, res) => {
+  const pegar = () => {
+    if (limites.disjuntor().estado === 'aberto') return null;
+    if (!janela.estado().aberta) return null;
+    return ponte.proximaTarefa();
+  };
 
-  const t = ponte.proximaTarefa();
-  if (!t) return res.status(204).end();
+  const espera = Math.min(Math.max(Number(req.query.espera) || 0, 0), 30) * 1000;
+  const limite = Date.now() + espera;
 
-  res.json(t);
+  // Se o braço desistir no meio, para de segurar em vez de escrever no vazio.
+  let vivo = true;
+  req.on('close', () => { vivo = false; });
+
+  for (;;) {
+    const t = pegar();
+    if (t) return res.json(t);
+    if (!vivo || Date.now() >= limite) break;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+
+  if (vivo) res.status(204).end();
 });
 
 /** Resultado de um envio. */
