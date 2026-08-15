@@ -31,6 +31,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       x11vnc novnc websockify \
     && rm -rf /var/lib/apt/lists/*
 
+# O pacote noVNC do Debian não traz index.html, então a raiz da URL mostra a
+# listagem da pasta em vez do cliente. Este redirect resolve — e já leva os
+# parâmetros que evitam dois cliques: conecta sozinho e escala a tela para
+# caber na janela (a do container é 1440x900).
+RUN printf '%s' '<!doctype html><meta http-equiv="refresh" content="0;url=vnc.html?autoconnect=true&resize=scale">' \
+    > /usr/share/novnc/index.html
+
 COPY package*.json ./
 RUN npm ci --omit=dev
 
