@@ -17,6 +17,7 @@ const fila = require('./fila');
 const limites = require('./limites');
 const janela = require('./janela');
 const midia = require('./midia');
+const { dados, persist } = require('./estado');
 
 const router = express.Router();
 
@@ -47,7 +48,18 @@ router.get('/estado', (_req, res) => {
     chatTitulo: cfg.vendedor.chatTitulo,
     // Só faz sentido ler o chat se alguém está esperando resposta.
     temAtendimentoAtivo: Boolean(fila.ativo()),
+    // Código SMS que o operador mandou com #taobao, aguardando o braço usar.
+    smsTaobao: dados.smsTaobao?.codigo || null,
   });
+});
+
+/** O braço avisa que consumiu o código — evita reusar um já gasto. */
+router.post('/sms-usado', (_req, res) => {
+  if (dados.smsTaobao) {
+    delete dados.smsTaobao;
+    persist();
+  }
+  res.json({ ok: true });
 });
 
 /** Próxima tarefa de envio. 204 quando não há nada a fazer. */

@@ -78,6 +78,60 @@ class Chat {
   }
 
   // ----------------------------------------------------------
+  // Verificação por SMS
+  //
+  // Diferente dos bloqueios: aqui a Taobao pede o código que ELA manda para o
+  // telefone do dono da conta. Não é anti-bot a ser contornado, é identidade a
+  // ser comprovada — e quem comprova é o operador, que recebe o SMS e devolve
+  // o número. O braço só faz o transporte, porque o navegador está num
+  // container onde ninguém consegue clicar.
+  // ----------------------------------------------------------
+
+  /** Estamos na tela de verificação por SMS? */
+  async emVerificacaoSms() {
+    const texto = await this.pagina.evaluate(() => document.body.innerText).catch(() => '');
+    return SEL.verificacaoSms.deteccao.some((m) => texto.includes(m));
+  }
+
+  /** Primeiro que existir, direto na página (esta tela não tem iframe). */
+  async _acharNaPagina(lista, timeout = 6000) {
+    const limite = Date.now() + timeout;
+    while (Date.now() < limite) {
+      for (const sel of lista) {
+        const el = await this.pagina.$(sel);
+        if (el) return el;
+      }
+      await this.pagina.waitForTimeout(300);
+    }
+    return null;
+  }
+
+  /** Clica em 获取短信校验码 para a Taobao disparar o SMS. */
+  async pedirSms() {
+    const botao = await this._acharNaPagina(SEL.verificacaoSms.botaoEnviarSms);
+    if (!botao) return false;
+    await botao.click({ delay: humaniza.msCurto() });
+    await this.pagina.waitForTimeout(humaniza.ms(1000, 2000));
+    return true;
+  }
+
+  /** Preenche o código que o operador mandou e confirma. */
+  async preencherSms(codigo) {
+    const campo = await this._acharNaPagina(SEL.verificacaoSms.campoCodigo);
+    if (!campo) throw new SeletorNaoEncontrado('campo do código SMS não encontrado');
+
+    await campo.click();
+    await campo.type(String(codigo), { delay: humaniza.msTecla() });
+    await this.pagina.waitForTimeout(humaniza.ms(500, 1200));
+
+    const confirmar = await this._acharNaPagina(SEL.verificacaoSms.botaoConfirmar);
+    if (!confirmar) throw new SeletorNaoEncontrado('botão 确定 não encontrado');
+
+    await confirmar.click({ delay: humaniza.msCurto() });
+    await this.pagina.waitForTimeout(humaniza.ms(3000, 5000));
+  }
+
+  // ----------------------------------------------------------
 
   async abrirConversa(titulo) {
     await this.prender();

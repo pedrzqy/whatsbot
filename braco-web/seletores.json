@@ -52,6 +52,27 @@
     "candidatos": [".content", ".text"]
   },
 
+  "verificacaoSms": {
+    "_o_que_e": "Tela 手机验证码验证 — a Taobao confirma identidade por SMS quando vê dispositivo novo. NÃO é captcha: é o dono da conta se identificando, e o SMS chega no telefone dele. Por isso tem fluxo assistido (o operador manda o código pelo WhatsApp) em vez de parada seca como nos bloqueios abaixo.",
+    "deteccao": ["手机验证码验证", "获取短信校验码", "校验码"],
+    "campoCodigo": [
+      "input[placeholder*='验证码']",
+      "#J_Phone_Checkcode",
+      "input[name='checkCode']",
+      "input[type='text']"
+    ],
+    "botaoEnviarSms": [
+      "a:has-text('获取短信校验码')",
+      "button:has-text('获取短信校验码')",
+      "[class*='send-code']"
+    ],
+    "botaoConfirmar": [
+      "button:has-text('确定')",
+      "input[value='确定']",
+      "[class*='submit']"
+    ]
+  },
+
   "bloqueios": {
     "_o_que_e": "Sinais de verificação anti-bot. Achou qualquer um, o braço PARA e chama humano. Nunca tenta resolver.",
     "seletores": [

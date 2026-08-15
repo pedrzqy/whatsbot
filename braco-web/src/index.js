@@ -71,19 +71,65 @@ async function alertarComPrint(pagina, texto) {
  * Não tenta logar sozinho de propósito: login automatizado numa conta com
  * histórico é o caminho mais rápido para verificação. Quem escaneia é humano.
  */
+let smsPedidoEm = 0;
+
 async function garantirLogin(pagina, chat) {
   try {
-    await chat.prender(); // acha o iframe chat-core
+    await chat.prender(); // achou o iframe chat-core = está logado
+    smsPedidoEm = 0;
     return true;
   } catch {
-    await alertarComPrint(
-      pagina,
-      '🔐 *Braço precisa de login na Taobao*\n\n' +
-        'Escaneie este QR com o app da Taobao no seu iPhone.\n' +
-        'Assim que logar, eu continuo sozinho — o perfil fica salvo.',
-    );
+    /* não logado — segue abaixo */
+  }
+
+  // Caso 1: verificação por SMS. A Taobao manda o código para o telefone do
+  // dono da conta; o operador recebe e devolve pelo WhatsApp. O braço só
+  // transporta, porque ninguém consegue clicar num navegador dentro de um
+  // container.
+  if (await chat.emVerificacaoSms()) {
+    // Código que o operador já mandou?
+    const { data: st } = await api.get('/estado').catch(() => ({ data: {} }));
+    if (st.smsTaobao) {
+      console.log('[braço] preenchendo código SMS recebido do operador');
+      try {
+        await chat.preencherSms(st.smsTaobao);
+        await api.post('/sms-usado', {});
+        smsPedidoEm = 0;
+        return false; // próximo ciclo confirma se entrou
+      } catch (err) {
+        await api.post('/sms-usado', {});
+        await alertarComPrint(pagina, `⚠️ Não consegui usar o código: ${err.message}`);
+        return false;
+      }
+    }
+
+    // Dispara o SMS uma vez a cada 5 min, não a cada ciclo — senão a Taobao
+    // trata como abuso e passa a recusar o envio.
+    if (Date.now() - smsPedidoEm > 5 * 60 * 1000) {
+      const pediu = await chat.pedirSms();
+      smsPedidoEm = Date.now();
+      await alertarComPrint(
+        pagina,
+        `📱 *Taobao pediu verificação por SMS*\n\n` +
+          (pediu
+            ? 'Já cliquei em "enviar SMS" — o código vai chegar no seu celular.\n\n'
+            : 'Não achei o botão de enviar SMS; clique você se conseguir.\n\n') +
+          'Quando chegar, responde aqui:\n*#taobao 123456*\n\n' +
+          'Isso acontece porque o navegador do servidor é um dispositivo novo ' +
+          'para a sua conta. Depois de validar uma vez, o perfil fica salvo.',
+      );
+    }
     return false;
   }
+
+  // Caso 2: tela de login normal (QR ou senha).
+  await alertarComPrint(
+    pagina,
+    '🔐 *Braço precisa de login na Taobao*\n\n' +
+      'Escaneie o QR desta tela com o app da Taobao no seu iPhone.\n' +
+      'Assim que logar, eu continuo sozinho — o perfil fica salvo.',
+  );
+  return false;
 }
 
 /** Baixa a foto do bot (que roda noutra máquina) para um arquivo temporário. */
