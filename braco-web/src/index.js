@@ -287,8 +287,16 @@ async function main() {
       await dormir(humaniza.intervaloLeitura());
     } catch (err) {
       if (err instanceof BloqueioDetectado) {
-        // NÃO tentamos resolver. Avisa e espera humano.
-        await api.post('/bloqueio', { motivo: String(err.message) }).catch(() => {});
+        // NÃO tentamos resolver. Manda o print junto: sem ver a tela, o
+        // operador não sabe se é slider, SMS ou logout, e cada um pede uma
+        // ação diferente.
+        const png = await pagina.screenshot({ type: 'jpeg', quality: 90 }).catch(() => null);
+        await api
+          .post('/bloqueio', {
+            motivo: String(err.message),
+            imagemBase64: png ? png.toString('base64') : undefined,
+          })
+          .catch(() => {});
         await evento('error', 'bloqueio', `${err.message} — aguardando liberação`);
         await dormir(600_000);
       } else if (err instanceof SeletorNaoEncontrado) {

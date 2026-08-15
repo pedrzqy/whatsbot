@@ -10,6 +10,19 @@ FROM mcr.microsoft.com/playwright:v1.49.1-jammy
 
 WORKDIR /app
 
+# x11vnc + noVNC: mãos remotas no navegador do container.
+#
+# Existe por um motivo específico. Quando a Taobao pede o slider de
+# verificação, não há código para repassar: ela mede a TRAJETÓRIA do arraste
+# (velocidade, aceleração, tremor). Ou um humano arrasta de verdade, ou não
+# passa. Sem isto, o braço detecta o slider, congela e ninguém consegue agir.
+#
+# Não é automação de captcha — é dar ao operador acesso à tela para ele mesmo
+# resolver. O mesmo canal serve para login e qualquer diálogo inesperado.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      x11vnc novnc websockify \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY package*.json ./
 RUN npm ci --omit=dev
 

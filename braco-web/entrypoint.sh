@@ -56,6 +56,21 @@ done
 
 echo "[entry] Xvfb pronto (pid ${XVFB_PID})"
 
+# ── VNC (opcional) ──────────────────────────────────────────────────
+# Só liga com VNC_PASSWORD definida. Sem senha NÃO sobe: um navegador logado
+# na Taobao exposto na internet sem autenticação seria pior que o problema
+# que ele resolve.
+if [ -n "${VNC_PASSWORD}" ]; then
+  echo "[entry] subindo VNC (tela remota para resolver verificação)"
+  x11vnc -display "${DISPLAY}" -forever -shared -rfbport 5900 \
+         -passwd "${VNC_PASSWORD}" -quiet >/tmp/x11vnc.log 2>&1 &
+  # websockify serve o noVNC por HTTP: você abre no navegador, sem instalar nada.
+  websockify --web=/usr/share/novnc 6080 localhost:5900 >/tmp/novnc.log 2>&1 &
+  echo "[entry] VNC em :6080 (aponte um domínio do Easypanel para esta porta)"
+else
+  echo "[entry] VNC desligado (defina VNC_PASSWORD para habilitar)"
+fi
+
 # exec para o Node virar o PID 1: assim SIGTERM do Easypanel chega nele e o
 # encerramento limpo do index.js funciona.
 echo "[entry] entregando para o node"

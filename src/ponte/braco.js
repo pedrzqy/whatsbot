@@ -131,9 +131,14 @@ router.post('/alerta', async (req, res) => {
 
 /** O braço viu captcha / logout / conta sinalizada. Congela tudo. */
 router.post('/bloqueio', async (req, res) => {
-  const { motivo, printPath } = req.body || {};
+  const { motivo, imagemBase64 } = req.body || {};
   res.json({ ok: true });
-  await ponte.bloqueioDetectado(motivo || 'verificação anti-bot detectada', printPath);
+
+  const imagem = imagemBase64
+    ? String(imagemBase64).replace(/^data:[^;]+;base64,/, '')
+    : undefined;
+
+  await ponte.bloqueioDetectado(motivo || 'verificação anti-bot detectada', imagem);
 });
 
 /**

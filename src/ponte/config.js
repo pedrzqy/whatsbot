@@ -53,8 +53,13 @@ module.exports = {
     falhasParaAbrir: num(process.env.PONTE_FALHAS_ABRIR, 3),
   },
 
-  // Chave que o braço Python usa para autenticar nas rotas /ponte/braco/*.
+  // Chave que o braço usa para autenticar nas rotas /ponte/braco/*.
   bracoApiKey: process.env.PONTE_BRACO_KEY || '',
+
+  // URL do noVNC do braço. Vai junto no alerta de verificação: quando a
+  // Taobao pede o slider não existe código para repassar (ela mede a
+  // trajetória do arraste), então o operador precisa arrastar ele mesmo.
+  vncUrl: process.env.PONTE_VNC_URL || '',
 
   operador: {
     // Número (só dígitos) que recebe alertas de captcha e fila travada.

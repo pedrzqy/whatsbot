@@ -317,10 +317,22 @@ async function bloqueioDetectado(motivo, printPath) {
   if (!limites.abrir(motivo, printPath)) return; // já estava aberto
 
   const esperando = fila.situacao().aguardando.length;
+
+  // O slider mede a trajetória do arraste, então não há código para repassar
+  // como no SMS: só um arraste humano de verdade passa. Por isso o caminho é
+  // a tela remota, não uma instrução de "resolve no seu navegador" — o
+  // navegador que precisa ser resolvido é o do container.
+  const comoResolver = cfg.vncUrl
+    ? `1. Abre a tela do braço: ${cfg.vncUrl}\n` +
+      `2. Arrasta o slider você mesmo (com o mouse, devagar)\n` +
+      `3. Responde *#liberar*`
+    : `1. Configure PONTE_VNC_URL para conseguir ver a tela do braço\n` +
+      `   (sem isso não há como resolver: o navegador está dentro do container)\n` +
+      `2. Depois de resolver, responde *#liberar*`;
+
   await alertar(
     `🛑 *Verificação da Taobao*\n\n${motivo}\n\n` +
-      `Ponte congelada. ${esperando} cliente(s) na fila.\n\n` +
-      `1. Abre o chat da Taobao\n2. Resolve a verificação na mão\n3. Responde *#liberar*`,
+      `Ponte congelada. ${esperando} cliente(s) na fila.\n\n${comoResolver}`,
     printPath,
   );
 }
