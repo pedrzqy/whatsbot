@@ -92,6 +92,30 @@ router.post('/entrada', async (req, res) => {
   }
 });
 
+/**
+ * Alerta com imagem vinda do braço (print de tela).
+ *
+ * Existe por um motivo concreto: dentro do container não há tela para escanear
+ * o QR do login da Taobao. O braço tira o print e manda para o operador, que
+ * escaneia com o iPhone. Mesmo caminho serve para print de erro e de captcha.
+ *
+ * A Evolution aceita base64 direto no campo `media`, então não precisa
+ * hospedar arquivo em lugar nenhum.
+ */
+router.post('/alerta', async (req, res) => {
+  const { texto, imagemBase64 } = req.body || {};
+  res.json({ ok: true });
+  if (!texto) return;
+
+  const imagem = imagemBase64
+    ? (String(imagemBase64).startsWith('data:')
+        ? String(imagemBase64)
+        : `data:image/png;base64,${imagemBase64}`)
+    : undefined;
+
+  await ponte.alertar(texto, imagem);
+});
+
 /** O braço viu captcha / logout / conta sinalizada. Congela tudo. */
 router.post('/bloqueio', async (req, res) => {
   const { motivo, printPath } = req.body || {};

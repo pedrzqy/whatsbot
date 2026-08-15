@@ -1,86 +1,111 @@
 'use strict';
 
 /**
- * Janela de atendimento do fornecedor chinês.
+ * Janela em que o fornecedor está online.
  *
- * O fuso é um problema de PRODUTO, não de código. China é UTC+8, Brasília é
- * UTC-3: 11 horas de diferença, a China na frente. Quando é 10h em SP, são 21h
- * em Guangzhou. Quando é 15h aqui, são 2h da madrugada lá.
+ * DEFINIDA EM HORÁRIO DE BRASÍLIA, não da China — e isso é proposital. A
+ * janela vem de OBSERVAÇÃO do operador ("ele responde das 00h às 15h30, some,
+ * e volta 17h15"), não do horário comercial declarado de ninguém. Converter
+ * para o fuso da China só adicionaria uma chance de errar a conta.
  *
- * Ou seja: TODA pergunta que chega no horário comercial brasileiro cai na
- * madrugada chinesa. A ponte não conserta isso — ela é honesta com o cliente
- * sobre o prazo e dispara no momento certo.
+ * Aceita VÁRIOS intervalos porque a realidade tem buraco no meio. Com um
+ * intervalo contíguo só, o braço ficaria parado horas em que ele está online.
  *
- * Janela útil do vendedor (09h–22h na China) vista de Brasília: 22h às 11h.
+ * Para referência: China é UTC+8, Brasília UTC-3 — 11h à nossa frente. A
+ * janela 00:00–15:30 daqui é 11:00–02:30 lá.
  */
 
 const cfg = require('./config');
 
-/** Hora e minuto atuais no fuso do vendedor, sem depender de biblioteca. */
-function agoraNoVendedor(agora) {
+/** "08:30" -> 510 (minutos desde a meia-noite). */
+function paraMinutos(hhmm) {
+  const [h, m] = String(hhmm).trim().split(':').map(Number);
+  return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
+}
+
+/**
+ * Converte "00:00-15:30,17:15-23:59" em [{de,ate}] em minutos.
+ * Intervalo que cruza a meia-noite é rejeitado — divida em dois.
+ */
+function intervalos() {
+  const bruto = cfg.vendedor.janelas || '';
+  const lista = bruto
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .map((p) => {
+      const [de, ate] = p.split('-');
+      return { de: paraMinutos(de), ate: paraMinutos(ate) };
+    })
+    .filter((i) => Number.isFinite(i.de) && Number.isFinite(i.ate) && i.ate > i.de);
+
+  // Sem configuração válida, assume online o dia inteiro: é melhor o braço
+  // tentar e o limite de envios segurar do que ficar mudo por erro de digitação.
+  return lista.length ? lista.sort((a, b) => a.de - b.de) : [{ de: 0, ate: 1439 }];
+}
+
+/** Minuto do dia no fuso configurado. */
+function minutoAgora(data) {
   const fmt = new Intl.DateTimeFormat('en-US', {
     timeZone: cfg.vendedor.tz,
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
   });
-  const partes = Object.fromEntries(fmt.formatToParts(agora).map((p) => [p.type, p.value]));
-  return { hora: Number(partes.hour), minuto: Number(partes.minute) };
+  const p = Object.fromEntries(fmt.formatToParts(data).map((x) => [x.type, x.value]));
+  // Em alguns fusos o formatador devolve "24" para meia-noite.
+  const h = Number(p.hour) % 24;
+  return h * 60 + Number(p.minute);
 }
 
-/** Hora local do cliente (Brasília), formatada "HHhMM". */
-function horaEmBrasilia(data) {
-  return new Intl.DateTimeFormat('pt-BR', {
-    timeZone: 'America/Sao_Paulo',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  })
-    .format(data)
-    .replace(':', 'h');
+function doisDigitos(n) {
+  return String(n).padStart(2, '0');
 }
 
-function minutosDe(hhmm) {
-  const [h, m] = String(hhmm).split(':').map(Number);
-  return h * 60 + (m || 0);
+function comoHora(minutos) {
+  return `${doisDigitos(Math.floor(minutos / 60))}h${doisDigitos(minutos % 60)}`;
 }
 
 /**
  * @returns {{aberta:boolean, esperaMinutos:number, proximaAbertura:Date, avisoCliente:string}}
  */
 function estado(agora = new Date()) {
-  const { hora, minuto } = agoraNoVendedor(agora);
-  const atual = hora * 60 + minuto;
-  const inicio = minutosDe(cfg.vendedor.inicio);
-  const fim = minutosDe(cfg.vendedor.fim);
+  const lista = intervalos();
+  const atual = minutoAgora(agora);
 
-  if (atual >= inicio && atual <= fim) {
+  const dentro = lista.some((i) => atual >= i.de && atual <= i.ate);
+  if (dentro) {
     return {
       aberta: true,
       esperaMinutos: 0,
       proximaAbertura: agora,
       avisoCliente:
-        'Já estou falando com o fornecedor na China sobre isso. Assim que ele responder eu te aviso aqui 👍',
+        'Já estou pedindo o código pro fornecedor. Assim que ele responder eu te mando aqui 👍',
     };
   }
 
-  // Minutos até a próxima abertura (hoje se ainda não passou, senão amanhã).
-  const espera = atual < inicio ? inicio - atual : 24 * 60 - atual + inicio;
-  const proxima = new Date(agora.getTime() + espera * 60 * 1000);
-
-  const mesmoDiaBR =
-    new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit' }).format(proxima) ===
-    new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit' }).format(agora);
+  // Próximo início: o primeiro que ainda vem hoje, senão o primeiro de amanhã.
+  const proximoHoje = lista.find((i) => i.de > atual);
+  const alvo = proximoHoje ? proximoHoje.de : lista[0].de;
+  const espera = proximoHoje ? alvo - atual : 1440 - atual + alvo;
 
   return {
     aberta: false,
     esperaMinutos: espera,
-    proximaAbertura: proxima,
+    proximaAbertura: new Date(agora.getTime() + espera * 60 * 1000),
     avisoCliente:
-      `Anotado! O fornecedor fica na China (11h na nossa frente) e agora está fora do expediente. ` +
-      `Sua pergunta já está na fila e vai pra ele ${mesmoDiaBR ? 'hoje' : 'amanhã'} por volta das ` +
-      `${horaEmBrasilia(proxima)} no nosso horário. Te aviso assim que ele responder 👍`,
+      `Recebi! O fornecedor está fora do ar agora e volta por volta das ${comoHora(alvo)}. ` +
+      `Sua solicitação já está na fila e assim que ele voltar eu peço o código e te aviso 👍`,
   };
 }
 
-module.exports = { estado, horaEmBrasilia };
+/** Texto curto para o #fila do operador. */
+function resumo(agora = new Date()) {
+  const e = estado(agora);
+  if (e.aberta) return '🟢 fornecedor online';
+  const h = Math.floor(e.esperaMinutos / 60);
+  const m = e.esperaMinutos % 60;
+  return `🌙 fornecedor offline — volta em ${h ? h + 'h' : ''}${m ? doisDigitos(m) : ''}`.trim();
+}
+
+module.exports = { estado, resumo, intervalos };

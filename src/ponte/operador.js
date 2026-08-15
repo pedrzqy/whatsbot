@@ -63,7 +63,7 @@ async function executar(texto) {
     const linhas = [
       `*Ponte* — modo ${cfg.modo}`,
       d.estado === 'aberto' ? `🛑 CONGELADA: ${d.motivo}` : '✅ operando',
-      j.aberta ? '🟢 fornecedor no expediente' : `🌙 fornecedor dorme — volta em ${Math.round(j.esperaMinutos / 60)}h`,
+      janela.resumo(),
       `Cota: ${lim.hora.usado}/${lim.hora.teto} nesta hora · ${lim.dia.usado}/${lim.dia.teto} hoje`,
       '',
     ];

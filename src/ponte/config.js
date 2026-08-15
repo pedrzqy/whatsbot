@@ -19,9 +19,19 @@ module.exports = {
     id: process.env.PONTE_SELLER_ID || 'vendedor-principal',
     // Título EXATO da conversa como aparece na lista de mensagens do app da Taobao.
     chatTitulo: process.env.PONTE_SELLER_CHAT_TITLE || '',
-    tz: process.env.PONTE_SELLER_TZ || 'Asia/Shanghai',
-    inicio: process.env.PONTE_SELLER_INICIO || '09:00',
-    fim: process.env.PONTE_SELLER_FIM || '22:00',
+    // Fuso em que as janelas abaixo estão escritas. Brasília por padrão: a
+    // janela vem da OBSERVAÇÃO do operador, e observar em fuso próprio evita
+    // uma conversão a mais para errar.
+    tz: process.env.PONTE_SELLER_TZ || 'America/Sao_Paulo',
+    // Intervalos "HH:MM-HH:MM" separados por vírgula. Aceita mais de um porque
+    // o fornecedor some no meio do dia. Intervalo não pode cruzar meia-noite —
+    // divida em dois (ex.: "22:00-23:59,00:00-02:00").
+    janelas:
+      process.env.PONTE_SELLER_JANELAS ||
+      // Compatibilidade com a config antiga de intervalo único.
+      (process.env.PONTE_SELLER_INICIO && process.env.PONTE_SELLER_FIM
+        ? `${process.env.PONTE_SELLER_INICIO}-${process.env.PONTE_SELLER_FIM}`
+        : '00:00-15:30,17:15-23:59'),
   },
 
   fila: {

@@ -11,6 +11,11 @@ process.env.PONTE_ATIVA = 'true';
 process.env.PONTE_OPERADOR_NUMERO = '5541999999999';
 process.env.PONTE_BRACO_KEY = 'teste';
 process.env.PONTE_SELLER_CHAT_TITLE = '山王电玩';
+// Fixado aqui de propósito: sem isto o teste leria o .env local e passaria a
+// validar a configuração da máquina, não a lógica. dotenv não sobrescreve
+// process.env já definido, então este valor vence.
+process.env.PONTE_SELLER_TZ = 'America/Sao_Paulo';
+process.env.PONTE_SELLER_JANELAS = '00:00-15:30,17:15-23:59';
 
 const tools = require('./src/tools');
 const codigo = require('./src/ponte/codigo');
@@ -83,11 +88,27 @@ const a1 = politica.paraFornecedor('R$ 10').texto;
 const a2 = politica.paraFornecedor('R$ 10').texto;
 t('mesma entrada = mesma saída', a1 === a2, a1 + ' vs ' + a2);
 
-// ── Janela do fornecedor (fuso da China) ────────────────────
+// ── Janela do fornecedor (observada, em horário de Brasília) ──
+// Config: 00:00-15:30 e 17:15-23:59. O único buraco é 15:30–17:15.
 bloco('janela do fornecedor');
-t('02h na China = fechada', janela.estado(new Date('2026-08-15T18:00:00Z')).aberta === false);
-t('12h na China = aberta', janela.estado(new Date('2026-08-15T04:00:00Z')).aberta === true);
-t('avisa prazo ao cliente', janela.estado(new Date('2026-08-15T18:00:00Z')).avisoCliente.length > 40);
+const emBRT = (hhmm) => {
+  const [h, m] = hhmm.split(':').map(Number);
+  // BRT = UTC-3, então soma 3 para chegar no UTC do mesmo instante.
+  return new Date(Date.UTC(2026, 7, 15, h + 3, m, 0));
+};
+
+t('09h00 BRT = online', janela.estado(emBRT('09:00')).aberta === true);
+t('15h00 BRT = online (antes da pausa)', janela.estado(emBRT('15:00')).aberta === true);
+t('16h00 BRT = OFFLINE (na pausa)', janela.estado(emBRT('16:00')).aberta === false);
+t('17h00 BRT = OFFLINE (ainda na pausa)', janela.estado(emBRT('17:00')).aberta === false);
+t('18h00 BRT = online (voltou)', janela.estado(emBRT('18:00')).aberta === true);
+t('23h00 BRT = online', janela.estado(emBRT('23:00')).aberta === true);
+t('03h00 BRT = online (madrugada)', janela.estado(emBRT('03:00')).aberta === true);
+
+const naPausa = janela.estado(emBRT('16:00'));
+t('espera até 17:15 ≈ 75 min', naPausa.esperaMinutos === 75, naPausa.esperaMinutos + ' min');
+t('aviso cita o horário de volta', /17h15/.test(naPausa.avisoCliente), naPausa.avisoCliente);
+t('dois intervalos configurados', janela.intervalos().length === 2);
 
 // ── Recepção: detecção sem IA ───────────────────────────────
 // Crítico: com BOT_AUTOREPLY=false o handlers retorna antes da IA, então este
