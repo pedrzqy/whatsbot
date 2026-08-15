@@ -17,16 +17,32 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const http = require('http');
+const https = require('https');
 const axios = require('axios');
 const cfg = require('./config');
 const { abrir } = require('./navegador');
 const { Chat, BloqueioDetectado, SeletorNaoEncontrado } = require('./chat');
 const humaniza = require('./humaniza');
 
+/**
+ * SEM keep-alive. É isto que fazia o long-poll morrer com "socket hang up".
+ *
+ * O Node 19+ liga keepAlive por padrão no agente global, então o socket do
+ * /estado ficava guardado para reuso. Só que o servidor descarta socket ocioso
+ * em 5s, e entre o /estado e o /proxima o braço abre a conversa — clique,
+ * espera, verificação de título: passa dos 5s com folga. O /proxima saía por um
+ * socket que o servidor já tinha fechado e morria antes de chegar.
+ *
+ * O braço faz meia dúzia de requisições por minuto; abrir conexão nova em cada
+ * uma não custa nada perto de perder o envio.
+ */
 const api = axios.create({
   baseURL: `${cfg.botUrl}/ponte/braco`,
   timeout: 30000,
   headers: { 'x-braco-key': cfg.chave, 'Content-Type': 'application/json' },
+  httpAgent: new http.Agent({ keepAlive: false }),
+  httpsAgent: new https.Agent({ keepAlive: false }),
 });
 
 let rodando = true;
@@ -339,11 +355,26 @@ async function main() {
       // o #ok sair na hora em vez de esperar o próximo ciclo. Espera curta
       // quando alguém já aguarda resposta, para reler o chat com frequência.
       const esperando = Array.isArray(marcaAtual);
-      const resp = await api.get('/proxima', {
-        params: { espera: esperando ? 6 : 25 },
-        timeout: 45_000,
-        validateStatus: (s) => s === 200 || s === 204,
-      });
+      let resp;
+      try {
+        resp = await api.get('/proxima', {
+          params: { espera: esperando ? 6 : 25 },
+          timeout: 45_000,
+          validateStatus: (s) => s === 200 || s === 204,
+        });
+      } catch (err) {
+        // Conexão caiu durante a espera: deploy do bot, socket reciclado,
+        // rede piscando. NÃO é o bot fora do ar — o /estado respondeu há
+        // segundos. Tenta de novo já, sem os 30s de castigo e sem marcar a
+        // conversa como fechada: reabrir a cada piscada é atividade repetida
+        // na tela do fornecedor, que é o que a gente evita.
+        if (!err.response) {
+          await evento('warn', 'poll', err.message);
+          await dormir(5000);
+          continue;
+        }
+        throw err;
+      }
       if (resp.status === 200) {
         marcaAtual = await executarTarefa(chat, resp.data, titulo);
         await dormir(humaniza.pausaLonga());

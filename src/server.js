@@ -105,10 +105,24 @@ app.post('/webhooks/nerix', async (req, res) => {
   }
 });
 
-app.listen(config.port, () => {
+const server = app.listen(config.port, () => {
   console.log(`whatsbot rodando na porta ${config.port}`);
   if (!config.autoReply) console.log('[bot] AUTO-RESPOSTA DESLIGADA (BOT_AUTOREPLY=false) — não responde no 1-a-1');
   recovery.start(); // recuperação de venda: cutuca quem sumiu no meio da conversa
   community.start(); // agente de comunidade: posta conteúdo no grupo (Fase 1: só saída)
   ponte.iniciar(); // ponte com o fornecedor da Taobao (fila serial + braço robô)
 });
+
+// Socket ocioso vive 65s, não os 5s do padrão.
+//
+// O braço faz long-poll no /ponte/braco/proxima e trabalha entre uma chamada e
+// outra: abrir a conversa, clicar, conferir o título. Com 5s o servidor
+// descartava o socket nesse intervalo e a chamada seguinte morria com "socket
+// hang up" — o braço nunca recebia tarefa e ficava reabrindo a conversa em
+// laço, sem nada no log além do aviso.
+//
+// headersTimeout precisa ser MAIOR que keepAliveTimeout: se for menor, o Node
+// derruba a conexão enquanto ainda espera os cabeçalhos e o problema volta com
+// outra cara.
+server.keepAliveTimeout = 65_000;
+server.headersTimeout = 70_000;
