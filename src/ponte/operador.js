@@ -23,8 +23,8 @@ const AJUDA = [
   '*Comandos*',
   '',
   '*#fila* — quem está sendo atendido e quem espera',
-  '*#liberar* — destrava depois de resolver a verificação da Taobao',
-  '*#taobao 123456* — repassa o código SMS que a Taobao te mandou',
+  '*#liberar* — destrava depois de resolver a verificação',
+  '*#sms 123456* — repassa o código SMS que chegou no seu celular',
   '*#ok <id>* — libera um envio',
   '*#enviar <id>* — manda a resposta ao cliente',
   '*#editar <id> <texto>* — corrige antes de mandar',
@@ -44,7 +44,7 @@ const min = (ms) => Math.round(ms / 60000);
 function ehComando(from, texto) {
   if (!cfg.ativa || !cfg.operador.numero) return false;
   if (from !== cfg.operador.numero) return false;
-  return /^#(fila|liberar|ok|enviar|editar|nao|não|pular|ajuda|taobao|teste|limpar|destravar)\b/i.test(
+  return /^#(fila|liberar|ok|enviar|editar|nao|não|pular|ajuda|sms|taobao|teste|limpar|destravar)\b/i.test(
     String(texto || '').trim(),
   );
 }
@@ -94,9 +94,9 @@ async function executar(texto) {
   // Código SMS que a Taobao mandou para o celular do operador. Fica guardado
   // até o braço buscar no próximo ciclo (≤1 min). Não é bypass de segurança:
   // é o dono da conta repassando o código que só ele recebeu.
-  if (cmd === 'taobao') {
+  if (cmd === 'sms' || cmd === 'taobao') {
     const codigo = (id || '').replace(/\D/g, '');
-    if (!codigo) return 'Manda assim: *#taobao 123456*';
+    if (!codigo) return 'Manda assim: *#sms 123456*';
     if (codigo.length < 4 || codigo.length > 8) {
       return `"${codigo}" não parece um código de SMS (espero 4 a 8 dígitos).`;
     }

@@ -219,9 +219,9 @@ async function receberDoFornecedor(entrada) {
   persistAgora();
 
   await alertar(
-    `⚠️ *Fornecedor não mandou código*\n\n` +
+    `⚠️ *Resposta sem código*\n\n` +
       `Cliente: *${at.nome}* · usuário \`${at.usuario}\`\n\n` +
-      `*Ele disse:* ${entrada.texto}\n` +
+      `*Original:* ${entrada.texto}\n` +
       `*Tradução:* ${traduzido}\n\n` +
       `*#enviar ${aprovacao.id}* manda essa explicação ao cliente\n` +
       `*#editar ${aprovacao.id} <texto>* · *#nao ${aprovacao.id}* descarta`,
@@ -402,7 +402,7 @@ async function bloqueioDetectado(motivo, printPath) {
       `2. Depois de resolver, responde *#liberar*`;
 
   await alertar(
-    `🛑 *Verificação da Taobao*\n\n${motivo}\n\n` +
+    `🛑 *Verificação na tela*\n\n${motivo}\n\n` +
       `Envios congelados. ${esperando} cliente(s) na fila.\n\n${comoResolver}`,
     printPath,
   );

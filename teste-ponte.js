@@ -313,7 +313,7 @@ const OP = '5541999999999';
   // Vale também para as mensagens do OPERADOR: elas saem pelo mesmo número
   // comercial, e é a conta inteira que corre risco, não só o 1-a-1 do cliente.
   bloco('nada de "braço"/"robô"/"bot" no WhatsApp');
-  const AUTOMACAO = /bra[çc]o|rob[ôo]|\bbot\b|autom[aá]tico\b/i;
+  const AUTOMACAO = /bra[çc]o|rob[ôo]|\bbot\b|autom[aá]tico\b|taobao|fornecedor/i;
 
   for (const cmd of ['#ajuda', '#fila', '#limpar', '#destravar', '#teste']) {
     const saida = String(await operador.executar(cmd));

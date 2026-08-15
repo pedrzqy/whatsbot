@@ -647,9 +647,24 @@ class Chat {
       (els, args) => {
         const { classeSelf, selConteudo, ruido } = args;
         const saida = [];
+        const nickDe = (el) => ((el.innerText || '').split('\n')[0] || '').trim();
+
+        // Nicks que já apareceram numa mensagem NOSSA.
+        //
+        // A classe .self é a checagem principal, mas ela falha justamente no
+        // balão de imagem colada — e aí a nossa própria foto vira "resposta do
+        // fornecedor". O nick é o mesmo em toda mensagem da mesma conta, então
+        // ele conserta o que a classe deixou passar, sem precisar configurar
+        // nada: quem é nosso se identifica sozinho na primeira mensagem de texto.
+        const meusNicks = new Set();
+        for (const el of els) {
+          if (el.classList.contains(classeSelf)) meusNicks.add(nickDe(el));
+        }
+        meusNicks.delete('');
 
         for (const el of els) {
           if (el.classList.contains(classeSelf)) continue; // mensagem nossa
+          if (meusNicks.has(nickDe(el))) continue; // nossa também — a classe falhou
 
           // .content tem que ser buscado DENTRO do balão: a mesma classe é
           // usada nos itens da lista lateral e traria nome de loja.
@@ -668,27 +683,29 @@ class Chat {
             .join(' ')
             .trim();
 
-          // Balão SEM texto mas COM imagem: o fornecedor respondeu mandando um
-          // print em vez de digitar. Sem este ramo a mensagem seria descartada
-          // em silêncio e o cliente esperaria até o timeout de 4h sem ninguém
-          // saber por quê. Marcamos para o operador olhar — ler código de
-          // dentro de imagem por OCR não tem confiança suficiente para
-          // entregar sozinho (trocar 8 por 3 num código é prejuízo).
-          const temImagem = Boolean(
-            el.querySelector('img, [class*="image"], [class*="picture"]'),
-          );
-          if (!limpo && !temImagem) continue;
+          // Balão SEM TEXTO é DESCARTADO — inclusive quando tem imagem.
+          //
+          // A versão anterior reportava "[respondeu com uma imagem]", e isso
+          // virava um alerta pedindo decisão do operador. Só que, na prática,
+          // esse balão quase sempre era a NOSSA foto lida como se fosse dele:
+          // um alarme falso a cada envio, pedindo ação sobre nada.
+          //
+          // E mesmo quando a imagem é de verdade dele, não há o que fazer com
+          // ela: código lido por OCR não tem confiança para ser entregue (trocar
+          // 8 por 3 faz o cliente digitar código inválido na conta de terceiro),
+          // então o alerta não traz decisão nenhuma — só ruído.
+          //
+          // O caso real não fica perdido: o atendimento vence no timeout e o
+          // operador é avisado, com a tela do chat a um clique.
+          if (!limpo) continue;
 
           // O innerText do balão traz "nick\nAAAA-MM-DD HH:MM:SS\nconteúdo".
           const bruto = el.innerText || '';
           const mData = bruto.match(/\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}/);
           const quando = mData ? mData[0] : '';
-          const nick = (bruto.split('\n')[0] || '').trim();
+          const nick = nickDe(el);
 
-          // Sem "fornecedor" no texto: este conteúdo pode chegar ao cliente
-          // pelo #enviar, e para ele a Phaze é quem gera o código.
-          const conteudo = limpo || '[respondeu com uma imagem]';
-          saida.push({ chave: `${nick}|${quando}|${conteudo}`, texto: conteudo, quando });
+          saida.push({ chave: `${nick}|${quando}|${limpo}`, texto: limpo, quando });
         }
 
         return saida;
