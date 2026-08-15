@@ -273,9 +273,18 @@ class Chat {
     for (const sel of SEL.voltarAoFundo.candidatos) {
       const botao = await this.frame.$(sel).catch(() => null);
       if (!botao) continue;
-      await this._clicar(botao, { timeout: 4000 }).catch(() => {});
-      await this.pagina.waitForTimeout(humaniza.ms(400, 900));
-      return;
+
+      // Só considera resolvido se o clique DEU CERTO. Engolir a falha e sair
+      // deixava a lista onde estava e ainda pulava a rolagem de reserva — o
+      // pior dos dois mundos, e silencioso. O botão pode existir no DOM e
+      // estar coberto por um modal, que é justamente quando a reserva importa.
+      try {
+        await this._clicar(botao, { timeout: 4000 });
+        await this.pagina.waitForTimeout(humaniza.ms(400, 900));
+        return;
+      } catch {
+        // cai na rolagem manual abaixo
+      }
     }
 
     // 2) Reserva, para quando a Taobao mudar o botão de nome: rolagem manual.

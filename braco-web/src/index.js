@@ -277,7 +277,18 @@ async function main() {
   // Diagnóstico ANTES de qualquer coisa que possa travar. A primeira versão ia
   // direto para abrir(), então quando o navegador não subia o container ficava
   // mudo — sem uma linha dizendo onde parou.
-  console.log('[braço] iniciando');
+  // Os dois serviços sobem SEPARADOS no Easypanel, e deployar só um já causou
+  // bug várias vezes. Compare esta data com a que o whatsbot imprime: se não
+  // batem, o deploy ficou pela metade e o sintoma pode já estar corrigido do
+  // outro lado — foi tempo perdido depurando isso mais de uma vez.
+  let build = 'desconhecida';
+  try {
+    build = fs.statSync(__filename).mtime.toISOString().slice(0, 16).replace('T', ' ');
+  } catch {
+    /* sem mtime não é motivo para não subir */
+  }
+
+  console.log(`[braço] iniciando — build de ${build} UTC`);
   console.log(`[braço] BOT_URL = ${cfg.botUrl}`);
   console.log(`[braço] chave   = ${cfg.chave ? 'definida' : 'AUSENTE'}`);
   console.log(`[braço] DISPLAY = ${process.env.DISPLAY || '(vazio — xvfb não exportou)'}`);

@@ -105,8 +105,25 @@ app.post('/webhooks/nerix', async (req, res) => {
   }
 });
 
+/**
+ * Data do código que está rodando de verdade.
+ *
+ * Os dois serviços sobem SEPARADOS no Easypanel, e deployar só um já causou
+ * bug várias vezes — com o log mudo sobre qual versão estava no ar, o tempo ia
+ * embora depurando um sintoma que outro deploy já tinha resolvido. Agora a
+ * primeira linha responde: se as duas datas não batem, o deploy ficou pela
+ * metade.
+ */
+function dataDoBuild(arquivo) {
+  try {
+    return require('fs').statSync(arquivo).mtime.toISOString().slice(0, 16).replace('T', ' ');
+  } catch {
+    return 'desconhecida';
+  }
+}
+
 const server = app.listen(config.port, () => {
-  console.log(`whatsbot rodando na porta ${config.port}`);
+  console.log(`whatsbot rodando na porta ${config.port} — build de ${dataDoBuild(__filename)} UTC`);
   if (!config.autoReply) console.log('[bot] AUTO-RESPOSTA DESLIGADA (BOT_AUTOREPLY=false) — não responde no 1-a-1');
   recovery.start(); // recuperação de venda: cutuca quem sumiu no meio da conversa
   community.start(); // agente de comunidade: posta conteúdo no grupo (Fase 1: só saída)
@@ -125,4 +142,36 @@ const server = app.listen(config.port, () => {
 // derruba a conexão enquanto ainda espera os cabeçalhos e o problema volta com
 // outra cara.
 server.keepAliveTimeout = 65_000;
+
+// Encerramento limpo: SALVA O ESTADO antes de morrer.
+//
+// O estado da ponte é gravado com debounce de 400ms (estado.js). Sem isto, o
+// SIGTERM de um deploy no instante errado levava junto a fila — quem estava
+// esperando código sumia da fila e ficava sem resposta e sem alerta, e o
+// operador não tinha como saber que existiu.
+//
+// Sai com 0 de propósito: encerramento pedido pelo orquestrador não é falha, e
+// código de erro aqui polui o log do painel com "crash" que nunca houve.
+let encerrando = false;
+for (const sinal of ['SIGTERM', 'SIGINT']) {
+  process.on(sinal, () => {
+    if (encerrando) return; // segundo sinal não reentra
+    encerrando = true;
+    console.log(`[whatsbot] ${sinal} recebido — salvando estado e encerrando`);
+
+    try {
+      require('./ponte/estado').persistAgora();
+      console.log('[whatsbot] estado salvo');
+    } catch (err) {
+      console.error('[whatsbot] falha ao salvar estado no encerramento:', err.message);
+    }
+
+    // Teto: se uma conexão pendurada (o long-poll do braço vive 65s) segurar o
+    // close, não dá para ficar esperando — o orquestrador manda SIGKILL e aí o
+    // encerramento não termina de qualquer jeito.
+    const forcar = setTimeout(() => process.exit(0), 5000);
+    forcar.unref();
+    server.close(() => process.exit(0));
+  });
+}
 server.headersTimeout = 70_000;
