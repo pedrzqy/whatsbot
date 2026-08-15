@@ -181,12 +181,19 @@ async function receberDoFornecedor(entrada) {
   }
 
   // Não é código: é problema. Traduz só para o operador entender e decidir.
+  //
+  // Marcador sintético do braço ("respondeu com uma imagem") já vem em
+  // português — mandar para o tradutor gastaria chamada de LLM para traduzir
+  // português em português.
+  const jaEmPortugues = entrada.texto.startsWith('[o fornecedor respondeu');
   let traduzido = entrada.texto;
-  try {
-    const t = await tradutor.paraCliente(entrada.texto, at.historico || []);
-    traduzido = t.traducao;
-  } catch {
-    traduzido = '(não consegui traduzir)';
+  if (!jaEmPortugues) {
+    try {
+      const t = await tradutor.paraCliente(entrada.texto, at.historico || []);
+      traduzido = t.traducao;
+    } catch {
+      traduzido = '(não consegui traduzir)';
+    }
   }
 
   const aprovacao = {

@@ -210,15 +210,23 @@ class Chat {
               break;
             }
           }
-          if (!texto) continue;
-
           const limpo = texto
             .split('\n')
             .map((l) => l.trim())
             .filter((l) => l && !ruido.includes(l))
             .join(' ')
             .trim();
-          if (!limpo) continue;
+
+          // Balão SEM texto mas COM imagem: o fornecedor respondeu mandando um
+          // print em vez de digitar. Sem este ramo a mensagem seria descartada
+          // em silêncio e o cliente esperaria até o timeout de 4h sem ninguém
+          // saber por quê. Marcamos para o operador olhar — ler código de
+          // dentro de imagem por OCR não tem confiança suficiente para
+          // entregar sozinho (trocar 8 por 3 num código é prejuízo).
+          const temImagem = Boolean(
+            el.querySelector('img, [class*="image"], [class*="picture"]'),
+          );
+          if (!limpo && !temImagem) continue;
 
           // O innerText do balão traz "nick\nAAAA-MM-DD HH:MM:SS\nconteúdo".
           const bruto = el.innerText || '';
@@ -226,7 +234,8 @@ class Chat {
           const quando = mData ? mData[0] : '';
           const nick = (bruto.split('\n')[0] || '').trim();
 
-          saida.push({ chave: `${nick}|${quando}|${limpo}`, texto: limpo, quando });
+          const conteudo = limpo || '[o fornecedor respondeu com uma imagem]';
+          saida.push({ chave: `${nick}|${quando}|${conteudo}`, texto: conteudo, quando });
         }
 
         return saida;
