@@ -30,7 +30,11 @@ const AJUDA = [
   '*#editar <id> <texto>* — corrige antes de mandar',
   '*#nao <id>* — descarta',
   '*#pular* — encerra o atendimento atual e chama o próximo',
+  '*#teste* — vira cliente por 30 min, para testar o fluxo do seu número',
 ].join('\n');
+
+/** Quanto tempo o operador fica valendo como cliente depois do #teste. */
+const TESTE_MS = 30 * 60 * 1000;
 
 const min = (ms) => Math.round(ms / 60000);
 
@@ -38,7 +42,7 @@ const min = (ms) => Math.round(ms / 60000);
 function ehComando(from, texto) {
   if (!cfg.ativa || !cfg.operador.numero) return false;
   if (from !== cfg.operador.numero) return false;
-  return /^#(fila|liberar|ok|enviar|editar|nao|não|pular|ajuda|taobao)\b/i.test(
+  return /^#(fila|liberar|ok|enviar|editar|nao|não|pular|ajuda|taobao|teste)\b/i.test(
     String(texto || '').trim(),
   );
 }
@@ -55,6 +59,33 @@ async function executar(texto) {
   const argumento = palavras.join(' ');
 
   if (cmd === 'ajuda') return AJUDA;
+
+  // ── #teste ─────────────────────────────────────────────
+  // O número do operador é ignorado pela recepção de propósito: ele recebe os
+  // alertas e responde com #comandos, e não faz sentido pedir código a si
+  // mesmo. Só que isso também impede o operador de testar o fluxo do próprio
+  // celular — que é justamente o que ele quer fazer antes de confiar no bot.
+  //
+  // Aqui ele vira cliente por meia hora. Não é perigoso: em copiloto nada sai
+  // para o fornecedor sem #ok, os #comandos continuam sendo lidos primeiro
+  // (handlers.js), e o prazo vence sozinho para ninguém esquecer ligado.
+  if (cmd === 'teste') {
+    const ligado = dados.testeOperador?.ate > Date.now();
+    if (ligado || /^(off|fim|parar|nao|não)$/i.test(id || '')) {
+      dados.testeOperador = null;
+      persistAgora();
+      return '🔕 Modo teste desligado. Seu número voltou a ser só operador.';
+    }
+    dados.testeOperador = { ate: Date.now() + TESTE_MS };
+    persistAgora();
+    return (
+      '🧪 *Modo teste ligado por 30 min.*\n\n' +
+      'Agora suas mensagens normais entram como se fossem de um cliente. ' +
+      'Manda *preciso do código* e segue o passo a passo.\n\n' +
+      '_Os #comandos continuam funcionando. Nada vai ao fornecedor sem #ok. ' +
+      'Mande #teste de novo para desligar antes da hora._'
+    );
+  }
 
   // ── #taobao <codigo> ───────────────────────────────────
   // Código SMS que a Taobao mandou para o celular do operador. Fica guardado

@@ -234,5 +234,35 @@ t('reconhece #fila do operador', operador.ehComando('5541999999999', '#fila') ==
 t('ignora #fila de estranho', operador.ehComando('5511888887777', '#fila') === false);
 t('ignora conversa normal', operador.ehComando('5541999999999', 'oi tudo bem') === false);
 
-console.log('\n' + (falhas ? falhas + ' FALHA(S)' : 'todos os ' + '' + 'testes passaram'));
-process.exit(falhas ? 1 : 0);
+// ── #teste: operador vira cliente ───────────────────────────
+// Sem isto o operador não consegue testar o fluxo do próprio celular: a
+// recepção ignora o número dele de propósito.
+const OP = '5541999999999';
+
+(async () => {
+  bloco('#teste — operador vira cliente');
+  t('#teste é comando', operador.ehComando(OP, '#teste') === true);
+  t('operador ignorado antes',
+    recepcao.avaliar(OP, 'preciso do codigo', null).acao === 'ignorar');
+
+  let saida = await operador.executar('#teste');
+  t('confirma que ligou', /teste ligado/i.test(saida), saida.split('\n')[0]);
+
+  let r3 = recepcao.avaliar(OP, 'preciso do codigo', null);
+  t('agora o operador é atendido', r3.acao === 'responder', r3.acao);
+  t('e recebe o tutorial', /foto da tela do console/i.test(r3.mensagem || ''));
+
+  saida = await operador.executar('#teste');
+  t('segundo #teste desliga', /desligado/i.test(saida), saida);
+  t('volta a ser ignorado',
+    recepcao.avaliar(OP, 'preciso do codigo', null).acao === 'ignorar');
+
+  // Rede de segurança: se o prazo vencer, volta a ser só operador sozinho.
+  await operador.executar('#teste');
+  require('./src/ponte/estado').dados.testeOperador = { ate: Date.now() - 1 };
+  t('prazo vencido desliga sozinho',
+    recepcao.avaliar(OP, 'preciso do codigo', null).acao === 'ignorar');
+
+  console.log('\n' + (falhas ? falhas + ' FALHA(S)' : 'todos os testes passaram'));
+  process.exit(falhas ? 1 : 0);
+})();

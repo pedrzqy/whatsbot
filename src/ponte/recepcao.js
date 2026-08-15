@@ -143,8 +143,13 @@ function repetiuAgora(item, aviso) {
  */
 function avaliar(from, texto, imagem) {
   if (!cfg.ativa) return { acao: 'ignorar' };
-  // O operador tem os comandos dele; não entra pelo fluxo de cliente.
-  if (from === cfg.operador.numero) return { acao: 'ignorar' };
+
+  // O operador tem os comandos dele; não entra pelo fluxo de cliente — a não
+  // ser que tenha ligado o modo teste com #teste, para conferir o passo a passo
+  // do próprio celular. O prazo vence sozinho (ver operador.js).
+  if (from === cfg.operador.numero && !(dados.testeOperador?.ate > Date.now())) {
+    return { acao: 'ignorar' };
+  }
 
   limparVencidos();
 
