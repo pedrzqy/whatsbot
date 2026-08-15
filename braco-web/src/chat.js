@@ -17,9 +17,16 @@
  */
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
+const { execFile, spawn } = require('child_process');
 const frameHelper = require('./frame');
 const humaniza = require('./humaniza');
+
+const rodar = (cmd, args) =>
+  new Promise((ok, erro) =>
+    execFile(cmd, args, (e, stdout, stderr) => (e ? erro(new Error(stderr || e.message)) : ok(stdout))),
+  );
 
 const SEL = JSON.parse(
   fs.readFileSync(path.join(__dirname, '..', 'seletores.json'), 'utf8'),
@@ -278,12 +285,15 @@ class Chat {
    * Os ids html5_* são gerados pelo plupload a CADA carregamento, então a
    * escolha não pode ser por id nem por posição. Vamos por ordem de confiança:
    *
-   *   1. input com accept de imagem — é o uploader de imagem se declarando;
-   *   2. colar a imagem no campo de texto, como um humano faz com print;
-   *   3. primeiro input que aceitar — melhor mandar como arquivo do que nada.
+   *   1. Ctrl+V de verdade — print no clipboard do X, tecla apertada no
+   *      navegador. É o que um humano faz, e colagem nunca vira anexo;
+   *   2. colagem forjada (evento de paste), se faltar xclip no container;
+   *   3. input com accept de imagem — o uploader de imagem se declarando;
+   *   4. primeiro input que aceitar — melhor mandar como arquivo do que nada.
    *
-   * O passo 2 só entra se o 1 falhar, e só avança para o 3 se nada tiver saído:
-   * assim uma tentativa frustrada não deixa lixo no chat do fornecedor.
+   * Cada passo só entra se o anterior não tiver posto nada no chat, conferido
+   * pela contagem de mensagens nossas. Assim tentativa frustrada não deixa
+   * lixo no chat do fornecedor nem manda a mesma foto duas vezes.
    *
    * @returns {Promise<{via:string, comoArquivo:boolean}>}
    */
@@ -296,34 +306,39 @@ class Chat {
     const antes = await this._quantasMinhas();
     let via = null;
 
-    // ── 1. O uploader de imagem se declara pelo accept ────────
-    const iImagem = mapa.findIndex((m) => /image|jpg|jpeg|png|gif|bmp/i.test(m.accept));
-    if (iImagem !== -1) {
-      const inputs = await this.frame.$$("input[type='file']");
-      try {
-        await inputs[iImagem].setInputFiles(caminhoLocal);
-        via = `accept "${mapa[iImagem].accept}"`;
-      } catch (err) {
-        console.warn(`[chat] input de imagem recusou: ${err.message}`);
-      }
+    // ── 1. Ctrl+V de verdade ──────────────────────────────────
+    try {
+      if (await this._tentar(() => this._ctrlV(caminhoLocal), antes)) via = 'Ctrl+V';
+    } catch (err) {
+      console.warn(`[chat] Ctrl+V falhou: ${err.message}`);
     }
 
-    // ── 2. Colar, como quem dá Ctrl+V num print ───────────────
+    // ── 2. Colagem forjada ────────────────────────────────────
     if (!via) {
       try {
-        await this._colarImagem(caminhoLocal);
-        via = 'colagem';
+        if (await this._tentar(() => this._colarForjado(caminhoLocal), antes)) via = 'colagem';
       } catch (err) {
-        console.warn(`[chat] colagem falhou: ${err.message}`);
+        console.warn(`[chat] colagem forjada falhou: ${err.message}`);
       }
     }
 
-    await this.pagina.waitForTimeout(humaniza.ms(2500, 5000));
+    // ── 3. Uploader que se declara de imagem ──────────────────
+    if (!via) {
+      const i = mapa.findIndex((m) => /image|jpg|jpeg|png|gif|bmp/i.test(m.accept));
+      if (i !== -1) {
+        const inputs = await this.frame.$$("input[type='file']");
+        try {
+          await inputs[i].setInputFiles(caminhoLocal);
+          await this.pagina.waitForTimeout(humaniza.ms(2500, 5000));
+          via = `accept "${mapa[i].accept}"`;
+        } catch (err) {
+          console.warn(`[chat] input de imagem recusou: ${err.message}`);
+        }
+      }
+    }
 
-    // ── 3. Último recurso: só se NADA saiu ────────────────────
-    // A checagem evita mandar a mesma foto duas vezes quando a colagem
-    // funcionou mas demorou a aparecer.
-    if ((await this._quantasMinhas()) === antes) {
+    // ── 4. Último recurso: qualquer input ─────────────────────
+    if (!via && (await this._quantasMinhas()) === antes) {
       const inputs = await this.frame.$$("input[type='file']");
       if (!inputs.length) {
         throw new SeletorNaoEncontrado('nenhum input[type=file] no frame do chat');
@@ -355,13 +370,77 @@ class Chat {
   }
 
   /**
-   * Cola a imagem no campo de texto.
+   * Roda uma tentativa de colagem e confirma que a foto SAIU.
    *
-   * É o caminho que um humano usa para mandar print: recorta e dá Ctrl+V. O
-   * chat trata a colagem como imagem, nunca como anexo — por isso ela serve de
-   * plano B quando não dá para identificar o uploader de imagem pelo accept.
+   * Colar não envia: a imagem fica na caixa de texto esperando o 发送, igual
+   * ao que acontece quando a gente cola um print. Por isso o clique no botão
+   * faz parte da tentativa — sem ele a foto some no próximo envio de texto.
    */
-  async _colarImagem(caminhoLocal) {
+  async _tentar(acao, antes) {
+    await acao();
+    await this.pagina.waitForTimeout(humaniza.ms(1200, 2200));
+
+    if ((await this._quantasMinhas()) > antes) return true; // enviou sozinho
+
+    try {
+      const botao = await this._achar('botaoEnviar', { timeout: 5000 });
+      await botao.el.click({ delay: humaniza.msCurto() });
+    } catch {
+      // sem botão visível: se a colagem não pegou, não há o que enviar
+    }
+    await this.pagina.waitForTimeout(humaniza.ms(2000, 3500));
+    return (await this._quantasMinhas()) > antes;
+  }
+
+  /**
+   * Ctrl+V real: põe o print no clipboard do X e aperta a tecla no navegador.
+   *
+   * Converte para PNG antes porque o Chromium lê o clipboard do X pelo alvo
+   * image/png — um JPEG oferecido como image/jpeg ele ignora, e o Ctrl+V não
+   * cola nada, sem erro nenhum.
+   *
+   * O xclip precisa continuar vivo enquanto o Chrome pede o conteúdo: quem
+   * anuncia a seleção no X é o processo dono, não o sistema. Por isso ele fica
+   * em segundo plano e só morre depois da colagem.
+   */
+  async _ctrlV(caminhoLocal) {
+    let png = caminhoLocal;
+    let temporario = null;
+
+    if (!/\.png$/i.test(caminhoLocal)) {
+      temporario = path.join(os.tmpdir(), `clip_${Date.now()}.png`);
+      await rodar('convert', [caminhoLocal, temporario]);
+      png = temporario;
+    }
+
+    const xclip = spawn('xclip', ['-selection', 'clipboard', '-t', 'image/png', '-i', png], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    xclip.unref();
+
+    try {
+      await this.pagina.waitForTimeout(600); // o xclip precisa assumir a seleção
+      const campo = await this._achar('campoTexto', { timeout: 8000 });
+      await campo.el.click({ delay: humaniza.msCurto() });
+      await this.pagina.keyboard.press('Control+V');
+      await this.pagina.waitForTimeout(humaniza.ms(800, 1500));
+    } finally {
+      // Solta a seleção só no fim: matar antes deixaria o Chrome colando vazio.
+      setTimeout(() => {
+        try { process.kill(xclip.pid); } catch { /* já saiu sozinho */ }
+        if (temporario) try { fs.unlinkSync(temporario); } catch { /* já sumiu */ }
+      }, 4000);
+    }
+  }
+
+  /**
+   * Colagem forjada, para quando o container não tem xclip.
+   *
+   * Menos fiel que o Ctrl+V — o evento não é confiável (isTrusted=false) e um
+   * chat pode ignorá-lo —, mas não depende de clipboard nem de binário externo.
+   */
+  async _colarForjado(caminhoLocal) {
     const b64 = fs.readFileSync(caminhoLocal).toString('base64');
     const nome = path.basename(caminhoLocal);
     const seletores = SEL.campoTexto.candidatos;

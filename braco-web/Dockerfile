@@ -27,8 +27,17 @@ WORKDIR /app
 ENV DEBIAN_FRONTEND=noninteractive \
     TZ=America/Sao_Paulo
 
+# xclip + imagemagick existem para o Ctrl+V da foto.
+#
+# O chat da Taobao tem uploader de imagem e uploader de arquivo, e o de arquivo
+# manda um cartão "下载文件" que o fornecedor não abre. Colar é o caminho que
+# nunca vira anexo — mas colar de verdade exige o print no clipboard do X, não
+# um evento de paste forjado.
+#
+# O imagemagick converte para PNG antes: o Chromium lê o clipboard do X pelo
+# alvo image/png, e um JPEG oferecido como image/jpeg ele simplesmente ignora.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      x11vnc novnc websockify \
+      x11vnc novnc websockify xclip imagemagick \
     && rm -rf /var/lib/apt/lists/*
 
 # O pacote noVNC do Debian não traz index.html, então a raiz da URL mostra a
