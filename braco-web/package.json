@@ -1,0 +1,21 @@
+{
+  "name": "phaze-braco-web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Braço da Ponte Phaze — opera o chat web da Taobao via Playwright",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/index.js",
+    "login": "node src/login.js",
+    "inspecionar": "node src/inspecionar.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "axios": "^1.7.7",
+    "dotenv": "^16.4.5",
+    "playwright": "^1.49.1"
+  }
+}

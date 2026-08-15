@@ -5,3 +5,10 @@ data/
 .DS_Store
 .claude/
 *.zip
+
+# Braço (Playwright)
+# perfil-chrome guarda cookies e tokens de device da Taobao — é sessão
+# autenticada, nunca vai para o repositório.
+braco-web/perfil-chrome/
+braco-web/inspecao/
+braco-web/prints/

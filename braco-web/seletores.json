@@ -1,0 +1,90 @@
+{
+  "_leia": [
+    "MAPA DO DOM DO CHAT WEB DA TAOBAO — valores REAIS, extraídos do chat do",
+    "山王电玩 em 2026-08-15 via `npm run inspecionar`.",
+    "",
+    "TUDO aqui é resolvido DENTRO do iframe chat-core (ver src/frame.js).",
+    "Seletor aplicado na página externa não acha nada.",
+    "",
+    "Quando a Taobao mudar o front, conserte AQUI, não no JavaScript. Cada campo",
+    "aceita uma lista; o braço usa o primeiro que existir, então dá para acumular",
+    "o seletor novo sem apagar o antigo e sobreviver a duas versões ao mesmo tempo.",
+    "",
+    "Para redescobrir: npm run inspecionar"
+  ],
+
+  "conversaNaLista": {
+    "_o_que_e": "Item da lista lateral. {titulo} é trocado pelo nome da loja (山王电玩).",
+    "candidatos": [
+      ".conversation-item:has-text('{titulo}')",
+      ".content:has-text('{titulo}')"
+    ]
+  },
+
+  "campoTexto": {
+    "_o_que_e": "Onde se digita. É um <pre class='edit'> contenteditable, não um textarea — por isso o braço usa type() e não fill().",
+    "candidatos": ["pre.edit", ".editBox pre", "[contenteditable='true']"]
+  },
+
+  "botaoEnviar": {
+    "_o_que_e": "Botão 发送. Prefira .send-btn: .next-btn é a classe genérica do design system da Alibaba e casaria com qualquer botão da tela.",
+    "candidatos": ["button.send-btn", ".send-btn", "button:has-text('发送')"]
+  },
+
+  "inputArquivo": {
+    "_o_que_e": "input[type=file] escondido, para anexar a foto. ATENÇÃO: os ids html5_* são gerados pelo plupload a cada carregamento — NUNCA use id aqui. O braço tenta cada input até um aceitar.",
+    "candidatos": ["input[type='file']"]
+  },
+
+  "mensagem": {
+    "_o_que_e": "Cada mensagem da conversa.",
+    "candidatos": [".message-item", ".item"]
+  },
+
+  "minhaMensagem": {
+    "_o_que_e": "Classe que marca mensagem NOSSA. O que NÃO tem isto é do fornecedor. Muito mais confiável que heurística de posição.",
+    "classe": "self",
+    "seletorDoFornecedor": ".message-item:not(.self)"
+  },
+
+  "conteudoDaMensagem": {
+    "_o_que_e": "Texto da mensagem dentro do balão. Precisa ser escopado dentro de .message-item: a classe .content também é usada nos itens da lista lateral e pegaria os nomes das lojas.",
+    "candidatos": [".content", ".text"]
+  },
+
+  "bloqueios": {
+    "_o_que_e": "Sinais de verificação anti-bot. Achou qualquer um, o braço PARA e chama humano. Nunca tenta resolver.",
+    "seletores": [
+      ".nc_wrapper",
+      "#nc_1_n1z",
+      ".nc-container",
+      ".baxia-dialog",
+      "#baxia-dialog-content",
+      "iframe[src*='captcha']",
+      ".J_MIDDLEWARE_FRAME_WIDGET"
+    ],
+    "textos": [
+      "请拖动滑块",
+      "安全验证",
+      "请登录",
+      "登录已过期",
+      "账号异常",
+      "操作过于频繁",
+      "向右滑动验证"
+    ]
+  },
+
+  "ruido": {
+    "_o_que_e": "Textos que aparecem dentro do balão mas não são conteúdo. 已读 ('lido') aparece como linha própria e viraria mensagem fantasma se não fosse filtrado.",
+    "textos": [
+      "已读",
+      "未读",
+      "以下是历史消息",
+      "对方正在输入",
+      "消息已撤回",
+      "系统消息",
+      "自动回复",
+      "该消息类型暂不支持"
+    ]
+  }
+}
