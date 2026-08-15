@@ -30,6 +30,7 @@ const AJUDA = [
   '*#editar <id> <texto>* — corrige antes de mandar',
   '*#nao <id>* — descarta',
   '*#limpar* — descarta tudo que está esperando aprovação',
+  '*#destravar* — devolve à fila envio que ficou preso',
   '*#pular* — encerra o atendimento atual e chama o próximo',
   '*#teste* — vira cliente por 30 min, para testar o fluxo do seu número',
 ].join('\n');
@@ -43,7 +44,7 @@ const min = (ms) => Math.round(ms / 60000);
 function ehComando(from, texto) {
   if (!cfg.ativa || !cfg.operador.numero) return false;
   if (from !== cfg.operador.numero) return false;
-  return /^#(fila|liberar|ok|enviar|editar|nao|não|pular|ajuda|taobao|teste|limpar)\b/i.test(
+  return /^#(fila|liberar|ok|enviar|editar|nao|não|pular|ajuda|taobao|teste|limpar|destravar)\b/i.test(
     String(texto || '').trim(),
   );
 }
@@ -170,6 +171,23 @@ async function executar(texto) {
     return '✅ Ponte liberada. O braço volta a operar no próximo ciclo (até 1 min).';
   }
 
+  // ── #destravar ─────────────────────────────────────────
+  // Envio que ficou em 'executando' sem dono — o braço o pegou e morreu antes
+  // de reportar (deploy, OOM, timeout). O /proxima só entrega 'pendente',
+  // então ele some da vista de todo mundo: o braço fica ocioso achando que não
+  // há trabalho e o cliente espera as 4h do timeout. Existe recuperação
+  // automática depois de 5 min; isto é o botão para não esperar.
+  if (cmd === 'destravar') {
+    const presas = dados.tarefas.filter((t) => t.estado === 'executando');
+    if (!presas.length) return 'Nenhum envio preso. Veja o *#fila*.';
+    for (const t of presas) {
+      t.estado = 'pendente';
+      t.tentativas = Math.max(0, t.tentativas - 1);
+    }
+    persistAgora();
+    return `🔧 ${presas.length} envio(s) de volta na fila. O braço pega em segundos.`;
+  }
+
   // ── #limpar ────────────────────────────────────────────
   // Existe para teste: cada rodada deixa uma tarefa esperando #ok, e depois de
   // algumas o operador tem uma pilha de lixo que atrapalha ler o #fila.
@@ -200,6 +218,17 @@ async function executar(texto) {
   if (cmd === 'ok') {
     const t = dados.tarefas.find((x) => x.id === id);
     if (!t) return `Não achei a tarefa \`${id}\`.`;
+
+    // 'executando' com o braço sumido é o caso em que o operador MAIS insiste
+    // no #ok — e recusar aqui era um beco sem saída: a mensagem dizia "já está
+    // executando" enquanto ninguém estava executando nada. Reenfileira.
+    if (t.estado === 'executando') {
+      t.estado = 'pendente';
+      t.tentativas = Math.max(0, t.tentativas - 1);
+      persistAgora();
+      return '🔧 Esse envio tinha ficado preso sem dono. Devolvi para a fila — sai em segundos.';
+    }
+
     if (t.estado !== 'aguardando_aprovacao') return `Essa tarefa já está como *${t.estado}*.`;
     t.estado = 'pendente';
     persistAgora();
