@@ -103,20 +103,33 @@ async function garantirLogin(pagina, chat) {
       }
     }
 
-    // Dispara o SMS uma vez a cada 5 min, não a cada ciclo — senão a Taobao
-    // trata como abuso e passa a recusar o envio.
-    if (Date.now() - smsPedidoEm > 5 * 60 * 1000) {
+    // 15 min entre avisos, não 5. Repetir de mais rebate na Taobao (pedidos de
+    // SMS seguidos viram sinal de abuso) e enche o WhatsApp do operador.
+    if (Date.now() - smsPedidoEm > 15 * 60 * 1000) {
       const pediu = await chat.pedirSms();
       smsPedidoEm = Date.now();
+
+      // Depois do clique a Taobao costuma exigir o slider ANTES de mandar o
+      // SMS. Se não checarmos, a mensagem diz "o código vai chegar" quando na
+      // verdade nada foi enviado — e o operador espera um SMS que não vem.
+      const bloqueado = await chat.temSlider();
+
+      const oQueFazer = bloqueado
+        ? `⚠️ Apareceu o *slider* antes de mandar o SMS. Ele mede o arraste, ` +
+          `então só um humano passa — eu não tento.\n\n` +
+          `1. Abre a tela do braço (link no alerta de verificação)\n` +
+          `2. Arrasta o slider com o mouse, devagar\n` +
+          `3. Aí o SMS chega e você responde *#taobao 123456*`
+        : pediu
+          ? 'Já cliquei em "enviar SMS" — o código deve chegar no seu celular.\n\n' +
+            'Quando chegar, responde aqui:\n*#taobao 123456*'
+          : 'Não achei o botão de enviar SMS. Abre a tela do braço e clica você.';
+
       await alertarComPrint(
         pagina,
-        `📱 *Taobao pediu verificação por SMS*\n\n` +
-          (pediu
-            ? 'Já cliquei em "enviar SMS" — o código vai chegar no seu celular.\n\n'
-            : 'Não achei o botão de enviar SMS; clique você se conseguir.\n\n') +
-          'Quando chegar, responde aqui:\n*#taobao 123456*\n\n' +
-          'Isso acontece porque o navegador do servidor é um dispositivo novo ' +
-          'para a sua conta. Depois de validar uma vez, o perfil fica salvo.',
+        `📱 *Taobao pediu verificação*\n\n${oQueFazer}\n\n` +
+          `_Isso acontece porque o navegador do servidor é um dispositivo novo ` +
+          `para a sua conta. Depois de validar uma vez, o perfil fica salvo._`,
       );
     }
     return false;

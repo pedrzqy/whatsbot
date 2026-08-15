@@ -106,6 +106,20 @@ class Chat {
     return null;
   }
 
+  /**
+   * Tem slider de verificação na tela? Diferente de checarBloqueio(): este
+   * só olha e responde, sem lançar. Serve para descrever a situação ao
+   * operador em vez de congelar tudo — na tela de login, slider é etapa
+   * normal, não incidente.
+   */
+  async temSlider() {
+    for (const sel of SEL.bloqueios.seletores) {
+      if (await this.pagina.$(sel)) return true;
+    }
+    const texto = await this.pagina.evaluate(() => document.body.innerText).catch(() => '');
+    return /滑块|滑动验证|拖动/.test(texto);
+  }
+
   /** Clica em 获取短信校验码 para a Taobao disparar o SMS. */
   async pedirSms() {
     const botao = await this._acharNaPagina(SEL.verificacaoSms.botaoEnviarSms);
