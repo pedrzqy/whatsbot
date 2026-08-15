@@ -57,6 +57,16 @@
     "candidatos": [".message-item", ".item"]
   },
 
+  "voltarAoFundo": {
+    "_o_que_e": "Botão 回到底部 ('voltar ao fundo'), que a Taobao mostra SOZINHA quando a lista não está no fim. É o caminho nativo para o fundo e o que um humano clicaria — melhor que mexer em scrollTop, que dependia de adivinhar qual container rola e acabou rolando a página inteira. A presença dele já responde 'estou no fim?': se não aparece, a lista já está no fim. Se o seletor falhar, o chat.js cai na rolagem manual — errar aqui não trava nada.",
+    "candidatos": [
+      "text=回到底部",
+      "[class*='back-to-bottom']",
+      "[class*='backToBottom']",
+      "[class*='back-bottom']"
+    ]
+  },
+
   "minhaMensagem": {
     "_o_que_e": "Classe que marca mensagem NOSSA. O que NÃO tem isto é do fornecedor. Muito mais confiável que heurística de posição.",
     "classe": "self",

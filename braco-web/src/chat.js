@@ -82,6 +82,29 @@ class Chat {
   }
 
   /**
+   * Clica com TETO DE TEMPO. Todo clique do braço passa por aqui.
+   *
+   * O `.click()` do Playwright sem `timeout` usa 30 SEGUNDOS. Era o buraco no
+   * teto de tempo que a gente achou que tinha fechado: `_achar` limita o tempo
+   * de ACHAR o elemento, mas o clique seguinte ficava com o default. Daí saiu
+   * o "elementHandle.click: Timeout 30000ms exceeded" que congelou os envios —
+   * meio minuto parado por clique, em cada tentativa, até estourar tudo.
+   *
+   * O "element is not stable" do mesmo log é a lista ainda rolando: o
+   * Playwright espera o elemento parar de se mexer antes de clicar, e a
+   * rolagem que corrigimos em _irParaOFim() mantinha a tela em movimento.
+   * scrollIntoViewIfNeeded resolve o par dele, "element is not visible".
+   *
+   * 8s é folga grande para clicar em algo já encontrado. Passou disso não é
+   * lentidão, é a tela em outro estado — e falhar rápido avisa o operador
+   * enquanto o cliente ainda está na conversa.
+   */
+  async _clicar(el, { timeout = 8000 } = {}) {
+    await el.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+    await el.click({ delay: humaniza.msCurto(), timeout });
+  }
+
+  /**
    * Procura tela de verificação. Chamado antes e depois de cada ação.
    * Nunca tenta resolver: o slider avalia a trajetória do arraste, então
    * script acerta a posição e falha a biometria — e tentativa falha soma
@@ -148,7 +171,7 @@ class Chat {
   async pedirSms() {
     const botao = await this._acharNaPagina(SEL.verificacaoSms.botaoEnviarSms);
     if (!botao) return false;
-    await botao.click({ delay: humaniza.msCurto() });
+    await this._clicar(botao);
     await this.pagina.waitForTimeout(humaniza.ms(1000, 2000));
     return true;
   }
@@ -158,14 +181,14 @@ class Chat {
     const campo = await this._acharNaPagina(SEL.verificacaoSms.campoCodigo);
     if (!campo) throw new SeletorNaoEncontrado('campo do código SMS não encontrado');
 
-    await campo.click();
-    await campo.type(String(codigo), { delay: humaniza.msTecla() });
+    await this._clicar(campo);
+    await campo.type(String(codigo), { delay: humaniza.msTecla(), timeout: 15_000 });
     await this.pagina.waitForTimeout(humaniza.ms(500, 1200));
 
     const confirmar = await this._acharNaPagina(SEL.verificacaoSms.botaoConfirmar);
     if (!confirmar) throw new SeletorNaoEncontrado('botão 确定 não encontrado');
 
-    await confirmar.click({ delay: humaniza.msCurto() });
+    await this._clicar(confirmar);
     await this.pagina.waitForTimeout(humaniza.ms(3000, 5000));
   }
 
@@ -192,7 +215,7 @@ class Chat {
     await this.checarBloqueio();
 
     const primeiro = await this._achar('conversaNaLista', { timeout: 12000 });
-    await primeiro.el.click({ delay: humaniza.msCurto() });
+    await this._clicar(primeiro.el, { timeout: 10000 });
     await this.pagina.waitForTimeout(humaniza.ms(900, 2000));
 
     // Painel de digitação carregado = conversa aberta de verdade.
@@ -243,13 +266,54 @@ class Chat {
    * É rolagem local: não gera clique nem requisição, a Taobao não vê nada.
    */
   async _irParaOFim() {
+    // 1) O caminho da própria Taobao. Ela mostra 回到底部 quando a lista não
+    //    está no fim, então a presença do botão já é o diagnóstico e o clique
+    //    é a cura — sem adivinhar qual elemento rola. Busca curta e sem espera:
+    //    botão ausente quer dizer "já está no fim", não "ainda vai aparecer".
+    for (const sel of SEL.voltarAoFundo.candidatos) {
+      const botao = await this.frame.$(sel).catch(() => null);
+      if (!botao) continue;
+      await this._clicar(botao, { timeout: 4000 }).catch(() => {});
+      await this.pagina.waitForTimeout(humaniza.ms(400, 900));
+      return;
+    }
+
+    // 2) Reserva, para quando a Taobao mudar o botão de nome: rolagem manual.
     await this.frame
-      .evaluate(() => {
-        const item = document.querySelector('.message-item');
-        let el = item ? item.parentElement : null;
-        while (el && el.scrollHeight <= el.clientHeight) el = el.parentElement;
-        if (el) el.scrollTop = el.scrollHeight;
-      })
+      .evaluate((cands) => {
+        // Parte da ÚLTIMA mensagem, não da primeira. A versão anterior pegava
+        // querySelector('.message-item') — a mais ANTIGA — e subia a partir
+        // dela, o que ancorava a rolagem no topo do histórico.
+        let ultima = null;
+        for (const s of cands) {
+          const els = document.querySelectorAll(s);
+          if (els.length) { ultima = els[els.length - 1]; break; }
+        }
+        if (!ultima) return;
+
+        // Sobe até o primeiro ancestral que realmente rola, mas PARA no body.
+        // Sem esse limite o laço chegava em <html> quando a lista ainda não
+        // tinha altura suficiente para rolar, e "ir para o fim" virava rolar a
+        // página inteira — que é o que fazia a tela do chat saltar.
+        let el = ultima.parentElement;
+        let caixa = null;
+        while (el && el !== document.body && el !== document.documentElement) {
+          const estilo = getComputedStyle(el);
+          const rola = /auto|scroll|overlay/.test(estilo.overflowY);
+          if (rola && el.scrollHeight > el.clientHeight) { caixa = el; break; }
+          el = el.parentElement;
+        }
+
+        if (caixa) {
+          caixa.scrollTop = caixa.scrollHeight;
+          return;
+        }
+
+        // Nenhum container próprio: leva a mensagem à vista com o MÍNIMO de
+        // deslocamento. 'nearest' de propósito — 'end'/'start' mexem em todos
+        // os ancestrais e devolvem o salto de página que a gente acabou de tirar.
+        ultima.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      }, SEL.mensagem.candidatos)
       .catch(() => {});
     await this.pagina.waitForTimeout(humaniza.ms(400, 900));
   }
@@ -267,9 +331,23 @@ class Chat {
    */
   async marca() {
     await this._irParaOFim();
-    const ms = await this._lerFornecedor().catch(() => []);
+
+    let ms;
+    try {
+      ms = await this._lerFornecedor();
+    } catch (err) {
+      // Marca que NÃO PÔDE ser tirada não é marca vazia. O `.catch(() => [])`
+      // daqui tratava as duas igual, e aí lerNovas() enxergava um chat zerado:
+      // sem chaves e sem corte de horário, o histórico inteiro passava por
+      // "resposta nova" e o primeiro número de meses atrás ia para o cliente
+      // da vez. É o erro mais caro possível — código de outro atendimento
+      // entra na conta de quem está esperando agora.
+      console.warn(`[chat] não consegui tirar a marca: ${err.message}`);
+      return { chaves: [], ate: '', confiavel: false };
+    }
+
     const ate = ms.map((m) => m.quando).filter(Boolean).sort().pop() || '';
-    return { chaves: ms.map((m) => m.chave), ate };
+    return { chaves: ms.map((m) => m.chave), ate, confiavel: true };
   }
 
   // ----------------------------------------------------------
@@ -290,7 +368,7 @@ class Chat {
 
     for (let tentativa = 1; tentativa <= 2; tentativa++) {
       const { el } = await this._achar('campoTexto');
-      await el.click();
+      await this._clicar(el);
       await this.pagina.waitForTimeout(humaniza.ms(300, 800));
 
       // Limpa o campo — SEM Ctrl+A.
@@ -308,12 +386,14 @@ class Chat {
         const sel = node.ownerDocument.getSelection();
         if (sel) sel.removeAllRanges(); // limpa seleção de tentativa anterior
       });
-      await el.click();
+      await this._clicar(el);
 
       // É um <pre contenteditable>, não um input: fill() não funciona.
       // type() com delay por tecla também produz cadência de digitação humana.
       for (const bloco of humaniza.blocos(texto)) {
-        await el.type(bloco, { delay: humaniza.msTecla() });
+        // timeout explícito: type() também cai no default de 30s do Playwright
+        // se o campo perder a condição de editável no meio da digitação.
+        await el.type(bloco, { delay: humaniza.msTecla(), timeout: 15_000 });
         await this.pagina.waitForTimeout(humaniza.ms(150, 500));
       }
 
@@ -334,7 +414,7 @@ class Chat {
       // Botão em vez de Enter: dentro de um <pre>, Enter pode inserir quebra de
       // linha em vez de enviar, dependendo da versão.
       const botao = await this._achar('botaoEnviar');
-      await botao.el.click({ delay: humaniza.msCurto() });
+      await this._clicar(botao.el);
 
       await this.pagina.waitForTimeout(humaniza.ms(1500, 2600));
 
@@ -547,7 +627,10 @@ class Chat {
       let anexou = false;
       for (const input of inputs) {
         try {
-          await input.setInputFiles(caminhoLocal);
+          // comLimite igual ao do caminho principal (linha ~590): sem ele cada
+          // input escondido pode segurar 30s no default do Playwright, e a
+          // página costuma ter vários — o laço inteiro passava de minuto.
+          await comLimite(input.setInputFiles(caminhoLocal), 20_000, 'setInputFiles (fallback)');
           anexou = true;
           break;
         } catch {
@@ -596,7 +679,7 @@ class Chat {
 
     try {
       const botao = await this._achar('botaoEnviar', { timeout: 5000 });
-      await botao.el.click({ delay: humaniza.msCurto() });
+      await this._clicar(botao.el);
     } catch {
       // sem botão visível: se a colagem não pegou, não há o que enviar
     }
@@ -630,7 +713,7 @@ class Chat {
       for (const sel of SEL.confirmarImagem.botaoCancelar) {
         const el = await raiz.$(sel).catch(() => null);
         if (!el) continue;
-        await el.click({ delay: humaniza.msCurto() }).catch(() => {});
+        await this._clicar(el).catch(() => {});
         console.log('[chat] diálogo de imagem antigo cancelado');
         await this.pagina.waitForTimeout(humaniza.ms(600, 1200));
         return true;
@@ -649,7 +732,7 @@ class Chat {
       for (const sel of SEL.confirmarImagem.botaoConfirmar) {
         const el = await raiz.$(sel).catch(() => null);
         if (!el) continue;
-        await el.click({ delay: humaniza.msCurto() }).catch(() => {});
+        await this._clicar(el).catch(() => {});
         console.log('[chat] diálogo 发送图片 confirmado');
         return true;
       }
@@ -693,7 +776,7 @@ class Chat {
     try {
       await this.pagina.waitForTimeout(600); // o xclip precisa assumir a seleção
       const campo = await this._achar('campoTexto', { timeout: 8000 });
-      await campo.el.click({ delay: humaniza.msCurto() });
+      await this._clicar(campo.el);
       await this.pagina.keyboard.press('Control+V');
       await this.pagina.waitForTimeout(humaniza.ms(800, 1500));
     } finally {
@@ -863,6 +946,18 @@ class Chat {
     // atendimento em curso quando o container reinicia no meio dele.
     const chaves = Array.isArray(marca) ? marca : marca?.chaves || [];
     const ate = Array.isArray(marca) ? '' : marca?.ate || '';
+    // Marca legada (array puro) segue valendo: ela existe para o atendimento
+    // em curso sobreviver ao restart do container. O que não vale é marca que
+    // falhou ao ser tirada — ver marca().
+    const confiavel = Array.isArray(marca) ? true : marca?.confiavel !== false;
+
+    if (!confiavel) {
+      // Sem retrato válido do "antes", NADA aqui pode ser chamado de resposta.
+      // Não entregar tem conserto: o atendimento vence no timeout e o operador
+      // assume. Entregar o código errado não tem.
+      console.warn('[chat] marca não confiável — nenhuma mensagem tratada como resposta');
+      return [];
+    }
 
     await this._irParaOFim();
 

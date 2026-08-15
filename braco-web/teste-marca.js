@@ -31,6 +31,10 @@ const msg = (quando, texto, nick = 'newtype10') => ({
 function chatFalso(mensagens) {
   const c = Object.create(Chat.prototype);
   c._lerFornecedor = async () => mensagens;
+  // marca() e lerNovas() rolam a lista até o fim antes de ler. Sem navegador
+  // não há o que rolar, e deixar o método real rodar aqui estoura em
+  // this.frame — foi o que quebrou este teste sem ninguém perceber.
+  c._irParaOFim = async () => {};
   return c;
 }
 
@@ -44,7 +48,8 @@ function chatFalso(mensagens) {
     msg('2026-08-14 19:39:37', '394860'),
   ];
   const marca = await chatFalso(antes).marca();
-  t('marca guardou 3 chaves', marca.length === 3);
+  t('marca guardou 3 chaves', marca.chaves.length === 3);
+  t('e o corte é a mensagem mais recente', marca.ate === '2026-08-14 19:39:37', marca.ate);
 
   // Chega 你好 e a mais antiga sai da janela — total continua igual.
   const depois = [
@@ -83,6 +88,59 @@ function chatFalso(mensagens) {
   const m4 = await chatFalso(historico).marca();
   const semNovas = await chatFalso(historico).lerNovas(m4);
   t('50 mensagens antigas não viram novidade', semNovas.length === 0);
+
+  // ── Cenário 5: o corte por horário sozinho ─────────────────
+  // Acima as antigas são barradas pelas CHAVES. Aqui não: a rolagem trouxe
+  // para o DOM mensagem que não estava na marca, exatamente o caso que fez
+  // conversa de outro dia chegar na fila como se fosse a resposta da vez.
+  // Só o relógio segura isto.
+  console.log('\n--- antiga que a rolagem trouxe de volta ---');
+
+  const m5 = await chatFalso([msg('2026-08-15 14:00:00', '111111')]).marca();
+  const rolou = await chatFalso([
+    msg('2026-06-02 09:12:00', '777777'), // veio do histórico, fora da marca
+    msg('2026-08-15 14:00:00', '111111'),
+    msg('2026-08-15 14:20:10', '222222'), // essa sim é resposta
+  ]).lerNovas(m5);
+  t('antiga fora da marca não vira resposta', !rolou.some((m) => m.texto === '777777'),
+    JSON.stringify(rolou.map((m) => m.texto)));
+  t('e a resposta de verdade passa', rolou.length === 1 && rolou[0].texto === '222222');
+
+  // Mensagem sem horário não é aceita: pode ser histórico, e código velho na
+  // conta do cliente é pior do que não entregar nada.
+  const semData = await chatFalso([
+    msg('2026-08-15 14:00:00', '111111'),
+    { chave: 'newtype10||333333', texto: '333333', quando: '' },
+  ]).lerNovas(m5);
+  t('mensagem sem horário é descartada', semData.length === 0,
+    JSON.stringify(semData.map((m) => m.texto)));
+
+  // ── Cenário 6: a leitura da marca falhou ───────────────────
+  // O pior caso do sistema inteiro. Se a marca não pôde ser tirada e for
+  // tratada como "chat vazio", não há chave nem corte de horário — e o
+  // histórico inteiro vira resposta nova. O primeiro número de meses atrás
+  // iria para o cliente da vez, ou seja, código de OUTRA pessoa na conta dele.
+  console.log('\n--- marca que falhou não libera o histórico ---');
+
+  const cQuebrado = Object.create(Chat.prototype);
+  cQuebrado._irParaOFim = async () => {};
+  cQuebrado._lerFornecedor = async () => { throw new Error('frame detached'); };
+
+  const mRuim = await cQuebrado.marca();
+  t('marca falha é marcada como não confiável', mRuim.confiavel === false);
+
+  const comHistorico = await chatFalso(historico).lerNovas(mRuim);
+  t('e o histórico NÃO vira resposta', comHistorico.length === 0,
+    JSON.stringify(comHistorico.slice(0, 3).map((m) => m.texto)));
+
+  // Marca boa continua marcada como confiável, senão nada mais passa.
+  const mBoa = await chatFalso(antes).marca();
+  t('marca normal é confiável', mBoa.confiavel === true);
+
+  // Compatibilidade: marca legada (array puro) salva o atendimento em curso
+  // quando o container reinicia no meio dele.
+  const legada = await chatFalso(antes).lerNovas(antes.map((m) => m.chave));
+  t('marca legada (array) ainda funciona', legada.length === 0);
 
   console.log('\n' + (falhas ? falhas + ' FALHA(S)' : 'todos passaram'));
   process.exit(falhas ? 1 : 0);
