@@ -29,6 +29,7 @@ const AJUDA = [
   '*#enviar <id>* — manda a resposta do fornecedor ao cliente',
   '*#editar <id> <texto>* — corrige antes de mandar',
   '*#nao <id>* — descarta',
+  '*#limpar* — descarta tudo que está esperando aprovação',
   '*#pular* — encerra o atendimento atual e chama o próximo',
   '*#teste* — vira cliente por 30 min, para testar o fluxo do seu número',
 ].join('\n');
@@ -42,7 +43,7 @@ const min = (ms) => Math.round(ms / 60000);
 function ehComando(from, texto) {
   if (!cfg.ativa || !cfg.operador.numero) return false;
   if (from !== cfg.operador.numero) return false;
-  return /^#(fila|liberar|ok|enviar|editar|nao|não|pular|ajuda|taobao|teste)\b/i.test(
+  return /^#(fila|liberar|ok|enviar|editar|nao|não|pular|ajuda|taobao|teste|limpar)\b/i.test(
     String(texto || '').trim(),
   );
 }
@@ -133,17 +134,29 @@ async function executar(texto) {
       }
     }
 
-    const pend = dados.tarefas.filter((t) => t.estado === 'aguardando_aprovacao').length + dados.aprovacoes.length;
-    if (pend) linhas.push('', `⏳ ${pend} item(ns) esperando sua aprovação`);
+    // LISTA os pendentes com id. Só dizer "5 itens" obriga o operador a rolar o
+    // WhatsApp atrás do alerta antigo para achar o id — e com vários pendentes
+    // é fácil aprovar o errado.
+    const aprovar = dados.tarefas.filter((t) => t.estado === 'aguardando_aprovacao');
+    if (aprovar.length || dados.aprovacoes.length) {
+      linhas.push('', `⏳ *Esperando você (${aprovar.length + dados.aprovacoes.length}):*`);
+      for (const t of aprovar.slice(0, 8)) {
+        linhas.push(`envio \`${t.usuario}\` — *#ok ${t.id}*`);
+      }
+      for (const a of dados.aprovacoes.slice(0, 8)) {
+        linhas.push(`resposta p/ ${a.cliente} — *#enviar ${a.id}*`);
+      }
+      if (aprovar.length + dados.aprovacoes.length > 8) linhas.push('_(mostrando os 8 primeiros)_');
+      linhas.push('_*#limpar* descarta tudo isso de uma vez_');
+    }
 
-    // O que já foi aprovado e está com o braço. Sem esta linha não dá para
-    // separar "o braço está lento" de "não há nada para ele fazer" — e essa
-    // dúvida já custou uma investigação inteira.
+    // O que já foi aprovado e está com o braço. Aparece SEMPRE, inclusive
+    // zerado: é a linha que separa "o braço está lento" de "não há nada para
+    // ele fazer" — e essa dúvida já custou uma investigação inteira. Escondida
+    // quando zero, ela não responde nem uma coisa nem outra.
     const naFila = dados.tarefas.filter((t) => t.estado === 'pendente').length;
     const emCurso = dados.tarefas.filter((t) => t.estado === 'executando').length;
-    if (naFila || emCurso) {
-      linhas.push('', `📤 braço: ${naFila} na fila · ${emCurso} em andamento`);
-    }
+    linhas.push('', `📤 braço: ${naFila} na fila · ${emCurso} em andamento`);
 
     return linhas.join('\n');
   }
@@ -155,6 +168,21 @@ async function executar(texto) {
     limites.fechar('operador');
     await ponte.tick();
     return '✅ Ponte liberada. O braço volta a operar no próximo ciclo (até 1 min).';
+  }
+
+  // ── #limpar ────────────────────────────────────────────
+  // Existe para teste: cada rodada deixa uma tarefa esperando #ok, e depois de
+  // algumas o operador tem uma pilha de lixo que atrapalha ler o #fila.
+  // Só descarta o que AINDA não saiu — envio em andamento não é tocado.
+  if (cmd === 'limpar') {
+    const tarefas = dados.tarefas.filter((t) => t.estado === 'aguardando_aprovacao').length;
+    const respostas = dados.aprovacoes.length;
+    if (!tarefas && !respostas) return 'Não há nada esperando aprovação.';
+
+    dados.tarefas = dados.tarefas.filter((t) => t.estado !== 'aguardando_aprovacao');
+    dados.aprovacoes = [];
+    persistAgora();
+    return `🧹 Descartei ${tarefas} envio(s) e ${respostas} resposta(s). Nada foi para o fornecedor.`;
   }
 
   // ── #pular ─────────────────────────────────────────────
