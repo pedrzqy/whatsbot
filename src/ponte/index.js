@@ -251,10 +251,46 @@ async function promoverProximo() {
 // Fila de tarefas do braço
 // ============================================================
 
+/** Tempo máximo que um envio pode ficar em 'executando' antes de ser dado por perdido. */
+const EXECUTANDO_MAX_MS = 5 * 60 * 1000;
+
+/**
+ * Devolve à fila as tarefas que ficaram presas em 'executando'.
+ *
+ * Uma tarefa entra em 'executando' quando o braço a pega, e só sai quando ele
+ * reporta o resultado. Se ele morrer no meio — deploy, OOM, container
+ * reiniciado — ninguém reporta nada e a tarefa fica presa PARA SEMPRE: o
+ * /proxima só entrega 'pendente', então o braço novo sobe, pergunta, não recebe
+ * nada e fica parado achando que não há trabalho.
+ *
+ * Antes isso se escondia atrás do restart do bot, que faz esse mesmo conserto
+ * ao carregar o estado. Só que os dois serviços são deployados separado: reiniciar
+ * o braço sozinho deixava o envio travado sem nada no log, e o cliente esperava
+ * as 4h do timeout.
+ *
+ * Não conta como tentativa: o braço não chegou a falhar, ele sumiu.
+ */
+function recuperarTravadas() {
+  const limite = Date.now() - EXECUTANDO_MAX_MS;
+  let mudou = false;
+  for (const t of dados.tarefas) {
+    if (t.estado === 'executando' && (t.pegaEm || 0) < limite) {
+      t.estado = 'pendente';
+      t.tentativas = Math.max(0, t.tentativas - 1);
+      mudou = true;
+      console.warn(`[ponte] tarefa ${t.id} travada em executando — devolvida à fila`);
+    }
+  }
+  if (mudou) persistAgora();
+}
+
 function proximaTarefa() {
+  recuperarTravadas();
+
   const agora = Date.now();
   const t = dados.tarefas.find((x) => x.estado === 'pendente' && x.agendadaPara <= agora);
   if (!t) return null;
+  t.pegaEm = agora;
   t.estado = 'executando';
   t.tentativas += 1;
   persistAgora();

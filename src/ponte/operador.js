@@ -136,6 +136,15 @@ async function executar(texto) {
     const pend = dados.tarefas.filter((t) => t.estado === 'aguardando_aprovacao').length + dados.aprovacoes.length;
     if (pend) linhas.push('', `⏳ ${pend} item(ns) esperando sua aprovação`);
 
+    // O que já foi aprovado e está com o braço. Sem esta linha não dá para
+    // separar "o braço está lento" de "não há nada para ele fazer" — e essa
+    // dúvida já custou uma investigação inteira.
+    const naFila = dados.tarefas.filter((t) => t.estado === 'pendente').length;
+    const emCurso = dados.tarefas.filter((t) => t.estado === 'executando').length;
+    if (naFila || emCurso) {
+      linhas.push('', `📤 braço: ${naFila} na fila · ${emCurso} em andamento`);
+    }
+
     return linhas.join('\n');
   }
 
