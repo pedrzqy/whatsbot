@@ -258,6 +258,9 @@ async function main() {
 
   // Marca do atendimento em curso. null = ninguém esperando resposta.
   let marcaAtual = null;
+  // Conversa do fornecedor está aberta na tela? Volta a false quando algo dá
+  // errado, para o próximo ciclo reabrir em vez de escrever no vazio.
+  let conversaAberta = false;
 
   while (rodando) {
     try {
@@ -281,9 +284,29 @@ async function main() {
       // Sessão caiu ou é a primeira subida: manda o QR e espera o humano.
       // 3 min entre tentativas para não encher o WhatsApp do operador de print.
       if (!(await garantirLogin(pagina, chat))) {
+        conversaAberta = false; // o reload abaixo joga a conversa fora
         await dormir(180_000);
         await pagina.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
         continue;
+      }
+
+      // Mantém a conversa do fornecedor ABERTA, mesmo sem tarefa.
+      //
+      // A versão anterior só abria quando havia trabalho, e o braço ficava
+      // parado na tela "您尚未选择联系人" — impossível saber pelo VNC se estava
+      // vivo. Além disso, humano que conversa com um fornecedor deixa o chat
+      // dele aberto; abrir só na hora de escrever é padrão de robô.
+      if (!conversaAberta) {
+        try {
+          await chat.abrirConversa(titulo);
+          conversaAberta = true;
+          console.log(`[braço] conversa de "${titulo}" aberta`);
+        } catch (err) {
+          console.warn(`[braço] não abri a conversa: ${err.message}`);
+          await evento('warn', 'abrir_conversa', err.message);
+          await dormir(120_000);
+          continue;
+        }
       }
 
       // 1) Tarefa pendente?
@@ -308,6 +331,10 @@ async function main() {
 
       await dormir(humaniza.intervaloLeitura());
     } catch (err) {
+      // Qualquer erro pode ter deixado a tela noutro estado — força reabrir
+      // a conversa no próximo ciclo em vez de escrever achando que está lá.
+      conversaAberta = false;
+
       if (err instanceof BloqueioDetectado) {
         // NÃO tentamos resolver. Manda o print junto: sem ver a tela, o
         // operador não sabe se é slider, SMS ou logout, e cada um pede uma
