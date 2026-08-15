@@ -276,11 +276,22 @@ class Chat {
       await el.click();
       await this.pagina.waitForTimeout(humaniza.ms(300, 800));
 
-      // Limpa o que a tentativa anterior deixou no campo. Sem isto a segunda
-      // tentativa digitaria "pwadpd12pwadpd12" e mandaria um usuário que não
-      // existe — pior que não mandar nada.
-      await this.pagina.keyboard.press('Control+A');
-      await this.pagina.keyboard.press('Delete');
+      // Limpa o campo — SEM Ctrl+A.
+      //
+      // Ctrl+A aqui foi um desastre: o atalho escapou do <pre> e selecionou a
+      // PÁGINA inteira (tudo azul na tela), o Delete não apagou nada porque o
+      // documento não é editável, e o texto digitado depois não entrou em lugar
+      // nenhum. O envio saía com o campo vazio e a Taobao respondia
+      // "请输入内容~" — digite algum conteúdo.
+      //
+      // Mexer no nó direto não tem como vazar para fora dele.
+      await el.evaluate((node) => {
+        node.textContent = '';
+        node.dispatchEvent(new Event('input', { bubbles: true }));
+        const sel = node.ownerDocument.getSelection();
+        if (sel) sel.removeAllRanges(); // limpa seleção de tentativa anterior
+      });
+      await el.click();
 
       // É um <pre contenteditable>, não um input: fill() não funciona.
       // type() com delay por tecla também produz cadência de digitação humana.
@@ -290,6 +301,18 @@ class Chat {
       }
 
       await this.pagina.waitForTimeout(humaniza.ms(400, 1100));
+
+      // O texto ENTROU mesmo no campo?
+      //
+      // Clicar em enviar com o campo vazio não é inofensivo: a Taobao responde
+      // com o aviso amarelo, e aviso é atrito registrado na conta. Se não
+      // entrou, nem tenta — vai para a próxima tentativa.
+      const noCampo = await el.evaluate((node) => node.innerText || node.textContent || '');
+      if (!noCampo.includes(texto)) {
+        console.warn(`[chat] campo ficou com "${noCampo.trim()}" — não cliquei em enviar`);
+        await this.pagina.waitForTimeout(humaniza.ms(4000, 7000));
+        continue;
+      }
 
       // Botão em vez de Enter: dentro de um <pre>, Enter pode inserir quebra de
       // linha em vez de enviar, dependendo da versão.
@@ -359,7 +382,8 @@ class Chat {
    * chega escrito pela própria Taobao.
    */
   async _lerAviso() {
-    const PISTAS = /频繁|太快|稍后|发送失败|请勿|限制|敏感/;
+    // 请输入内容 = "digite algum conteúdo": campo vazio na hora do envio.
+    const PISTAS = /频繁|太快|稍后|发送失败|请勿|限制|敏感|请输入/;
     for (const raiz of [this.frame, this.pagina]) {
       const txt = await raiz.evaluate(() => document.body.innerText || '').catch(() => '');
       const linha = txt.split('\n').map((l) => l.trim()).find((l) => l && PISTAS.test(l));
