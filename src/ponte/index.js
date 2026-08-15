@@ -93,7 +93,16 @@ async function pedirCodigo(from, nome, usuarioBruto, imagemPath = null) {
     };
   }
 
-  const lim = limites.checarCliente(from);
+  // O modo teste do operador não consome cota de cliente.
+  //
+  // Esse limite existe para um cliente não inundar a fila — e testar é
+  // exatamente repetir o fluxo, então ele travava justo quem precisa repetir.
+  // Os limites do FORNECEDOR (10/h, 60/dia) continuam valendo normalmente:
+  // são esses que protegem a conta da Taobao, e nenhum teste passa por cima.
+  const testando =
+    from === cfg.operador.numero && dados.testeOperador?.ate > Date.now();
+
+  const lim = testando ? { permitido: true } : limites.checarCliente(from);
   if (!lim.permitido) {
     return {
       aceito: false,

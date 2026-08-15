@@ -84,7 +84,8 @@ async function executar(texto) {
       '🧪 *Modo teste ligado por 30 min.*\n\n' +
       'Agora suas mensagens normais entram como se fossem de um cliente. ' +
       'Manda *preciso do código* e segue o passo a passo.\n\n' +
-      '_Os #comandos continuam funcionando. Nada sai sem #ok. ' +
+      '_Os #comandos continuam funcionando e o limite de 5 códigos/hora não ' +
+      'vale para você agora. Nada sai sem #ok. ' +
       'Mande #teste de novo para desligar antes da hora._'
     );
   }
