@@ -149,13 +149,13 @@ async function garantirLogin(pagina, chat) {
       const oQueFazer = bloqueado
         ? `⚠️ Apareceu o *slider* antes de mandar o SMS. Ele mede o arraste, ` +
           `então só um humano passa — eu não tento.\n\n` +
-          `1. Abre a tela do braço (link no alerta de verificação)\n` +
+          `1. Abre a tela (link no alerta de verificação)\n` +
           `2. Arrasta o slider com o mouse, devagar\n` +
           `3. Aí o SMS chega e você responde *#taobao 123456*`
         : pediu
           ? 'Já cliquei em "enviar SMS" — o código deve chegar no seu celular.\n\n' +
             'Quando chegar, responde aqui:\n*#taobao 123456*'
-          : 'Não achei o botão de enviar SMS. Abre a tela do braço e clica você.';
+          : 'Não achei o botão de enviar SMS. Abre a tela e clica você.';
 
       await alertarComPrint(
         pagina,
@@ -170,7 +170,10 @@ async function garantirLogin(pagina, chat) {
   // Caso 2: tela de login normal (QR ou senha).
   await alertarComPrint(
     pagina,
-    '🔐 *Braço precisa de login na Taobao*\n\n' +
+    // Sem "braço" nem "robô" no texto: isto sai pelo WhatsApp da loja, e
+    // vocabulário de automação numa conta comercial é sinal para o WhatsApp.
+    // O operador entende igual — ele sabe do que se trata.
+    '🔐 *Precisa de login*\n\n' +
       'Escaneie o QR desta tela com o app da Taobao no seu iPhone.\n' +
       'Assim que logar, eu continuo sozinho — o perfil fica salvo.',
   );

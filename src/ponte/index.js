@@ -71,7 +71,7 @@ async function pedirCodigo(from, nome, usuarioBruto, imagemPath = null) {
 
   const d = limites.disjuntor();
   if (d.estado === 'aberto') {
-    await alertar(`⚠️ ${nome} pediu código com a ponte congelada. Fila parada.`);
+    await alertar(`⚠️ ${nome} pediu código com os envios congelados. Fila parada.`);
     return {
       aceito: false,
       mensagem: 'Estou resolvendo uma coisa aqui no sistema e já te mando o código 🙏',
@@ -339,7 +339,7 @@ async function resultadoTarefa(id, ok, erro, printPath) {
   const { abriu } = limites.registrarFalha(erro || 'falha no envio', printPath);
   if (abriu) {
     await alertar(
-      `🛑 *Ponte congelada*\n\nO braço falhou várias vezes seguidas.\n` +
+      `🛑 *Envios congelados*\n\nFalhou várias vezes seguidas.\n` +
         `Último erro: ${erro}\n\nVê o que houve e responde *#liberar*.`,
       printPath,
     );
@@ -374,16 +374,16 @@ async function bloqueioDetectado(motivo, printPath) {
   // a tela remota, não uma instrução de "resolve no seu navegador" — o
   // navegador que precisa ser resolvido é o do container.
   const comoResolver = cfg.vncUrl
-    ? `1. Abre a tela do braço: ${cfg.vncUrl}\n` +
+    ? `1. Abre a tela: ${cfg.vncUrl}\n` +
       `2. Arrasta o slider você mesmo (com o mouse, devagar)\n` +
       `3. Responde *#liberar*`
-    : `1. Configure PONTE_VNC_URL para conseguir ver a tela do braço\n` +
+    : `1. Configure PONTE_VNC_URL para conseguir ver a tela\n` +
       `   (sem isso não há como resolver: o navegador está dentro do container)\n` +
       `2. Depois de resolver, responde *#liberar*`;
 
   await alertar(
     `🛑 *Verificação da Taobao*\n\n${motivo}\n\n` +
-      `Ponte congelada. ${esperando} cliente(s) na fila.\n\n${comoResolver}`,
+      `Envios congelados. ${esperando} cliente(s) na fila.\n\n${comoResolver}`,
     printPath,
   );
 }

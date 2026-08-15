@@ -20,13 +20,13 @@ const sender = require('../sender');
 const { dados, persistAgora } = require('./estado');
 
 const AJUDA = [
-  '*Comandos da ponte*',
+  '*Comandos*',
   '',
   '*#fila* — quem está sendo atendido e quem espera',
   '*#liberar* — destrava depois de resolver a verificação da Taobao',
   '*#taobao 123456* — repassa o código SMS que a Taobao te mandou',
-  '*#ok <id>* — aprova o envio de uma pergunta ao fornecedor',
-  '*#enviar <id>* — manda a resposta do fornecedor ao cliente',
+  '*#ok <id>* — libera um envio',
+  '*#enviar <id>* — manda a resposta ao cliente',
   '*#editar <id> <texto>* — corrige antes de mandar',
   '*#nao <id>* — descarta',
   '*#limpar* — descarta tudo que está esperando aprovação',
@@ -84,7 +84,7 @@ async function executar(texto) {
       '🧪 *Modo teste ligado por 30 min.*\n\n' +
       'Agora suas mensagens normais entram como se fossem de um cliente. ' +
       'Manda *preciso do código* e segue o passo a passo.\n\n' +
-      '_Os #comandos continuam funcionando. Nada vai ao fornecedor sem #ok. ' +
+      '_Os #comandos continuam funcionando. Nada sai sem #ok. ' +
       'Mande #teste de novo para desligar antes da hora._'
     );
   }
@@ -101,7 +101,7 @@ async function executar(texto) {
     }
     dados.smsTaobao = { codigo, em: Date.now() };
     persistAgora();
-    return `✅ Código guardado. O braço vai usar no próximo ciclo (até 1 min).`;
+    return '✅ Código guardado. Vai ser usado em até 1 min.';
   }
 
   // ── #fila ──────────────────────────────────────────────
@@ -112,7 +112,7 @@ async function executar(texto) {
     const lim = limites.painel();
 
     const linhas = [
-      `*Ponte* — modo ${cfg.modo}`,
+      `*Códigos* — modo ${cfg.modo}`,
       d.estado === 'aberto' ? `🛑 CONGELADA: ${d.motivo}` : '✅ operando',
       janela.resumo(),
       `Cota: ${lim.hora.usado}/${lim.hora.teto} nesta hora · ${lim.dia.usado}/${lim.dia.teto} hoje`,
@@ -157,7 +157,7 @@ async function executar(texto) {
     // quando zero, ela não responde nem uma coisa nem outra.
     const naFila = dados.tarefas.filter((t) => t.estado === 'pendente').length;
     const emCurso = dados.tarefas.filter((t) => t.estado === 'executando').length;
-    linhas.push('', `📤 braço: ${naFila} na fila · ${emCurso} em andamento`);
+    linhas.push('', `📤 envios: ${naFila} na fila · ${emCurso} saindo agora`);
 
     return linhas.join('\n');
   }
@@ -165,10 +165,10 @@ async function executar(texto) {
   // ── #liberar ───────────────────────────────────────────
   if (cmd === 'liberar') {
     const d = limites.disjuntor();
-    if (d.estado !== 'aberto') return 'A ponte já está operando — nada a liberar.';
+    if (d.estado !== 'aberto') return 'Já está operando — nada a liberar.';
     limites.fechar('operador');
     await ponte.tick();
-    return '✅ Ponte liberada. O braço volta a operar no próximo ciclo (até 1 min).';
+    return '✅ Liberado. Volta a operar em até 1 min.';
   }
 
   // ── #destravar ─────────────────────────────────────────
@@ -185,7 +185,7 @@ async function executar(texto) {
       t.tentativas = Math.max(0, t.tentativas - 1);
     }
     persistAgora();
-    return `🔧 ${presas.length} envio(s) de volta na fila. O braço pega em segundos.`;
+    return `🔧 ${presas.length} envio(s) de volta na fila. Sai em segundos.`;
   }
 
   // ── #limpar ────────────────────────────────────────────
@@ -200,7 +200,7 @@ async function executar(texto) {
     dados.tarefas = dados.tarefas.filter((t) => t.estado !== 'aguardando_aprovacao');
     dados.aprovacoes = [];
     persistAgora();
-    return `🧹 Descartei ${tarefas} envio(s) e ${respostas} resposta(s). Nada foi para o fornecedor.`;
+    return `🧹 Descartei ${tarefas} envio(s) e ${respostas} resposta(s). Nada saiu.`;
   }
 
   // ── #pular ─────────────────────────────────────────────
@@ -233,8 +233,8 @@ async function executar(texto) {
     t.estado = 'pendente';
     persistAgora();
     return janela.estado().aberta
-      ? '✅ Aprovado. O braço envia no próximo ciclo.'
-      : `✅ Aprovado. Sai quando o fornecedor abrir (em ${Math.round(janela.estado().esperaMinutos / 60)}h).`;
+      ? '✅ Aprovado. Sai em segundos.'
+      : `✅ Aprovado. Sai quando reabrir (em ${Math.round(janela.estado().esperaMinutos / 60)}h).`;
   }
 
   // ── #enviar / #editar — resposta do fornecedor ao cliente ──
@@ -273,7 +273,7 @@ async function executar(texto) {
       t.estado = 'falhou';
       t.ultimoErro = 'descartada pelo operador';
       persistAgora();
-      return 'Pergunta descartada — não vai para o fornecedor.';
+      return 'Envio descartado — não sai.';
     }
     return `Não achei nada com o id \`${id}\`.`;
   }

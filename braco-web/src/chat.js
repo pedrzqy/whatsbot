@@ -300,6 +300,12 @@ class Chat {
   async enviarFoto(caminhoLocal) {
     await this.checarBloqueio();
 
+    // Sobrou diálogo de imagem aberto de uma tentativa anterior? CANCELA.
+    // Confirmar mandaria a foto de outro cliente — ou pior, alguma imagem que
+    // nem sabemos de onde veio — para a conversa. Cancelar sempre é seguro:
+    // no pior caso o nosso próprio print é recolado logo abaixo.
+    await this._cancelarDialogoImagem();
+
     const mapa = await this._mapearInputs();
     console.log(`[chat] ${mapa.length} input[type=file]: ${JSON.stringify(mapa)}`);
 
@@ -380,6 +386,12 @@ class Chat {
     await acao();
     await this.pagina.waitForTimeout(humaniza.ms(1200, 2200));
 
+    // Colar abre o diálogo 发送图片 com a prévia. Enquanto ele estiver na tela
+    // nada foi enviado — e o 发送 lá atrás nem está clicável.
+    if (await this._confirmarEnvioImagem()) {
+      await this.pagina.waitForTimeout(humaniza.ms(1500, 2800));
+    }
+
     if ((await this._quantasMinhas()) > antes) return true; // enviou sozinho
 
     try {
@@ -390,6 +402,61 @@ class Chat {
     }
     await this.pagina.waitForTimeout(humaniza.ms(1200, 2200));
     return (await this._quantasMinhas()) > antes;
+  }
+
+  /**
+   * Fecha o diálogo 发送图片 clicando em 确定.
+   *
+   * A Taobao não envia imagem colada direto: abre uma prévia e pede
+   * confirmação. Sem o clique, a foto fica parada nesse diálogo — e como o
+   * balão nunca aparece, o braço concluía "a colagem não funcionou" e partia
+   * para o próximo caminho, empilhando tentativa em cima de um diálogo aberto.
+   *
+   * Confere o TEXTO do diálogo antes de clicar: 确定 sozinho é o "OK" de
+   * qualquer confirmação da Taobao, inclusive de coisas que não queremos aceitar.
+   */
+  /**
+   * Cancela um diálogo de imagem que ficou aberto de antes.
+   *
+   * Nunca confirma nessa situação: a prévia pode ser a foto de outro cliente,
+   * ou uma imagem que a gente nem sabe de onde veio. Cancelar é sempre seguro —
+   * no pior caso o nosso print é recolado logo em seguida.
+   */
+  async _cancelarDialogoImagem() {
+    for (const raiz of [this.frame, this.pagina]) {
+      const txt = await raiz.evaluate(() => document.body.innerText || '').catch(() => '');
+      if (!SEL.confirmarImagem.deteccao.some((m) => txt.includes(m))) continue;
+
+      for (const sel of SEL.confirmarImagem.botaoCancelar) {
+        const el = await raiz.$(sel).catch(() => null);
+        if (!el) continue;
+        await el.click({ delay: humaniza.msCurto() }).catch(() => {});
+        console.log('[chat] diálogo de imagem antigo cancelado');
+        await this.pagina.waitForTimeout(humaniza.ms(600, 1200));
+        return true;
+      }
+    }
+    return false;
+  }
+
+  async _confirmarEnvioImagem() {
+    const raizes = [this.frame, this.pagina];
+
+    for (const raiz of raizes) {
+      const txt = await raiz.evaluate(() => document.body.innerText || '').catch(() => '');
+      if (!SEL.confirmarImagem.deteccao.some((m) => txt.includes(m))) continue;
+
+      for (const sel of SEL.confirmarImagem.botaoConfirmar) {
+        const el = await raiz.$(sel).catch(() => null);
+        if (!el) continue;
+        await el.click({ delay: humaniza.msCurto() }).catch(() => {});
+        console.log('[chat] diálogo 发送图片 confirmado');
+        return true;
+      }
+
+      console.warn('[chat] diálogo 发送图片 na tela mas não achei o 确定');
+    }
+    return false;
   }
 
   /**
@@ -445,7 +512,12 @@ class Chat {
     const nome = path.basename(caminhoLocal);
     const seletores = SEL.campoTexto.candidatos;
 
-    const ok = await this.frame.evaluate(
+    // dispatchEvent devolve FALSE quando a página chamou preventDefault — ou
+    // seja, quando ela TRATOU a colagem. Ler isso como falha era o inverso da
+    // verdade: o log dizia "campo de texto não aceitou a colagem" justamente
+    // nas vezes em que a Taobao tinha aceitado. Aqui só interessa se o campo
+    // existe; quem julga o resultado é a contagem de mensagens, em _tentar().
+    const achouCampo = await this.frame.evaluate(
       ({ b64, nome, seletores }) => {
         const alvo = seletores.map((s) => document.querySelector(s)).find(Boolean);
         if (!alvo) return false;
@@ -458,14 +530,15 @@ class Chat {
         dt.items.add(new File([bytes], nome, { type: 'image/jpeg' }));
 
         alvo.focus();
-        return alvo.dispatchEvent(
+        alvo.dispatchEvent(
           new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }),
         );
+        return true;
       },
       { b64, nome, seletores },
     );
 
-    if (!ok) throw new SeletorNaoEncontrado('campo de texto não aceitou a colagem');
+    if (!achouCampo) throw new SeletorNaoEncontrado('campo de texto não encontrado para colar');
   }
 
   /**

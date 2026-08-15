@@ -309,6 +309,19 @@ const OP = '5541999999999';
   t('prazo vencido desliga sozinho',
     recepcao.avaliar(OP, 'preciso do codigo', null).acao === 'ignorar');
 
+  // ── Vocabulário de automação no WhatsApp ──────────────────
+  // Vale também para as mensagens do OPERADOR: elas saem pelo mesmo número
+  // comercial, e é a conta inteira que corre risco, não só o 1-a-1 do cliente.
+  bloco('nada de "braço"/"robô"/"bot" no WhatsApp');
+  const AUTOMACAO = /bra[çc]o|rob[ôo]|\bbot\b|autom[aá]tico\b/i;
+
+  for (const cmd of ['#ajuda', '#fila', '#limpar', '#destravar', '#teste']) {
+    const saida = String(await operador.executar(cmd));
+    t(`${cmd} sem vocabulário de robô`, !AUTOMACAO.test(saida),
+      (saida.match(AUTOMACAO) || [''])[0] || 'limpo');
+  }
+  await operador.executar('#teste'); // desliga o que o laço acima ligou
+
   console.log('\n' + (falhas ? falhas + ' FALHA(S)' : 'todos os testes passaram'));
   process.exit(falhas ? 1 : 0);
 })();

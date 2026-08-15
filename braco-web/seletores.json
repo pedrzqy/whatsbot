@@ -36,6 +36,22 @@
     "candidatos": ["input[type='file']"]
   },
 
+  "confirmarImagem": {
+    "_o_que_e": "Diálogo 发送图片 que a Taobao abre ao COLAR uma imagem: mostra a prévia e pede 确定 (confirmar) ou 取消 (cancelar). Sem clicar em 确定 a imagem fica parada no diálogo e nada é enviado — foi exatamente onde o print travou. Só clicamos se a detecção casar: 确定 sozinho casaria com qualquer confirmação da página.",
+    "deteccao": ["发送图片", "發送圖片"],
+    "botaoConfirmar": [
+      "button:has-text('确定')",
+      "button:has-text('確定')",
+      ".next-dialog-footer button:has-text('确定')",
+      "[class*='dialog'] button:has-text('确定')"
+    ],
+    "botaoCancelar": [
+      "button:has-text('取消')",
+      ".next-dialog-footer button:has-text('取消')",
+      "[class*='dialog'] button:has-text('取消')"
+    ]
+  },
+
   "mensagem": {
     "_o_que_e": "Cada mensagem da conversa.",
     "candidatos": [".message-item", ".item"]

@@ -106,10 +106,10 @@ function estado(agora = new Date()) {
 /** Texto curto para o #fila do operador. */
 function resumo(agora = new Date()) {
   const e = estado(agora);
-  if (e.aberta) return '🟢 fornecedor online';
+  if (e.aberta) return '🟢 online';
   const h = Math.floor(e.esperaMinutos / 60);
   const m = e.esperaMinutos % 60;
-  return `🌙 fornecedor offline — volta em ${h ? h + 'h' : ''}${m ? doisDigitos(m) : ''}`.trim();
+  return `🌙 offline — volta em ${h ? h + 'h' : ''}${m ? doisDigitos(m) : ''}`.trim();
 }
 
 module.exports = { estado, resumo, intervalos };
