@@ -228,6 +228,13 @@ async function executarTarefa(chat, tarefa, titulo) {
       }
     }
 
+    // Respira entre a foto e o usuário.
+    //
+    // Duas mensagens coladas uma na outra é assinatura de script — pessoa
+    // nenhuma anexa um print e digita no mesmo segundo. E dá tempo do upload
+    // assentar antes de o texto entrar na fila de envio.
+    if (fotoEnviada) await dormir(humaniza.ms(3000, 4500));
+
     await chat.enviarTexto(tarefa.usuario);
     humaniza.registrarEnvio();
 

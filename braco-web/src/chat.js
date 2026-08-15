@@ -271,12 +271,16 @@ class Chat {
     // Modal aberto engole clique. Cancela antes de tentar digitar.
     await this._cancelarDialogoImagem();
 
-    const antes = await this._quantasMinhas();
-
     for (let tentativa = 1; tentativa <= 2; tentativa++) {
       const { el } = await this._achar('campoTexto');
       await el.click();
       await this.pagina.waitForTimeout(humaniza.ms(300, 800));
+
+      // Limpa o que a tentativa anterior deixou no campo. Sem isto a segunda
+      // tentativa digitaria "pwadpd12pwadpd12" e mandaria um usuário que não
+      // existe — pior que não mandar nada.
+      await this.pagina.keyboard.press('Control+A');
+      await this.pagina.keyboard.press('Delete');
 
       // É um <pre contenteditable>, não um input: fill() não funciona.
       // type() com delay por tecla também produz cadência de digitação humana.
@@ -292,14 +296,23 @@ class Chat {
       const botao = await this._achar('botaoEnviar');
       await botao.el.click({ delay: humaniza.msCurto() });
 
-      await this.pagina.waitForTimeout(humaniza.ms(1000, 2200));
+      await this.pagina.waitForTimeout(humaniza.ms(1500, 2600));
 
-      if ((await this._quantasMinhas()) > antes) {
+      if (await this._ultimaMinhaTem(texto)) {
         await this.checarBloqueio();
         return;
       }
-      console.warn(`[chat] "${texto}" não saiu na tentativa ${tentativa}`);
+
+      // A Taobao recusa envio rápido demais com um aviso amarelo e engole a
+      // mensagem. Esperar mais que na primeira vez faz a segunda tentativa
+      // pegar — insistir no mesmo ritmo só levaria o mesmo aviso.
+      const aviso = await this._lerAviso();
+      console.warn(
+        `[chat] "${texto}" não saiu na tentativa ${tentativa}` +
+          (aviso ? ` — a Taobao avisou: "${aviso}"` : ''),
+      );
       await this._cancelarDialogoImagem();
+      await this.pagina.waitForTimeout(humaniza.ms(6000, 9000));
     }
 
     // Falhar alto aqui é melhor que seguir calado: a foto já foi, e foto sem
@@ -308,6 +321,51 @@ class Chat {
       `digitei "${texto}" duas vezes e a mensagem não saiu — a foto já foi enviada, ` +
         `manda o usuário na mão pelo chat`,
     );
+  }
+
+  /**
+   * O texto aparece numa das últimas mensagens NOSSAS?
+   *
+   * Confirmar por CONTAGEM não serve para texto: o balão da foto entra no DOM
+   * com atraso, então a contagem sobe enquanto o texto ainda está sendo
+   * digitado — e o braço dava por enviado um usuário que a Taobao recusou.
+   * Foi assim que o fornecedor recebeu print sem usuário e ninguém percebeu.
+   *
+   * Usuário é alfanumérico e único, então procurar o texto em si não dá falso
+   * positivo. Olha as 3 últimas porque a foto pode ter entrado depois dele.
+   */
+  async _ultimaMinhaTem(texto) {
+    const classeSelf = SEL.minhaMensagem.classe;
+    return this.frame
+      .evaluate(
+        ({ c, t }) => {
+          const meus = document.querySelectorAll(`.message-item.${c}`);
+          for (let i = meus.length - 1; i >= 0 && i >= meus.length - 3; i--) {
+            if ((meus[i].innerText || '').includes(t)) return true;
+          }
+          return false;
+        },
+        { c: classeSelf, t: texto },
+      )
+      .catch(() => false);
+  }
+
+  /**
+   * O aviso amarelo que a Taobao mostra quando recusa um envio.
+   *
+   * Não é bloqueio nem captcha — é um toast que some sozinho, e a mensagem
+   * simplesmente não sai. Sem capturar o texto, o log só diz "não saiu" e a
+   * causa fica em aberto entre ritmo, conteúdo e sessão. Com ele, o motivo
+   * chega escrito pela própria Taobao.
+   */
+  async _lerAviso() {
+    const PISTAS = /频繁|太快|稍后|发送失败|请勿|限制|敏感/;
+    for (const raiz of [this.frame, this.pagina]) {
+      const txt = await raiz.evaluate(() => document.body.innerText || '').catch(() => '');
+      const linha = txt.split('\n').map((l) => l.trim()).find((l) => l && PISTAS.test(l));
+      if (linha) return linha.slice(0, 120);
+    }
+    return '';
   }
 
   /** Quantas mensagens NOSSAS existem agora. Serve para saber se algo saiu. */
@@ -731,6 +789,7 @@ class Chat {
     const conhecidas = new Set(chaves);
     const todas = await this._lerFornecedor();
     const novas = [];
+    let antigas = 0;
 
     for (const m of todas) {
       if (conhecidas.has(m.chave)) continue;
@@ -738,14 +797,20 @@ class Chat {
       // O horário manda. Mensagem sem data não é aceita: pode ser histórico
       // que entrou no DOM por rolagem, e entregar código velho ao cliente é
       // pior do que não entregar nada — o que já tem timeout e alerta.
-      if (ate) {
-        if (!m.quando || m.quando <= ate) {
-          console.log(`[chat] ignorada (anterior à marca ${ate}): ${m.quando || 'sem data'}`);
-          continue;
-        }
+      if (ate && (!m.quando || m.quando <= ate)) {
+        antigas++;
+        continue;
       }
 
       novas.push({ texto: m.texto, quando: m.quando });
+    }
+
+    // Uma linha por leitura, e só quando o número muda. A leitura roda a cada
+    // 6s enquanto alguém espera; logar cada mensagem descartada enchia o log
+    // de dezenas de linhas por minuto e enterrava qualquer aviso de verdade.
+    if (antigas && this._antigasLogadas !== antigas) {
+      console.log(`[chat] ${antigas} mensagem(ns) antiga(s) ignorada(s) — corte ${ate}`);
+      this._antigasLogadas = antigas;
     }
 
     return novas;
