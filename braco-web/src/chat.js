@@ -25,8 +25,25 @@ const humaniza = require('./humaniza');
 
 const rodar = (cmd, args) =>
   new Promise((ok, erro) =>
-    execFile(cmd, args, (e, stdout, stderr) => (e ? erro(new Error(stderr || e.message)) : ok(stdout))),
+    // timeout obrigatório: sem ele, um binário que trava trava o braço junto,
+    // sem log e sem fim — foi o que aconteceu no envio que ficou mudo.
+    execFile(cmd, args, { timeout: 10_000 }, (e, stdout, stderr) =>
+      e ? erro(new Error(stderr || e.message)) : ok(stdout),
+    ),
   );
+
+/**
+ * Corta uma promessa que demora demais.
+ *
+ * Todo passo do envio precisa de teto. Um passo sem teto não falha: ele PARA, e
+ * parar é o pior estado possível aqui — o braço não avança nem cai, o cliente
+ * espera, e o log fica na última linha para sempre.
+ */
+const comLimite = (promessa, ms, oQue) =>
+  Promise.race([
+    promessa,
+    new Promise((_, rej) => setTimeout(() => rej(new Error(`${oQue} passou de ${ms}ms`)), ms)),
+  ]);
 
 const SEL = JSON.parse(
   fs.readFileSync(path.join(__dirname, '..', 'seletores.json'), 'utf8'),
@@ -392,6 +409,24 @@ class Chat {
     return '';
   }
 
+  /**
+   * O campo de digitação tem algo dentro?
+   *
+   * Conta imagem também: print colado entra como <img> no <pre>, sem texto
+   * nenhum — olhar só o innerText diria "vazio" justamente quando há uma foto
+   * esperando o 发送.
+   */
+  async _campoTemConteudo() {
+    const seletores = SEL.campoTexto.candidatos;
+    return this.frame
+      .evaluate((sels) => {
+        const el = sels.map((s) => document.querySelector(s)).find(Boolean);
+        if (!el) return false;
+        return Boolean((el.innerText || '').trim()) || Boolean(el.querySelector('img'));
+      }, seletores)
+      .catch(() => false);
+  }
+
   /** Quantas mensagens NOSSAS existem agora. Serve para saber se algo saiu. */
   async _quantasMinhas() {
     const classeSelf = SEL.minhaMensagem.classe;
@@ -460,34 +495,46 @@ class Chat {
     const antes = await this._quantasMinhas();
     let via = null;
 
-    // ── 1. Ctrl+V de verdade ──────────────────────────────────
-    try {
-      if (await this._tentar(() => this._ctrlV(caminhoLocal), antes)) via = 'Ctrl+V';
-    } catch (err) {
-      console.warn(`[chat] Ctrl+V falhou: ${err.message}`);
-    }
-
-    // ── 2. Colagem forjada ────────────────────────────────────
-    if (!via) {
+    // ── 1. Uploader que se declara de imagem ──────────────────
+    //
+    // O log de produção confirmou que ele existe e se identifica sozinho:
+    // accept=".jpg,.jpeg,.gif,.png,.bmp" com pai "moxie-shim". O outro input,
+    // accept vazio e name="file" dentro de "next-upload-inner", é o de ARQUIVO
+    // — era ele que mandava o cartão "下载文件" que o fornecedor não abre.
+    //
+    // Vem primeiro por ser o caminho mais curto: uma chamada, sem clipboard,
+    // sem binário externo, sem diálogo. O Ctrl+V continua logo atrás.
+    const i = mapa.findIndex((m) => /image|jpg|jpeg|png|gif|bmp/i.test(m.accept));
+    if (i !== -1) {
+      const inputs = await this.frame.$$("input[type='file']");
       try {
-        if (await this._tentar(() => this._colarForjado(caminhoLocal), antes)) via = 'colagem';
+        console.log(`[chat] tentando input de imagem #${i} (${mapa[i].accept})`);
+        await comLimite(inputs[i].setInputFiles(caminhoLocal), 20_000, 'setInputFiles');
+        if (await this._tentar(async () => {}, antes)) via = `accept "${mapa[i].accept}"`;
       } catch (err) {
-        console.warn(`[chat] colagem forjada falhou: ${err.message}`);
+        console.warn(`[chat] input de imagem recusou: ${err.message}`);
       }
     }
 
-    // ── 3. Uploader que se declara de imagem ──────────────────
+    // ── 2. Ctrl+V de verdade ──────────────────────────────────
     if (!via) {
-      const i = mapa.findIndex((m) => /image|jpg|jpeg|png|gif|bmp/i.test(m.accept));
-      if (i !== -1) {
-        const inputs = await this.frame.$$("input[type='file']");
-        try {
-          await inputs[i].setInputFiles(caminhoLocal);
-          await this.pagina.waitForTimeout(humaniza.ms(2500, 5000));
-          via = `accept "${mapa[i].accept}"`;
-        } catch (err) {
-          console.warn(`[chat] input de imagem recusou: ${err.message}`);
+      try {
+        console.log('[chat] tentando Ctrl+V');
+        if (await this._tentar(() => comLimite(this._ctrlV(caminhoLocal), 30_000, 'Ctrl+V'), antes)) {
+          via = 'Ctrl+V';
         }
+      } catch (err) {
+        console.warn(`[chat] Ctrl+V falhou: ${err.message}`);
+      }
+    }
+
+    // ── 3. Colagem forjada ────────────────────────────────────
+    if (!via) {
+      try {
+        console.log('[chat] tentando colagem forjada');
+        if (await this._tentar(() => this._colarForjado(caminhoLocal), antes)) via = 'colagem';
+      } catch (err) {
+        console.warn(`[chat] colagem forjada falhou: ${err.message}`);
       }
     }
 
@@ -541,6 +588,11 @@ class Chat {
     }
 
     if ((await this._quantasMinhas()) > antes) return true; // enviou sozinho
+
+    // Só clica em enviar se HÁ o que enviar. Clicar com o campo vazio rende o
+    // aviso amarelo "请输入内容~", e aviso é atrito registrado na conta — não
+    // vale gastar isso para descobrir que a tentativa não pegou.
+    if (!(await this._campoTemConteudo())) return false;
 
     try {
       const botao = await this._achar('botaoEnviar', { timeout: 5000 });
@@ -632,6 +684,10 @@ class Chat {
       detached: true,
       stdio: 'ignore',
     });
+    // SEM este handler, xclip ausente vira evento 'error' sem ouvinte — e no
+    // Node isso é exceção não capturada, que derruba o braço inteiro em vez de
+    // apenas pular para o próximo caminho de envio.
+    xclip.on('error', (e) => console.warn(`[chat] xclip não rodou: ${e.message}`));
     xclip.unref();
 
     try {
