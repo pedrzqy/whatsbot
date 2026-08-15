@@ -1,0 +1,125 @@
+'use strict';
+
+/**
+ * Rotas HTTP que o braço Python consome.
+ *
+ * O braço roda em outro processo (e provavelmente em outra máquina — a VPS com
+ * ADB para o cloud phone), então a comunicação é por polling HTTP simples. Não
+ * há WebSocket nem fila externa de propósito: o braço faz uma ação a cada
+ * dezenas de segundos, e polling nesse ritmo é mais simples de operar e de
+ * depurar do que qualquer coisa persistente.
+ */
+
+const express = require('express');
+const cfg = require('./config');
+const ponte = require('./index');
+const fila = require('./fila');
+const limites = require('./limites');
+const janela = require('./janela');
+const midia = require('./midia');
+
+const router = express.Router();
+
+/** Toda rota do braço exige a chave. Sem isso, é endpoint aberto para qualquer um. */
+router.use((req, res, next) => {
+  if (!cfg.bracoApiKey) {
+    return res.status(503).json({ erro: 'PONTE_BRACO_KEY não configurada no servidor' });
+  }
+  if (req.get('x-braco-key') !== cfg.bracoApiKey) {
+    return res.status(401).json({ erro: 'chave inválida' });
+  }
+  next();
+});
+
+/**
+ * O braço pergunta se pode agir agora. Junta três respostas numa chamada só
+ * para o braço não precisar de três round-trips a cada ciclo.
+ */
+router.get('/estado', (_req, res) => {
+  const j = janela.estado();
+  const d = limites.disjuntor();
+  res.json({
+    podeAgir: j.aberta && d.estado === 'fechado',
+    janelaAberta: j.aberta,
+    esperaMinutos: j.esperaMinutos,
+    disjuntor: d.estado,
+    motivoDisjuntor: d.motivo,
+    chatTitulo: cfg.vendedor.chatTitulo,
+    // Só faz sentido ler o chat se alguém está esperando resposta.
+    temAtendimentoAtivo: Boolean(fila.ativo()),
+  });
+});
+
+/** Próxima tarefa de envio. 204 quando não há nada a fazer. */
+router.get('/proxima', (_req, res) => {
+  const d = limites.disjuntor();
+  if (d.estado === 'aberto') return res.status(204).end();
+  if (!janela.estado().aberta) return res.status(204).end();
+
+  const t = ponte.proximaTarefa();
+  if (!t) return res.status(204).end();
+
+  res.json(t);
+});
+
+/** Resultado de um envio. */
+router.post('/resultado', async (req, res) => {
+  const { id, ok, erro, printPath } = req.body || {};
+  if (!id) return res.status(400).json({ erro: 'id obrigatório' });
+  const r = await ponte.resultadoTarefa(id, Boolean(ok), erro, printPath);
+  res.json(r);
+});
+
+/**
+ * Mensagens NOVAS do fornecedor.
+ *
+ * O braço só manda o que veio DEPOIS da marca d'água registrada no envio. Ele
+ * nunca varre o histórico: o chat tem meses de conversa visível, e ler tudo
+ * viraria centenas de "códigos novos" na primeira execução.
+ */
+router.post('/entrada', async (req, res) => {
+  const mensagens = Array.isArray(req.body?.mensagens) ? req.body.mensagens : [];
+  res.json({ ok: true, recebidas: mensagens.length }); // responde já, processa depois
+
+  for (const m of mensagens) {
+    const texto = String(m?.texto || '').trim();
+    if (!texto) continue;
+    try {
+      await ponte.receberDoFornecedor({ texto, printPath: m.printPath });
+    } catch (err) {
+      console.error('[ponte/braco] falha ao processar entrada:', err.message);
+    }
+  }
+});
+
+/** O braço viu captcha / logout / conta sinalizada. Congela tudo. */
+router.post('/bloqueio', async (req, res) => {
+  const { motivo, printPath } = req.body || {};
+  res.json({ ok: true });
+  await ponte.bloqueioDetectado(motivo || 'verificação anti-bot detectada', printPath);
+});
+
+/**
+ * Serve a foto do cliente para o braço baixar.
+ *
+ * O braço roda noutra máquina (a VPS com ADB), então não enxerga o disco do
+ * bot: ele pega a imagem por aqui, empurra para a galeria do celular e anexa
+ * no chat.
+ */
+router.get('/midia/:nome', (req, res) => {
+  const { nome } = req.params;
+  if (!midia.existe(nome)) return res.status(404).json({ erro: 'arquivo não encontrado' });
+  res.sendFile(midia.caminho(nome));
+});
+
+/** Log estruturado do braço — é aqui que se descobre que a Taobao mudou a UI. */
+router.post('/evento', (req, res) => {
+  const { nivel, etapa, detalhe } = req.body || {};
+  const linha = `[braço/${nivel || 'info'}] ${etapa}: ${detalhe}`;
+  if (nivel === 'error') console.error(linha);
+  else if (nivel === 'warn') console.warn(linha);
+  else console.log(linha);
+  res.json({ ok: true });
+});
+
+module.exports = router;

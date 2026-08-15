@@ -13,6 +13,7 @@
 const nerix = require('./nerix');
 const config = require('./config');
 const store = require('./store');
+const ponte = require('./ponte');
 
 /** Monta o link direto do produto no site (rota /package/:slug da Nerix). */
 function productLink(slug) {
@@ -33,6 +34,31 @@ const definitions = [
           termo: { type: 'string', description: 'Termo de busca pelo nome do produto (ex.: "minecraft"). Vazio lista os primeiros.' },
         },
         required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'pedir_codigo_fornecedor',
+      description:
+        'Pede ao FORNECEDOR o código de verificação da conta do cliente e entrega o código a ele. ' +
+        'Use quando o cliente estiver travado na tela de verificação e o site de código não resolver: ' +
+        'ele precisa mandar o USUÁRIO da conta (algo como "rrrtsr223") e, de preferência, a FOTO da tela. ' +
+        'Se ele ainda não mandou o usuário, PEÇA antes de chamar esta ferramenta — sem o usuário o fornecedor ' +
+        'não consegue achar a conta. O fornecedor atende um cliente por vez e fica 11h à nossa frente, ' +
+        'então pode demorar; a ferramenta já devolve o que dizer sobre o prazo.',
+      parameters: {
+        type: 'object',
+        properties: {
+          usuario: {
+            type: 'string',
+            description:
+              'O usuário da conta, EXATAMENTE como o cliente mandou. Só o usuário, sem frase em volta. ' +
+              'Alfanumérico, até 20 caracteres. Ex.: "rrrtsr223".',
+          },
+        },
+        required: ['usuario'],
       },
     },
   },
@@ -99,6 +125,28 @@ function formatProducts(list) {
 
 async function execute(name, args = {}, ctx = {}) {
   try {
+    if (name === 'pedir_codigo_fornecedor') {
+      const usuario = (args.usuario || '').trim();
+      if (!usuario) return { erro: 'usuario_vazio' };
+
+      const contato = ctx.from ? store.getContact(ctx.from) : null;
+      // ctx.imagem vem do handlers quando o cliente mandou foto nesta mensagem.
+      const r = await ponte.pedirCodigo(
+        ctx.from,
+        contato?.name || ctx.pushName || ctx.from,
+        usuario,
+        ctx.imagem || null,
+      );
+
+      console.log(`[ponte] ${ctx.from} pediu código para "${usuario}"${ctx.imagem ? ' (+foto)' : ''}`);
+      return {
+        aceito: r.aceito,
+        // A IA repassa isto ao cliente com as palavras dela. NÃO invente prazo
+        // diferente do que vem aqui — ele considera o fuso da China.
+        instrucao_para_o_cliente: r.mensagem,
+      };
+    }
+
     if (name === 'falar_com_atendente') {
       const nome = (args.nome_completo || '').trim();
       if (nome.split(/\s+/).length < 2) return { erro: 'falta_sobrenome' };

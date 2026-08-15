@@ -258,7 +258,7 @@ async function chat(messages, opts = {}) {
  * A IA pode chamar ferramentas (consultar a Nerix) antes de responder.
  * @returns {Promise<string>} texto da resposta
  */
-async function reply(from, userText, pushName) {
+async function reply(from, userText, pushName, extra = {}) {
   const contact = store.getContact(from);
   const system = await buildSystemPrompt(contact?.name || pushName);
   const history = getHistory(from);
@@ -280,7 +280,9 @@ async function reply(from, userText, pushName) {
         let args = {};
         try { args = JSON.parse(call.function.arguments || '{}'); } catch { /* ignore */ }
         console.log(`[ai] ferramenta ${call.function.name}(${call.function.arguments || ''})`);
-        const result = await tools.execute(call.function.name, args, { from });
+        // `extra` carrega contexto da mensagem atual (ex.: imagem que o cliente
+        // acabou de mandar) para ferramentas que precisam dele.
+        const result = await tools.execute(call.function.name, args, { from, pushName, ...extra });
         messages.push({
           role: 'tool',
           tool_call_id: call.id,

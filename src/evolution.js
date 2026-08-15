@@ -65,10 +65,31 @@ async function sendMedia(number, { mediatype, media, caption, fileName }, opts =
   return data;
 }
 
+/**
+ * Baixa a mídia de uma mensagem RECEBIDA e devolve em base64.
+ *
+ * O webhook da Evolution entrega só os metadados da imagem (mimetype, tamanho,
+ * chaves de criptografia) — o binário fica no servidor do WhatsApp. Esta rota
+ * pede à Evolution que baixe e descriptografe por nós.
+ *
+ * @param {object} rawMessage  o objeto `data` do webhook (precisa ter .key e .message)
+ * @param {{instance?:string}} [opts]
+ * @returns {Promise<{base64:string, mimetype:string, fileName?:string}>}
+ */
+async function getBase64FromMediaMessage(rawMessage, opts = {}) {
+  const instance = opts.instance || config.evolution.instance;
+  const { data } = await http.post(`/chat/getBase64FromMediaMessage/${instance}`, {
+    message: rawMessage,
+    convertToMp4: false,
+  });
+  return data;
+}
+
 module.exports = {
   http,
   toNumber,
   sendText,
   sendPresence,
   sendMedia,
+  getBase64FromMediaMessage,
 };

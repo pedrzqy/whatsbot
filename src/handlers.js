@@ -17,6 +17,9 @@ const welcome = require('./welcome');
 const ai = require('./ai');
 const sender = require('./sender');
 const variator = require('./variator');
+const operador = require('./ponte/operador');
+const recepcao = require('./ponte/recepcao');
+const ponte = require('./ponte');
 
 // Palavras que reativam o autoatendimento quando o cliente está com um humano.
 const RESUME = new Set(['#inicio', '#início', 'inicio', 'início', 'menu', 'voltar', 'atendimento', 'recomecar', 'recomeçar']);
@@ -43,10 +46,51 @@ function onIncomingMessage(msg) {
 }
 
 async function handleMessage(msg) {
-  const { from, text, pushName } = msg;
+  const { from, text, pushName, imagem } = msg;
   const trimmed = (text || '').trim();
   const lower = trimmed.toLowerCase();
-  console.log(`[msg] de ${from} (${pushName || '?'}): ${trimmed}`);
+  console.log(`[msg] de ${from} (${pushName || '?'}): ${trimmed}${imagem ? ' [+foto]' : ''}`);
+
+  // ─── 0) Comandos do operador da ponte (só do número configurado) ───
+  // Vem antes de tudo: quando a Taobao pede verificação, o operador precisa
+  // destravar em segundos, e não pode esbarrar em boas-vindas ou pausa.
+  if (operador.ehComando(from, trimmed)) {
+    try {
+      await sender.send(from, await operador.executar(trimmed), { typing: false });
+    } catch (err) {
+      console.error('[ponte/operador] erro:', err.message);
+      await sender.send(from, `Falhou: ${err.message}`, { typing: false });
+    }
+    return;
+  }
+
+  // ─── 0.1) Pedido de código ao fornecedor (ponte) ───
+  //
+  // Vem ANTES do check de autoReply de propósito. Com BOT_AUTOREPLY=false o
+  // fluxo abaixo retorna sem chamar a IA, e a ferramenta pedir_codigo_fornecedor
+  // nunca seria invocada — a ponte ficaria inerte, sem erro e sem log.
+  //
+  // O gatilho é estreito (foto + algo com cara de usuário de conta), então
+  // conversa normal de vendas não cai aqui. ATENÇÃO: neste caminho o bot
+  // RESPONDE ao cliente mesmo com autoreply desligado — é o único jeito de
+  // pedir a metade que falta e de entregar o código depois.
+  if (ponte.ativa()) {
+    const r = recepcao.avaliar(from, trimmed, imagem);
+
+    if (r.acao === 'responder') {
+      store.saveContact(from, { lastSeen: Date.now(), name: pushName || store.getContact(from)?.name });
+      await sender.send(from, r.mensagem);
+      return;
+    }
+
+    if (r.acao === 'pedir') {
+      store.saveContact(from, { lastSeen: Date.now(), name: pushName || store.getContact(from)?.name });
+      const nome = store.getContact(from)?.name || pushName || from;
+      const res = await ponte.pedirCodigo(from, nome, r.usuario, r.imagem);
+      await sender.send(from, res.mensagem);
+      return;
+    }
+  }
 
   // Auto-resposta DESLIGADA (BOT_AUTOREPLY=false): o bot não RESPONDE no 1-a-1
   // (um humano atende). Mas marca o contato como engajado, pra a RECUPERAÇÃO DE
@@ -95,11 +139,14 @@ async function handleMessage(msg) {
   // Cliente entrou na conversa (não é só boas-vindas): vira candidato à recuperação
   // e, por estar ativo agora, zera qualquer ciclo de cutucada pendente.
   store.saveContact(from, { ...nameFields, engaged: true, followupCount: 0 });
-  if (!trimmed) return;
+  // Foto sem legenda ainda é mensagem: o cliente manda a imagem do produto e
+  // pergunta depois. Sem isto, a foto seria descartada antes de chegar na IA.
+  if (!trimmed && !imagem) return;
 
   // ─── 4) Todo o resto → IA (conversa livre; ela transfere p/ atendente se preciso) ───
   try {
-    const answer = await ai.reply(from, trimmed, pushName);
+    const texto = trimmed || '(o cliente mandou uma foto sem escrever nada)';
+    const answer = await ai.reply(from, texto, pushName, { imagem });
     await sender.send(from, answer);
   } catch (err) {
     console.error('[ai] erro ao responder:', err.response?.data || err.message);
