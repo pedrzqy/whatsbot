@@ -244,6 +244,37 @@ t('número do operador é ignorado',
   recepcao.avaliar('5541999999999', 'rrrtsr223', 'x.jpg').acao === 'ignorar');
 
 // ── Comandos do operador ────────────────────────────────────
+// ── O cliente não pode saber de onde vem o código ───────────
+// Para o cliente, quem gera é a Phaze. Uma palavra escapando numa mensagem
+// automática entrega a origem — e mensagem automática é justamente a que
+// ninguém relê antes de sair.
+bloco('nada de "fornecedor"/"taobao" no que o cliente lê');
+const PROIBIDO = /fornecedor|taobao|chin[êe]s|vendedor|parceiro/i;
+const paraCliente = [];
+
+paraCliente.push(janela.estado(emBRT('09:00')).avisoCliente);
+paraCliente.push(janela.estado(emBRT('16:00')).avisoCliente);
+
+const CLI9 = '5541911112222';
+paraCliente.push(recepcao.avaliar(CLI9, 'preciso do codigo', null).mensagem);
+paraCliente.push(recepcao.avaliar(CLI9, '', 'x.jpg').mensagem);
+paraCliente.push(recepcao.avaliar(CLI9, 'nao lembro', null).mensagem);
+paraCliente.push(recepcao.avaliar('5541911113333', 'rrtt9321', null).mensagem);
+
+// O que o #enviar leva ao cliente quando a resposta não é código.
+paraCliente.push(politica.paraCliente('看 https://item.taobao.com/i.htm 有货').texto);
+
+paraCliente.forEach((m, i) => {
+  t(`mensagem ${i + 1} não entrega a origem`, typeof m === 'string' && m.length > 0 && !PROIBIDO.test(m), m);
+});
+
+bloco('id fácil de copiar');
+const { proximoId } = require('./src/ponte/estado');
+const id1 = proximoId();
+t('id é só número', /^\d+$/.test(id1), id1);
+t('id tem no máximo 6 dígitos', id1.length <= 6, id1);
+t('ids não repetem', proximoId() !== id1);
+
 bloco('comandos do operador');
 t('reconhece #fila do operador', operador.ehComando('5541999999999', '#fila') === true);
 t('ignora #fila de estranho', operador.ehComando('5511888887777', '#fila') === false);

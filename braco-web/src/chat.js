@@ -546,7 +546,9 @@ class Chat {
           const quando = mData ? mData[0] : '';
           const nick = (bruto.split('\n')[0] || '').trim();
 
-          const conteudo = limpo || '[o fornecedor respondeu com uma imagem]';
+          // Sem "fornecedor" no texto: este conteúdo pode chegar ao cliente
+          // pelo #enviar, e para ele a Phaze é quem gera o código.
+          const conteudo = limpo || '[respondeu com uma imagem]';
           saida.push({ chave: `${nick}|${quando}|${conteudo}`, texto: conteudo, quando });
         }
 

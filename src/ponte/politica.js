@@ -100,9 +100,12 @@ function paraCliente(traduzido) {
     }
   }
 
+  // O texto substituído VAI PARA O CLIENTE (pelo #enviar), então ele não pode
+  // denunciar a origem. A flag continua dizendo tudo ao operador; só o que o
+  // cliente lê fica neutro.
   texto = texto.replace(g(RE_URL), (url) => {
     flags.push(linkPermitido(url) ? 'link_fornecedor' : 'link_externo');
-    return '[link do fornecedor]';
+    return '[link removido]';
   });
 
   // Assuntos que exigem decisão comercial, não só tradução.

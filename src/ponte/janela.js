@@ -79,8 +79,10 @@ function estado(agora = new Date()) {
       aberta: true,
       esperaMinutos: 0,
       proximaAbertura: agora,
-      avisoCliente:
-        'Já estou pedindo o código pro fornecedor. Assim que ele responder eu te mando aqui 👍',
+      // O cliente nunca fica sabendo de onde vem o código. Para ele é a Phaze
+      // que gera, e é isso que a mensagem diz — sem "canal", sem "parceiro",
+      // sem nada que sugira que existe alguém do outro lado.
+      avisoCliente: 'Já estou pegando seu código automaticamente. Só um instante 👍',
     };
   }
 
@@ -93,9 +95,11 @@ function estado(agora = new Date()) {
     aberta: false,
     esperaMinutos: espera,
     proximaAbertura: new Date(agora.getTime() + espera * 60 * 1000),
+    // Fora da janela também não se explica o motivo: só o horário. "Sistema em
+    // manutenção" é verdade suficiente e não abre porta para pergunta nenhuma.
     avisoCliente:
-      `Recebi! O fornecedor está fora do ar agora e volta por volta das ${comoHora(alvo)}. ` +
-      `Sua solicitação já está na fila e assim que ele voltar eu peço o código e te aviso 👍`,
+      `Recebi! O sistema de código volta por volta das ${comoHora(alvo)}. ` +
+      `Você já está na fila e eu te mando assim que sair 👍`,
   };
 }
 

@@ -104,10 +104,21 @@ function persistAgora() {
   }
 }
 
+/**
+ * Id curto — um número e pronto.
+ *
+ * O operador digita isto no celular, às vezes com o cliente esperando:
+ * `#ok 7` sai numa tacada, `#ok at_msv3a1bf_12` obriga a selecionar e colar,
+ * e errar um caractere devolve "não achei a tarefa".
+ *
+ * O contador é único para atendimento, tarefa e aprovação, então nunca há dois
+ * itens com o mesmo número — e ele nunca zera, nem em restart, porque vive no
+ * estado persistido junto com as tarefas que o referenciam.
+ */
 function proximoId() {
   dados.seq += 1;
   persist();
-  return `at_${Date.now().toString(36)}_${dados.seq}`;
+  return String(dados.seq);
 }
 
 load();

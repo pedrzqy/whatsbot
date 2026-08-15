@@ -102,18 +102,18 @@ function pedeCodigo(texto) {
   return VERBO_DE_PEDIDO.test(t);
 }
 
+// Curtas de propósito. Cliente no meio de uma compra lê a primeira linha e
+// age; parágrafo faz ele parar para entender e perguntar de novo.
 const MSG_PEDE_FOTO =
-  'Pra pegar o código eu preciso de *2 coisas*, uma de cada vez 👇\n\n' +
-  '1️⃣ Manda a *foto da tela do console*, na página onde ele está pedindo o ' +
-  'código de verificação.';
+  'Vou pegar seu código! Preciso de *2 coisas* 👇\n\n' +
+  '1️⃣ *Foto da tela do console*, na página que está pedindo o código.';
 
 const MSG_PEDE_USUARIO =
   'Foto recebida ✅\n\n' +
-  '2️⃣ Agora manda o *login/usuário* da conta — só o usuário, *nunca a senha*.';
+  '2️⃣ Agora o *login/usuário* da conta — só o usuário, *nunca a senha*.';
 
 const MSG_USUARIO_INVALIDO =
-  'Não consegui entender o usuário 🤔\n\n' +
-  'Manda ele *sozinho*, numa mensagem só — por exemplo: `rrrtsr223`';
+  'Não entendi o usuário 🤔\n\n' + 'Manda ele sozinho, tipo: `rrrtsr223`';
 
 /**
  * Acabamos de dizer ISTO para este cliente?
@@ -210,7 +210,7 @@ function avaliar(from, texto, imagem) {
     return responder(
       'foto',
       'Anotei o usuário! Manda também o *print da tela de verificação* que eu ' +
-        'peço o código pro fornecedor 👍',
+        'pego seu código 👍',
       { usuario, imagem: null, etapa: 'foto' }
     );
   }

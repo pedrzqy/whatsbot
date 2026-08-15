@@ -63,8 +63,10 @@ async function alertar(texto, imagem, nomeArquivo) {
  * @returns {Promise<{aceito:boolean, mensagem:string}>}
  */
 async function pedirCodigo(from, nome, usuarioBruto, imagemPath = null) {
+  // NADA do que sai daqui para o cliente cita a origem do código.
+  // Para ele, quem gera é a Phaze — e essa é a única versão que existe.
   if (!cfg.ativa) {
-    return { aceito: false, mensagem: 'O canal com o fornecedor está desativado agora.' };
+    return { aceito: false, mensagem: 'O sistema de código está em manutenção. Já te aviso 🙏' };
   }
 
   const d = limites.disjuntor();
@@ -72,9 +74,7 @@ async function pedirCodigo(from, nome, usuarioBruto, imagemPath = null) {
     await alertar(`⚠️ ${nome} pediu código com a ponte congelada. Fila parada.`);
     return {
       aceito: false,
-      mensagem:
-        'Nosso canal está passando por uma verificação neste momento. ' +
-        'Já estou resolvendo e te mando o código em seguida 🙏',
+      mensagem: 'Estou resolvendo uma coisa aqui no sistema e já te mando o código 🙏',
     };
   }
 
@@ -97,9 +97,7 @@ async function pedirCodigo(from, nome, usuarioBruto, imagemPath = null) {
   if (!lim.permitido) {
     return {
       aceito: false,
-      mensagem:
-        'Já pedi vários códigos pra você agora há pouco e o fornecedor atende um por vez. ' +
-        'Deixa eu esperar os anteriores voltarem 👍',
+      mensagem: 'Você já pediu vários códigos agora há pouco. Deixa os anteriores chegarem primeiro 👍',
     };
   }
 
@@ -112,9 +110,8 @@ async function pedirCodigo(from, nome, usuarioBruto, imagemPath = null) {
     return {
       aceito: true,
       mensagem:
-        `Anotei! O fornecedor libera um código por vez e tem ${aFrente} ` +
-        `${aFrente === 1 ? 'pessoa' : 'pessoas'} na frente. Assim que chegar a sua vez ` +
-        `eu peço e te mando 👍`,
+        `Anotei! Tem ${aFrente} ${aFrente === 1 ? 'pessoa' : 'pessoas'} na sua frente. ` +
+        `Já já pego seu código e te mando 👍`,
     };
   }
 
@@ -189,7 +186,7 @@ async function receberDoFornecedor(entrada) {
   // Marcador sintético do braço ("respondeu com uma imagem") já vem em
   // português — mandar para o tradutor gastaria chamada de LLM para traduzir
   // português em português.
-  const jaEmPortugues = entrada.texto.startsWith('[o fornecedor respondeu');
+  const jaEmPortugues = entrada.texto.startsWith('[respondeu com');
   let traduzido = entrada.texto;
   if (!jaEmPortugues) {
     try {
@@ -243,7 +240,7 @@ async function promoverProximo() {
   const at = fila.ativo();
   if (!at || !at.usuario) return;
 
-  await sender.send(at.from, 'Chegou sua vez! Já estou pedindo o código ao fornecedor 👍');
+  await sender.send(at.from, 'Chegou sua vez! Já estou pegando seu código 👍');
   await despachar(at);
 }
 
@@ -351,7 +348,7 @@ async function resultadoTarefa(id, ok, erro, printPath) {
     if (at) {
       await sender.send(
         at.from,
-        'Não consegui falar com o fornecedor agora. Já avisei nossa equipe e te retorno 🙏',
+        'Deu um problema aqui no sistema. Nossa equipe já foi avisada e te retorno 🙏',
       );
     }
     await alertar(`⚠️ Desisti de um envio após 3 tentativas.\nErro: ${erro}`, printPath);
@@ -401,7 +398,7 @@ async function tick() {
     for (const v of vencidos) {
       await sender.send(
         v.from,
-        'O fornecedor ainda não devolveu seu código. Já cobrei de novo — ' +
+        'Seu código está demorando mais que o normal. Já estou vendo isso — ' +
           'se preferir, posso te passar pra um atendente 👍',
       );
       await alertar(`⏱️ Atendimento de *${v.nome}* (\`${v.usuario}\`) expirou sem código.`);
