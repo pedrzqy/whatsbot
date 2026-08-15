@@ -76,10 +76,19 @@ let smsPedidoEm = 0;
 async function garantirLogin(pagina, chat) {
   try {
     await chat.prender(); // achou o iframe chat-core = está logado
+    console.log('[braço] sessão ok (iframe do chat encontrado)');
     smsPedidoEm = 0;
     return true;
-  } catch {
-    /* não logado — segue abaixo */
+  } catch (err) {
+    // Diz POR QUE achou que não está logado. Sem isto, o log só informa que
+    // um print foi enviado — e a tela pode estar perfeitamente carregada
+    // enquanto o problema é outro (frame com outro nome, página errada,
+    // aba diferente). Foi exatamente onde a gente ficou cego.
+    console.warn(`[braço] sessão NÃO ok: ${err.message}`);
+    console.warn(`[braço] URL atual: ${pagina.url()}`);
+    for (const f of pagina.frames()) {
+      console.warn(`[braço]   frame: ${f.url() || '(sem url)'}`);
+    }
   }
 
   // Caso 1: verificação por SMS. A Taobao manda o código para o telefone do
