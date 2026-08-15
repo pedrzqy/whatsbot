@@ -43,6 +43,11 @@ RUN chmod +x entrypoint.sh
 # 6 meses de histórico — que é o gatilho mais direto de verificação.
 VOLUME ["/app/perfil-chrome"]
 
+# Tela remota (noVNC). O proxy do Easypanel alcança a porta pela rede Docker
+# mesmo sem isto, mas declarar faz a sugestão de porta aparecer no painel e
+# deixa explícito o que o container serve.
+EXPOSE 6080
+
 # Headful sob display virtual. Headless entrega uma classe inteira de sinais
 # (UA HeadlessChrome, plugins vazios, WebGL irreal) que patch de JS não cobre
 # bem. xvfb-run custa ~200MB de RAM e resolve na raiz.
