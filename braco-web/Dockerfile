@@ -19,6 +19,14 @@ WORKDIR /app
 #
 # Não é automação de captcha — é dar ao operador acesso à tela para ele mesmo
 # resolver. O mesmo canal serve para login e qualquer diálogo inesperado.
+# DEBIAN_FRONTEND=noninteractive é obrigatório aqui: o novnc puxa tzdata como
+# dependência, e o tzdata abre um menu perguntando a região geográfica. Sem
+# ninguém para responder, o build fica parado nesse prompt até estourar o
+# tempo — sem erro, só travado.
+# O TZ pré-definido evita a pergunta já na raiz.
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=America/Sao_Paulo
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
       x11vnc novnc websockify \
     && rm -rf /var/lib/apt/lists/*
