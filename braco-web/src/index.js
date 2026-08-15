@@ -139,14 +139,48 @@ async function lerRespostas(chat, marca) {
 // ------------------------------------------------------------
 
 async function main() {
+  // Diagnóstico ANTES de qualquer coisa que possa travar. A primeira versão ia
+  // direto para abrir(), então quando o navegador não subia o container ficava
+  // mudo — sem uma linha dizendo onde parou.
+  console.log('[braço] iniciando');
+  console.log(`[braço] BOT_URL = ${cfg.botUrl}`);
+  console.log(`[braço] chave   = ${cfg.chave ? 'definida' : 'AUSENTE'}`);
+  console.log(`[braço] DISPLAY = ${process.env.DISPLAY || '(vazio — xvfb não exportou)'}`);
+
   if (!cfg.chave) {
-    console.error('[fatal] PONTE_BRACO_KEY vazia. Preencha o .env.');
+    console.error('[fatal] PONTE_BRACO_KEY vazia. Preencha no Environment do serviço.');
     process.exit(2);
   }
 
-  const { contexto, pagina } = await abrir();
+  // Fala com o bot ANTES de abrir o navegador: se a rede interna estiver
+  // errada, melhor descobrir agora do que depois de esperar o Chrome subir.
+  try {
+    const { data } = await api.get('/estado');
+    console.log(
+      `[braço] bot ok — janela ${data.janelaAberta ? 'aberta' : 'fechada'}, disjuntor ${data.disjuntor}`,
+    );
+  } catch (err) {
+    console.error(`[fatal] não falei com o bot em ${cfg.botUrl}: ${err.message}`);
+    console.error('        Se for ECONNREFUSED, o whatsbot escuta noutra porta — tente :3000.');
+    process.exit(3);
+  }
+
+  console.log('[braço] abrindo o Chrome (pode levar ~30s na primeira vez)…');
+  let contexto;
+  let pagina;
+  try {
+    ({ contexto, pagina } = await abrir());
+    console.log('[braço] Chrome aberto');
+  } catch (err) {
+    console.error(`[fatal] não abri o Chrome: ${err.message}`);
+    console.error(err.stack || '');
+    process.exit(4);
+  }
+
   const chat = new Chat(pagina);
+  console.log(`[braço] carregando ${cfg.chatUrl}`);
   await pagina.goto(cfg.chatUrl, { waitUntil: 'domcontentloaded' });
+  console.log('[braço] página carregada — entrando no laço');
 
   // Marca do atendimento em curso. null = ninguém esperando resposta.
   let marcaAtual = null;

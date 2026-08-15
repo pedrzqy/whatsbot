@@ -29,4 +29,9 @@ VOLUME ["/app/perfil-chrome"]
 # Headful sob display virtual. Headless entrega uma classe inteira de sinais
 # (UA HeadlessChrome, plugins vazios, WebGL irreal) que patch de JS não cobre
 # bem. xvfb-run custa ~200MB de RAM e resolve na raiz.
-CMD ["xvfb-run", "--auto-servernum", "--server-args=-screen 0 1440x900x24", "node", "src/index.js"]
+#
+# O echo e o teste de xvfb-run vêm antes de propósito: sem eles, container que
+# sobe e não imprime nada não diz se o problema é a imagem, o xvfb ou o Node.
+# Com estas linhas, silêncio total passa a significar "nem o container subiu",
+# que é um diagnóstico diferente.
+CMD ["sh", "-c", "echo '[docker] container subiu'; command -v xvfb-run >/dev/null || echo '[docker] ERRO: xvfb-run ausente na imagem'; exec xvfb-run --auto-servernum --server-args='-screen 0 1440x900x24' node src/index.js"]
