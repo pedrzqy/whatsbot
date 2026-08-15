@@ -51,8 +51,14 @@ async function evento(nivel, etapa, detalhe) {
  */
 async function alertarComPrint(pagina, texto) {
   try {
-    const png = await pagina.screenshot({ type: 'png' });
-    await api.post('/alerta', { texto, imagemBase64: png.toString('base64') });
+    // JPEG e não PNG: print de 1440x900 em PNG passa de 1MB depois do base64,
+    // tamanho que a Evolution costuma recusar com 400 — e aí o sender cai no
+    // fallback de só texto, que para um QR é inútil. Em q90 o QR continua
+    // perfeitamente escaneável e o payload cai para ~100KB.
+    const jpg = await pagina.screenshot({ type: 'jpeg', quality: 90 });
+    const b64 = jpg.toString('base64');
+    console.log(`[braço] enviando print (${Math.round(b64.length / 1024)} KB em base64)`);
+    await api.post('/alerta', { texto, imagemBase64: b64 });
   } catch (err) {
     console.error('[braço] falha ao mandar print:', err.message);
     await api.post('/alerta', { texto }).catch(() => {});

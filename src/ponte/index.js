@@ -33,13 +33,17 @@ const midia = require('./midia');
 const { dados, persist, persistAgora, proximoId } = require('./estado');
 const sender = require('../sender');
 
-async function alertar(texto, imagem) {
+async function alertar(texto, imagem, nomeArquivo) {
   if (!cfg.operador.numero) {
     console.warn('[ponte] alerta sem destino (defina PONTE_OPERADOR_NUMERO):', texto);
     return;
   }
   try {
-    await sender.send(cfg.operador.numero, texto, imagem ? { image: imagem } : {});
+    await sender.send(
+      cfg.operador.numero,
+      texto,
+      imagem ? { image: imagem, fileName: nomeArquivo || 'ponte.png' } : {},
+    );
   } catch (err) {
     console.error('[ponte] falha ao alertar operador:', err.message);
   }

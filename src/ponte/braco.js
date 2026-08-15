@@ -107,13 +107,14 @@ router.post('/alerta', async (req, res) => {
   res.json({ ok: true });
   if (!texto) return;
 
+  // Base64 PURO, sem prefixo data:. A Evolution rejeita o data URI com 400 —
+  // foi o que derrubou o primeiro envio do QR e fez o sender cair no fallback
+  // de só texto, que para um QR é inútil.
   const imagem = imagemBase64
-    ? (String(imagemBase64).startsWith('data:')
-        ? String(imagemBase64)
-        : `data:image/png;base64,${imagemBase64}`)
+    ? String(imagemBase64).replace(/^data:[^;]+;base64,/, '')
     : undefined;
 
-  await ponte.alertar(texto, imagem);
+  await ponte.alertar(texto, imagem, 'ponte.jpg');
 });
 
 /** O braço viu captcha / logout / conta sinalizada. Congela tudo. */

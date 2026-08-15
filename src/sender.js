@@ -97,10 +97,19 @@ async function processJob(job) {
   // 4) Envio. Com imagem → card de mídia. Se opts.imageOnly, NÃO cai pra texto (lança).
   if (opts.image) {
     try {
-      await evolution.sendMedia(number, { mediatype: 'image', media: opts.image, caption: text }, evoOpts);
+      await evolution.sendMedia(
+        number,
+        { mediatype: 'image', media: opts.image, caption: text, fileName: opts.fileName },
+        evoOpts,
+      );
     } catch (err) {
       if (opts.imageOnly) throw err; // só imagem: se falhar, não manda texto
-      console.warn('[sender] mídia falhou, enviando só texto:', err.response?.status || err.message);
+      // Loga o corpo do erro, não só o status: com base64 o motivo do 400 vem
+      // no payload da Evolution, e sem ele o diagnóstico vira adivinhação.
+      const detalhe = err.response?.data
+        ? JSON.stringify(err.response.data).slice(0, 300)
+        : err.message;
+      console.warn(`[sender] mídia falhou (${err.response?.status || '?'}): ${detalhe}`);
       await evolution.sendText(number, text, evoOpts);
     }
   } else {
