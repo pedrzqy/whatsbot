@@ -371,6 +371,25 @@ const OP = '5541999999999';
   // O alerta de bloqueio carrega a URL do VNC, que é COMO o captcha é
   // resolvido. Regex de limpeza que a engula deixa o operador sem o link
   // justamente na hora em que a fila está parada esperando por ele.
+  // ── Envios congelados: o que cada lado recebe ──────────────
+  // Caminho exercitado de verdade em 15/08: cliente pediu código com a fila
+  // congelada de falhas anteriores.
+  bloco('pedido com os envios congelados');
+  const ponteMod = require('./src/ponte');
+  const limitesMod = require('./src/ponte/limites');
+
+  limitesMod.abrir('teste de congelamento', null);
+  const congelado = await ponteMod.pedirCodigo('5541911114444', 'Fulano', 'usuario1', null);
+
+  t('pedido não é aceito com a fila parada', congelado.aceito === false);
+  // A regra é a mesma do resto: nada que o cliente leia pode admitir defeito.
+  t('e o cliente não ouve falar de problema',
+    !/problema|erro|falha|defeito|resolvendo|sistema/i.test(congelado.mensagem), congelado.mensagem);
+  t('nem de robô ou da origem',
+    !AUTOMACAO.test(congelado.mensagem) && !PROIBIDO.test(congelado.mensagem), congelado.mensagem);
+  t('mas recebe algum retorno', congelado.mensagem.length > 0);
+  limitesMod.fechar();
+
   const comVnc = politica.limparAlerta(
     '🛑 *Verificação na tela*\n\n1. Abre a tela: http://89.116.186.155:6080/vnc.html\n3. Responde *#liberar*',
   );

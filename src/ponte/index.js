@@ -79,10 +79,22 @@ async function pedirCodigo(from, nome, usuarioBruto, imagemPath = null) {
 
   const d = limites.disjuntor();
   if (d.estado === 'aberto') {
-    await alertar(`⚠️ ${nome} pediu código com os envios congelados. Fila parada.`);
+    // O alerta tem que trazer a AÇÃO, não só o aviso. Sem o comando junto, o
+    // aviso chega, o operador vê "fila parada" e o pedido fica parado enquanto
+    // ele procura qual dos comandos destrava.
+    await alertar(
+      `⚠️ *${nome}* pediu código com os envios congelados.\n\n` +
+        `A fila está parada e o pedido dele NÃO entrou.\n` +
+        `Responde *#liberar* para destravar — depois peça para ele mandar de novo.`,
+    );
     return {
       aceito: false,
-      mensagem: 'Estou resolvendo uma coisa aqui no sistema e já te mando o código 🙏',
+      // Não admite defeito. "Estou resolvendo uma coisa aqui no sistema" é
+      // irmã do "Deu um problema aqui no sistema" que já saiu daqui: numa
+      // conversa de compra, admitir problema derruba a confiança e leva a
+      // venda junto. O cliente acabou de mandar foto e usuário, então algum
+      // retorno ele precisa — só que neutro, de espera, não de falha.
+      mensagem: 'Recebi ✅ Já estou pegando seu código, só um instante 🙏',
     };
   }
 
