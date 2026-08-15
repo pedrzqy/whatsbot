@@ -322,6 +322,60 @@ const OP = '5541999999999';
   }
   await operador.executar('#teste'); // desliga o que o laço acima ligou
 
+  // ── Erro técnico não vira mensagem de WhatsApp ─────────────
+  // O texto abaixo é REAL: saiu pelo número comercial em 15/08 num alerta de
+  // "Envio pela metade". Log de Playwright inteiro numa conversa de loja.
+  bloco('stack trace nunca sai no WhatsApp');
+  const politica = require('./src/ponte/politica');
+
+  const STACK_REAL =
+    'elementHandle.click: Timeout 30000ms exceeded.\n' +
+    'Call log:\n' +
+    '  - attempting click action\n' +
+    '    2 × waiting for element to be visible, enabled and stable\n' +
+    '      - element is not visible\n' +
+    '  - retrying click action\n' +
+    '    - waiting 500ms\n' +
+    '    at Chat._acharNoFrame (/app/braco-web/src/chat.js:247:8)';
+
+  const motivo = politica.motivoNeutro(STACK_REAL);
+  t('o stack real vira frase curta', motivo === 'o passo passou do tempo e eu parei no meio', motivo);
+  t('e não carrega nada do original',
+    !/Timeout|click|waiting|chat\.js|30000ms/i.test(motivo), motivo);
+
+  // Catálogo fechado: erro desconhecido cai no genérico em vez de vazar.
+  const inedito = politica.motivoNeutro(new Error('WebSocket frame 0x8badf00d @ /srv/app.js:99'));
+  t('erro inédito não vaza o texto', !/WebSocket|badf00d|app\.js/i.test(inedito), inedito);
+  t('e ainda diz alguma coisa', inedito.length > 0);
+
+  // Nenhuma frase do catálogo pode denunciar a origem nem a automação.
+  for (const amostra of [STACK_REAL, 'net::ERR_CONNECTION_REFUSED', 'BloqueioDetectado',
+    'SeletorNaoEncontrado: campoTexto', 'upload failed', '']) {
+    const m = politica.motivoNeutro(amostra);
+    t(`motivo limpo p/ "${String(amostra).slice(0, 22)}"`,
+      !AUTOMACAO.test(m) && !PROIBIDO.test(m), m);
+  }
+
+  // A porta: limparAlerta é o que roda em TODO alerta, inclusive os do braço.
+  const sujo = politica.limparAlerta(`⚠️ Envio pela metade\n\n${STACK_REAL}`);
+  t('limparAlerta avisa que limpou', sujo.limpou === true);
+  t('e o resultado não tem vocabulário de robô', !AUTOMACAO.test(sujo.texto), sujo.texto.slice(0, 40));
+  t('nem caminho de arquivo .js', !/\.js\b/.test(sujo.texto), sujo.texto.slice(0, 60));
+  // O dump inteiro tem que sumir, não só as palavras proibidas dele.
+  t('nem sobra dump de log',
+    !/Call log|attempting|waiting for|Timeout/i.test(sujo.texto), JSON.stringify(sujo.texto));
+
+  const limpo = politica.limparAlerta('🛑 Envios congelados. Responde #liberar.');
+  t('texto já limpo passa intacto', limpo.limpou === false, limpo.texto);
+
+  // O alerta de bloqueio carrega a URL do VNC, que é COMO o captcha é
+  // resolvido. Regex de limpeza que a engula deixa o operador sem o link
+  // justamente na hora em que a fila está parada esperando por ele.
+  const comVnc = politica.limparAlerta(
+    '🛑 *Verificação na tela*\n\n1. Abre a tela: http://89.116.186.155:6080/vnc.html\n3. Responde *#liberar*',
+  );
+  t('URL do VNC sobrevive à limpeza', comVnc.texto.includes('89.116.186.155:6080/vnc.html'), comVnc.texto);
+
   console.log('\n' + (falhas ? falhas + ' FALHA(S)' : 'todos os testes passaram'));
   process.exit(falhas ? 1 : 0);
 })();

@@ -30,6 +30,7 @@ const codigo = require('./codigo');
 const tradutor = require('./tradutor');
 const janela = require('./janela');
 const midia = require('./midia');
+const politica = require('./politica');
 const { dados, persist, persistAgora, proximoId } = require('./estado');
 const sender = require('../sender');
 
@@ -38,10 +39,17 @@ async function alertar(texto, imagem, nomeArquivo) {
     console.warn('[ponte] alerta sem destino (defina PONTE_OPERADOR_NUMERO):', texto);
     return;
   }
+  // Toda saída passa por aqui, e é de propósito: o alerta vai para o operador
+  // mas sai pelo MESMO número comercial que fala com o cliente. Um stack trace
+  // do Playwright já saiu por este caminho. Filtrar em cada chamada é o que
+  // falhou; filtrar na porta é o que segura.
+  const { texto: limpo, limpou } = politica.limparAlerta(texto);
+  if (limpou) console.warn('[ponte] alerta continha texto técnico — limpo antes de enviar');
+
   try {
     await sender.send(
       cfg.operador.numero,
-      texto,
+      limpo,
       imagem ? { image: imagem, fileName: nomeArquivo || 'ponte.png' } : {},
     );
   } catch (err) {
@@ -351,25 +359,29 @@ async function resultadoTarefa(id, ok, erro, printPath, fatal = false) {
   t.ultimoErro = erro || 'sem detalhe';
   persistAgora();
 
+  // O erro cru fica no log do servidor, que é onde ele serve. Para o WhatsApp
+  // vai só o motivo do catálogo — ver politica.motivoNeutro().
+  if (erro) console.error(`[ponte] tarefa ${id} falhou:`, erro);
+  const motivo = politica.motivoNeutro(erro);
+
   const { abriu } = limites.registrarFalha(erro || 'falha no envio', printPath);
   if (abriu) {
     await alertar(
       `🛑 *Envios congelados*\n\nFalhou várias vezes seguidas.\n` +
-        `Último erro: ${erro}\n\nVê o que houve e responde *#liberar*.`,
+        `Motivo: ${motivo}\n\nVê o que houve e responde *#liberar*.`,
       printPath,
     );
   } else if (desistir) {
+    // O cliente NÃO recebe aviso de falha. Ele não tem o que fazer com essa
+    // informação, e "deu problema no sistema" numa conversa de compra derruba
+    // a confiança na hora — some com a venda junto. Quem assume é o operador,
+    // pelo alerta abaixo, com o id em mãos para responder na conversa.
     const at = fila.porId(t.atendimentoId);
-    if (at) {
-      await sender.send(
-        at.from,
-        'Deu um problema aqui no sistema. Nossa equipe já foi avisada e te retorno 🙏',
-      );
-    }
     await alertar(
-      fatal
-        ? `⚠️ *Envio pela metade*\n\n${erro}\n\nNão repeti de propósito: repetir mandaria o print de novo.`
-        : `⚠️ Desisti de um envio após 3 tentativas.\nErro: ${erro}`,
+      (fatal
+        ? `⚠️ *Envio pela metade* — ${motivo}\n\nNão repeti de propósito: repetir mandaria o print de novo.`
+        : `⚠️ Desisti de um envio após 3 tentativas — ${motivo}.`) +
+        (at ? `\n\n👤 Cliente *${at.id}* está esperando e não foi avisado. Assume a conversa.` : ''),
       printPath,
     );
   }

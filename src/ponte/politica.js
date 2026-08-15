@@ -120,4 +120,96 @@ function paraCliente(traduzido) {
   };
 }
 
-module.exports = { paraFornecedor, paraCliente };
+// ============================================================
+// ERRO TÉCNICO NUNCA VIRA MENSAGEM DE WHATSAPP
+// ============================================================
+
+/**
+ * Catálogo FECHADO de motivos. Nada aqui é montado com o texto do erro.
+ *
+ * É whitelist de propósito. A tentativa anterior era repassar `err.message` no
+ * alerta, e um dia saiu isto pelo número comercial:
+ *
+ *   elementHandle.click: Timeout 30000ms exceeded.
+ *   - retrying click action / waiting for element to be visible
+ *
+ * Ou seja: o log do Playwright inteiro num WhatsApp de loja. Blacklist não
+ * resolve — a mensagem de erro é texto de terceiro, muda a cada versão da
+ * biblioteca, e um padrão novo passa direto. Com catálogo fechado o pior caso
+ * é um motivo genérico, nunca um vazamento.
+ *
+ * Nenhuma frase pode conter "fornecedor", "Taobao", "braço", "robô" ou "bot":
+ * o alerta sai pelo MESMO número comercial que fala com o cliente.
+ */
+const MOTIVOS = [
+  [/timeout|exceeded|timed out|esgotou/i, 'o passo passou do tempo e eu parei no meio'],
+  [/not visible|not stable|not enabled|not attached|waiting for element|elementhandle|locator/i,
+    'o campo não apareceu onde eu esperava'],
+  [/seletornaoencontrado|selector|não encontrei o seletor/i, 'a tela mudou de lugar'],
+  [/bloqueiodetectado|verifica|安全验证|滑块/i, 'apareceu um pedido de verificação na tela'],
+  [/net::|econnrefused|enotfound|etimedout|socket hang up|network|navigation/i,
+    'a conexão caiu no meio'],
+  [/upload|arquivo|file|imagem|image/i, 'a foto não subiu'],
+];
+
+const MOTIVO_PADRAO = 'não consegui concluir o passo';
+
+/**
+ * Erro cru → frase curta e segura para o WhatsApp.
+ *
+ * O detalhe técnico NÃO se perde: quem chama continua logando `err.message` no
+ * console do servidor, que é onde ele serve para depurar. O que muda é que ele
+ * para de viajar pelo WhatsApp.
+ *
+ * @param {unknown} erro  Error, string, o que vier.
+ * @returns {string} frase do catálogo, sempre.
+ */
+function motivoNeutro(erro) {
+  const cru = String((erro && erro.message) || erro || '');
+  if (!cru.trim()) return MOTIVO_PADRAO;
+  for (const [re, frase] of MOTIVOS) if (re.test(cru)) return frase;
+  return MOTIVO_PADRAO;
+}
+
+// Última rede antes do sender. Cobre o texto que a gente mesmo escreve nos
+// alertas — inclusive o que alguém venha a interpolar ali no futuro sem
+// lembrar desta regra.
+const RE_AUTOMACAO = /bra[çc]o|rob[ôo]|\bbots?\b|autom[aá]tic[oa]s?|taobao|fornecedor|playwright|chrome|selenium|puppeteer/gi;
+// Cara de stack trace: "algo.algo:", "at Objeto.func", caminho de arquivo, ms.
+const RE_TECNICO = /\b\w+\.\w+:\s|\bat\s+\w+[.:]|\/[\w./-]+\.js\b|\b\d+ms\b|\bTypeError\b|\bError:/g;
+
+/**
+ * Limpa QUALQUER texto que vá para o WhatsApp pelo canal de alerta.
+ * @returns {{texto:string, limpou:boolean}}
+ */
+function limparAlerta(original) {
+  const antes = String(original || '');
+
+  // Truncar vem ANTES de substituir, e é o que de fato salva. Trocar palavra
+  // por palavra num dump de log deixa passar o resto ("Timeout exceeded / Call
+  // log: / attempting click action") — sem nome proibido nenhum, e ainda assim
+  // inconfundivelmente saída de máquina numa conversa de loja. Do marcador em
+  // diante não há nada que o operador precise ler no WhatsApp: está no log do
+  // servidor inteiro.
+  // O corte tem que pegar a PRIMEIRA linha técnica, não o "Call log:" lá
+  // embaixo: a assinatura da falha ("elementHandle.click: Timeout 30000ms
+  // exceeded") vem antes dele, e cortar só no marcador deixava justamente ela
+  // passar. `\w+\.\w+:\s` exige espaço depois dos dois pontos para não comer
+  // a URL do VNC, que aparece legitimamente nos alertas de bloqueio.
+  let texto = antes;
+  const corte = texto.search(
+    /\n?\s*(?:Call log:|Stack:|at\s+\w+[.(]|\bwaiting for\b|\battempting\b|\w+\.\w+:\s|\bTimeout\b|\bexceeded\b|\bTypeError\b|\bError:)/i,
+  );
+  if (corte > 0) texto = texto.slice(0, corte);
+
+  texto = texto
+    .replace(RE_TECNICO, ' ')
+    .replace(RE_AUTOMACAO, 'sistema')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  return { texto, limpou: texto !== antes.trim() };
+}
+
+module.exports = { paraFornecedor, paraCliente, motivoNeutro, limparAlerta };
