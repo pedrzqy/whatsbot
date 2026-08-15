@@ -329,7 +329,13 @@ function devolverTarefa(id) {
   persistAgora();
 }
 
-async function resultadoTarefa(id, ok, erro, printPath) {
+/**
+ * @param {boolean} fatal  não tente de novo, aconteça o que acontecer.
+ *   Usado quando repetir causaria dano: se a foto já saiu e só o usuário
+ *   falhou, uma nova tentativa manda o MESMO print outra vez e o fornecedor
+ *   fica com dois prints e nenhum usuário.
+ */
+async function resultadoTarefa(id, ok, erro, printPath, fatal = false) {
   const t = dados.tarefas.find((x) => x.id === id);
   if (!t) return { ok: false, motivo: 'tarefa desconhecida' };
 
@@ -340,7 +346,7 @@ async function resultadoTarefa(id, ok, erro, printPath) {
     return { ok: true };
   }
 
-  const desistir = t.tentativas >= 3;
+  const desistir = fatal || t.tentativas >= 3;
   t.estado = desistir ? 'falhou' : 'pendente';
   t.ultimoErro = erro || 'sem detalhe';
   persistAgora();
@@ -360,7 +366,12 @@ async function resultadoTarefa(id, ok, erro, printPath) {
         'Deu um problema aqui no sistema. Nossa equipe já foi avisada e te retorno 🙏',
       );
     }
-    await alertar(`⚠️ Desisti de um envio após 3 tentativas.\nErro: ${erro}`, printPath);
+    await alertar(
+      fatal
+        ? `⚠️ *Envio pela metade*\n\n${erro}\n\nNão repeti de propósito: repetir mandaria o print de novo.`
+        : `⚠️ Desisti de um envio após 3 tentativas.\nErro: ${erro}`,
+      printPath,
+    );
   }
 
   return { ok: true, desistiu: desistir };

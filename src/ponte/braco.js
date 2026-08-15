@@ -107,9 +107,9 @@ router.get('/proxima', async (req, res) => {
 
 /** Resultado de um envio. */
 router.post('/resultado', async (req, res) => {
-  const { id, ok, erro, printPath } = req.body || {};
+  const { id, ok, erro, printPath, fatal } = req.body || {};
   if (!id) return res.status(400).json({ erro: 'id obrigatório' });
-  const r = await ponte.resultadoTarefa(id, Boolean(ok), erro, printPath);
+  const r = await ponte.resultadoTarefa(id, Boolean(ok), erro, printPath, Boolean(fatal));
   res.json(r);
 });
 

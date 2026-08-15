@@ -213,35 +213,101 @@ class Chat {
    *
    * @returns {Promise<string[]>}
    */
+  /**
+   * Rola a lista de mensagens até o fim.
+   *
+   * Sem isto a marca d'água mente. Ela é um retrato do que está RENDERIZADO, e
+   * o chat só renderiza a janela visível: se a página estiver rolada para cima
+   * — coisa que o diálogo de imagem faz sozinho — mensagens de meses atrás
+   * aparecem no DOM, ficam de fora da marca, e na leitura seguinte passam por
+   * "resposta nova". Foi assim que conversa de outro dia chegou na fila de
+   * aprovação como se fosse a resposta do cliente da vez.
+   *
+   * É rolagem local: não gera clique nem requisição, a Taobao não vê nada.
+   */
+  async _irParaOFim() {
+    await this.frame
+      .evaluate(() => {
+        const item = document.querySelector('.message-item');
+        let el = item ? item.parentElement : null;
+        while (el && el.scrollHeight <= el.clientHeight) el = el.parentElement;
+        if (el) el.scrollTop = el.scrollHeight;
+      })
+      .catch(() => {});
+    await this.pagina.waitForTimeout(humaniza.ms(400, 900));
+  }
+
+  /**
+   * Retrato do chat antes de enviar. Tudo além disto é resposta.
+   *
+   * Guarda DUAS coisas, e as duas fazem falta:
+   *
+   *  - `chaves`: as mensagens que já estavam lá. Sozinho isso não basta, pelo
+   *    motivo explicado em _irParaOFim().
+   *  - `ate`: o horário da mensagem mais recente. Este é o corte de verdade —
+   *    mensagem com horário anterior é passado, apareça ela no DOM quando
+   *    aparecer. Rolagem e virtualização não mexem no relógio.
+   */
   async marca() {
-    return this._lerFornecedor().then((ms) => ms.map((m) => m.chave)).catch(() => []);
+    await this._irParaOFim();
+    const ms = await this._lerFornecedor().catch(() => []);
+    const ate = ms.map((m) => m.quando).filter(Boolean).sort().pop() || '';
+    return { chaves: ms.map((m) => m.chave), ate };
   }
 
   // ----------------------------------------------------------
 
+  /**
+   * Digita e envia texto — e CONFIRMA que saiu.
+   *
+   * A confirmação não é zelo excessivo: quando o diálogo de imagem fica aberto,
+   * ele engole o clique no campo e no 发送, e a função terminava "com sucesso"
+   * sem nada ter sido enviado. O fornecedor recebia a foto sem o usuário
+   * embaixo — inútil para ele — e o cliente esperava as 4h do timeout.
+   */
   async enviarTexto(texto) {
     await this.checarBloqueio();
 
-    const { el } = await this._achar('campoTexto');
-    await el.click();
-    await this.pagina.waitForTimeout(humaniza.ms(300, 800));
+    // Modal aberto engole clique. Cancela antes de tentar digitar.
+    await this._cancelarDialogoImagem();
 
-    // É um <pre contenteditable>, não um input: fill() não funciona.
-    // type() com delay por tecla também produz cadência de digitação humana.
-    for (const bloco of humaniza.blocos(texto)) {
-      await el.type(bloco, { delay: humaniza.msTecla() });
-      await this.pagina.waitForTimeout(humaniza.ms(150, 500));
+    const antes = await this._quantasMinhas();
+
+    for (let tentativa = 1; tentativa <= 2; tentativa++) {
+      const { el } = await this._achar('campoTexto');
+      await el.click();
+      await this.pagina.waitForTimeout(humaniza.ms(300, 800));
+
+      // É um <pre contenteditable>, não um input: fill() não funciona.
+      // type() com delay por tecla também produz cadência de digitação humana.
+      for (const bloco of humaniza.blocos(texto)) {
+        await el.type(bloco, { delay: humaniza.msTecla() });
+        await this.pagina.waitForTimeout(humaniza.ms(150, 500));
+      }
+
+      await this.pagina.waitForTimeout(humaniza.ms(400, 1100));
+
+      // Botão em vez de Enter: dentro de um <pre>, Enter pode inserir quebra de
+      // linha em vez de enviar, dependendo da versão.
+      const botao = await this._achar('botaoEnviar');
+      await botao.el.click({ delay: humaniza.msCurto() });
+
+      await this.pagina.waitForTimeout(humaniza.ms(1000, 2200));
+
+      if ((await this._quantasMinhas()) > antes) {
+        await this.checarBloqueio();
+        return;
+      }
+      console.warn(`[chat] "${texto}" não saiu na tentativa ${tentativa}`);
+      await this._cancelarDialogoImagem();
     }
 
-    await this.pagina.waitForTimeout(humaniza.ms(400, 1100));
-
-    // Botão em vez de Enter: dentro de um <pre>, Enter pode inserir quebra de
-    // linha em vez de enviar, dependendo da versão.
-    const botao = await this._achar('botaoEnviar');
-    await botao.el.click({ delay: humaniza.msCurto() });
-
-    await this.pagina.waitForTimeout(humaniza.ms(1000, 2200));
-    await this.checarBloqueio();
+    // Falhar alto aqui é melhor que seguir calado: a foto já foi, e foto sem
+    // usuário não serve para nada. O operador precisa saber para mandar na mão.
+    throw new SeletorNaoEncontrado(
+      `digitei "${texto}" duas vezes e a mensagem não saiu — a foto já foi enviada, ` +
+        `manda o usuário na mão pelo chat`,
+    );
   }
 
   /** Quantas mensagens NOSSAS existem agora. Serve para saber se algo saiu. */
@@ -638,11 +704,34 @@ class Chat {
    * @returns {Promise<{texto:string, quando:string}[]>}
    */
   async lerNovas(marca) {
-    const conhecidas = new Set(marca || []);
+    // Aceita a marca antiga (só a lista de chaves) para não perder o
+    // atendimento em curso quando o container reinicia no meio dele.
+    const chaves = Array.isArray(marca) ? marca : marca?.chaves || [];
+    const ate = Array.isArray(marca) ? '' : marca?.ate || '';
+
+    await this._irParaOFim();
+
+    const conhecidas = new Set(chaves);
     const todas = await this._lerFornecedor();
-    return todas
-      .filter((m) => !conhecidas.has(m.chave))
-      .map(({ texto, quando }) => ({ texto, quando }));
+    const novas = [];
+
+    for (const m of todas) {
+      if (conhecidas.has(m.chave)) continue;
+
+      // O horário manda. Mensagem sem data não é aceita: pode ser histórico
+      // que entrou no DOM por rolagem, e entregar código velho ao cliente é
+      // pior do que não entregar nada — o que já tem timeout e alerta.
+      if (ate) {
+        if (!m.quando || m.quando <= ate) {
+          console.log(`[chat] ignorada (anterior à marca ${ate}): ${m.quando || 'sem data'}`);
+          continue;
+        }
+      }
+
+      novas.push({ texto: m.texto, quando: m.quando });
+    }
+
+    return novas;
   }
 }
 

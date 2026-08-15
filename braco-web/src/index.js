@@ -205,11 +205,13 @@ async function executarTarefa(chat, tarefa, titulo) {
   const marca = await chat.marca();
 
   let temp = null;
+  let fotoEnviada = false;
   try {
     if (tarefa.imagem) {
       temp = await baixarFoto(tarefa.imagem);
       // Foto primeiro: o fornecedor vê a tela e já lê o usuário embaixo.
       const r = await chat.enviarFoto(temp);
+      fotoEnviada = true;
       await evento('info', 'foto', `enviada via ${r.via}`);
 
       // Saiu como cartão de download em vez de imagem: para o fornecedor é o
@@ -230,8 +232,20 @@ async function executarTarefa(chat, tarefa, titulo) {
     humaniza.registrarEnvio();
 
     await api.post('/resultado', { id: tarefa.id, ok: true });
-    await evento('info', 'enviado', `${tarefa.usuario} — marca ${marca}`);
+    await evento('info', 'enviado', `${tarefa.usuario} — corte ${marca.ate || 'sem data'}`);
     return marca;
+  } catch (err) {
+    // A foto já saiu e o usuário não. NÃO pode repetir: nova tentativa manda a
+    // MESMA foto de novo no chat, e aí o fornecedor recebe dois prints e nenhum
+    // usuário. Marca como fatal para o bot não reenfileirar e chamar o humano.
+    if (fotoEnviada) {
+      await api
+        .post('/resultado', { id: tarefa.id, ok: false, erro: err.message, fatal: true })
+        .catch(() => {});
+      await evento('error', 'envio_parcial', `foto foi, usuário NÃO: ${err.message}`);
+      return null;
+    }
+    throw err;
   } finally {
     if (temp && fs.existsSync(temp)) fs.unlinkSync(temp);
   }
@@ -357,7 +371,11 @@ async function main() {
       // LONG-POLLING: o bot segura a resposta até aparecer tarefa. É o que faz
       // o #ok sair na hora em vez de esperar o próximo ciclo. Espera curta
       // quando alguém já aguarda resposta, para reler o chat com frequência.
-      const esperando = Array.isArray(marcaAtual);
+      // Checa a FORMA da marca, não só "não é null": se executarTarefa sair
+      // cedo devolvendo undefined, uma checagem frouxa passaria, a marca viraria
+      // conjunto vazio e TODO o histórico seria lido como novo — justamente o
+      // que a marca existe para impedir.
+      const esperando = Boolean(marcaAtual && Array.isArray(marcaAtual.chaves));
       let resp;
       try {
         resp = await api.get('/proxima', {
@@ -385,11 +403,6 @@ async function main() {
       }
 
       // 2) Alguém esperando resposta? Só então vale ler.
-      //
-      // Array.isArray e não `!== null`: se executarTarefa sair cedo devolvendo
-      // undefined, `undefined !== null` passaria, a marca viraria conjunto
-      // vazio e TODO o histórico seria lido como novo — justamente o que a
-      // marca existe para impedir.
       //
       // Não reabre a conversa aqui: o topo do laço já garante que ela está
       // aberta, e clicar de novo a cada leitura seria atividade repetida e
