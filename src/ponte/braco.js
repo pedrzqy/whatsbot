@@ -27,6 +27,14 @@ router.use((req, res, next) => {
     return res.status(503).json({ erro: 'PONTE_BRACO_KEY não configurada no servidor' });
   }
   if (req.get('x-braco-key') !== cfg.bracoApiKey) {
+    // Registra a batida RECUSADA, separada da batida boa.
+    //
+    // Sem isto, chave errada e serviço fora do ar davam o mesmo "nunca
+    // conectou" no #fila — e as duas causas não têm nada em comum: uma se
+    // conserta no Environment do painel, a outra é o container que não subiu.
+    // Chegar aqui já prova que a rede entre os dois serviços funciona.
+    dados.coletaChaveRuimEm = Date.now();
+    console.warn('[ponte/braco] chave recusada — PONTE_BRACO_KEY diferente entre os dois serviços?');
     return res.status(401).json({ erro: 'chave inválida' });
   }
   next();

@@ -128,8 +128,21 @@ async function executar(texto) {
     // "Coleta" e não a outra palavra: isto sai pelo número comercial.
     const visto = dados.coletaVistaEm || 0;
     const idade = visto ? Date.now() - visto : Infinity;
-    if (!visto) {
-      linhas.push('🔌 Coleta: *nunca conectou* — confira se o outro serviço subiu');
+    const chaveRuim = dados.coletaChaveRuimEm || 0;
+
+    if (!visto && chaveRuim) {
+      // Bateu na porta e foi recusado: a rede funciona, o segredo é que não
+      // bate. Diagnóstico completamente diferente de "não subiu", e antes os
+      // dois apareciam iguais aqui.
+      linhas.push(
+        '🔌 Coleta: *chave recusada* — a PONTE_BRACO_KEY está diferente entre os dois serviços.',
+        '   Copie o mesmo valor no Environment dos dois e faça Deploy.',
+      );
+    } else if (!visto) {
+      linhas.push(
+        '🔌 Coleta: *nunca conectou* — o outro serviço não subiu ou não alcança este.',
+        '   Confira no painel se ele está rodando e se a BOT_URL dele aponta para cá.',
+      );
     } else if (idade > 90_000) {
       linhas.push(`🔌 Coleta: *SEM SINAL há ${min(idade)} min* — o outro serviço parece fora do ar`);
     } else {
