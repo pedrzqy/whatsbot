@@ -68,13 +68,41 @@ class Chat {
     const lista = SEL[chave].candidatos.map((s) => s.replace('{titulo}', titulo));
     const limite = Date.now() + timeout;
 
+    // Procura o primeiro VISÍVEL, não o primeiro do DOM.
+    //
+    // Esta é a origem do "element is not visible" que derrubou o envio do
+    // usuário depois da foto já ter saído. `frame.$()` devolve o primeiro nó
+    // que casa, visível ou não — e este chat é uma SPA com a lista de
+    // conversas ao lado, então existe mais de um contenteditable/pre.edit no
+    // documento. O braço pegava um oculto e o Playwright ficava os 8s inteiros
+    // esperando ele aparecer, coisa que nunca ia acontecer.
+    //
+    // Um elemento que não fica visível em 8s não está lento, está errado.
+    let achadosOcultos = 0;
+
     while (Date.now() < limite) {
+      achadosOcultos = 0;
       for (const sel of lista) {
-        const el = await this.frame.$(sel);
-        if (el) return { el, sel };
+        for (const el of await this.frame.$$(sel).catch(() => [])) {
+          if (await el.isVisible().catch(() => false)) return { el, sel };
+          achadosOcultos++;
+        }
       }
       await this.pagina.waitForTimeout(300);
     }
+
+    // Distingue "não existe" de "existe escondido". São problemas diferentes:
+    // o primeiro é seletor desatualizado (conserta no seletores.json), o
+    // segundo é a tela em outro estado — modal por cima, conversa não aberta,
+    // painel ainda montando. Antes os dois davam a mesma mensagem, e o custo
+    // era 8s de clique cego antes de descobrir qual era.
+    if (achadosOcultos) {
+      throw new SeletorNaoEncontrado(
+        `"${chave}": ${achadosOcultos} elemento(s) casaram mas NENHUM está visível. ` +
+          `A tela provavelmente está noutro estado (modal aberto, conversa não aberta).`,
+      );
+    }
+
     throw new SeletorNaoEncontrado(
       `"${chave}" não encontrado. Tentei: ${lista.join(' | ')}. ` +
         `Rode "npm run inspecionar" e atualize o seletores.json.`,
@@ -145,8 +173,13 @@ class Chat {
     const limite = Date.now() + timeout;
     while (Date.now() < limite) {
       for (const sel of lista) {
-        const el = await this.pagina.$(sel);
-        if (el) return el;
+        // Primeiro VISÍVEL, mesmo motivo do _achar: `$()` devolve o primeiro nó
+        // do DOM ainda que oculto, e o clique seguinte queima o timeout inteiro
+        // esperando ele aparecer. Aqui isso é pior que no envio — este caminho
+        // é o do SMS, e SMS que não entra derruba a sessão da conta.
+        for (const el of await this.pagina.$$(sel).catch(() => [])) {
+          if (await el.isVisible().catch(() => false)) return el;
+        }
       }
       await this.pagina.waitForTimeout(300);
     }
@@ -279,7 +312,16 @@ class Chat {
 
     for (const raiz of raizes) {
       for (const sel of SEL.voltarAoFundo.candidatos) {
-        const botao = await raiz.$(sel).catch(() => null);
+        // VISÍVEL, não só presente. A Taobao mantém o botão no DOM e apenas o
+        // esconde quando a lista já está no fim — clicar no oculto queimaria os
+        // 4s do teto a cada descida, inclusive nas que não precisavam de nada.
+        // E é a visibilidade dele, não a existência, que significa "não estou
+        // no fim".
+        const candidatos = await raiz.$$(sel).catch(() => []);
+        let botao = null;
+        for (const c of candidatos) {
+          if (await c.isVisible().catch(() => false)) { botao = c; break; }
+        }
         if (!botao) continue;
 
         // Só considera resolvido se o clique DEU CERTO. Engolir a falha e sair
