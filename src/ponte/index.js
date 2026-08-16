@@ -31,6 +31,7 @@ const tradutor = require('./tradutor');
 const janela = require('./janela');
 const midia = require('./midia');
 const politica = require('./politica');
+const marca = require('./marca');
 const { dados, persist, persistAgora, proximoId } = require('./estado');
 const sender = require('../sender');
 
@@ -139,11 +140,14 @@ async function pedirCodigo(from, nome, usuarioBruto, imagemPath = null) {
   persistAgora();
 
   if (!ativo) {
+    // Assinada: fecha uma etapa (o cliente vai esperar), e é uma das que ele
+    // relê enquanto aguarda.
     return {
       aceito: true,
-      mensagem:
+      mensagem: marca.assinar(
         `Anotei! Tem ${aFrente} ${aFrente === 1 ? 'pessoa' : 'pessoas'} na sua frente. ` +
-        `Já já pego seu código e te mando 👍`,
+          `Já já pego seu código e te mando 👍`,
+      ),
     };
   }
 
@@ -174,7 +178,12 @@ async function pedirCodigo(from, nome, usuarioBruto, imagemPath = null) {
     };
   }
 
-  return { aceito: true, mensagem: janela.estado().avisoCliente };
+  // Assinada aqui e não dentro de janela.js: o mesmo avisoCliente é embutido
+  // em itálico no fim da MSG_PEDE_FOTO (recepcao.js), que já abre com o
+  // cabeçalho — marcar na origem deixaria a marca duas vezes na mesma
+  // mensagem, uma delas dentro do itálico.
+  const j = janela.estado();
+  return { aceito: true, mensagem: j.aberta ? j.avisoCliente : marca.assinar(j.avisoCliente) };
 }
 
 /** Cria a tarefa do braço. Sem tradução: usuário é alfanumérico. */
@@ -301,10 +310,14 @@ async function receberDoFornecedor(entrada) {
 
 /** Entrega o código ao cliente, encerra a vez e chama o próximo. */
 async function entregarCodigo(atendimento, cod) {
+  // Assinada: é a mensagem que o cliente guarda e printa, o momento de maior
+  // valor percebido do atendimento inteiro.
   await sender.send(
     atendimento.from,
-    `Chegou o código da sua conta:\n\n*${cod}*\n\n` +
-      `Digita ele na tela de verificação. Se der erro ou expirar, me avisa que peço outro 👍`,
+    marca.assinar(
+      `Chegou o código da sua conta:\n\n*${cod}*\n\n` +
+        `Digita ele na tela de verificação. Se der erro ou expirar, me avisa que peço outro 👍`,
+    ),
   );
 
   console.log(`[ponte] código ${cod} entregue a ${atendimento.from} (${atendimento.usuario})`);

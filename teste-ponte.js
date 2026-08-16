@@ -400,6 +400,38 @@ const OP = '5541999999999';
   }
   await operador.executar('#teste'); // desliga o que o laço acima ligou
 
+  // ── Marca da Phaze: onde deve, e só onde deve ──────────────
+  bloco('marca da Phaze');
+  const marca = require('./src/ponte/marca');
+
+  const CLI_MARCA = '5541911119999';
+  const primeira = recepcao.avaliar(CLI_MARCA, 'preciso do codigo', null).mensagem;
+  t('a primeira mensagem do fluxo abre com a marca',
+    primeira.startsWith(marca.CABECALHO), primeira.split('\n')[0]);
+
+  // Repetir o cabeçalho a cada passo empurra a instrução para baixo, com o
+  // cliente lendo com pressa no meio de uma compra.
+  const intermediaria = recepcao.avaliar(CLI_MARCA, '', 'x.jpg').mensagem;
+  t('a intermediária não repete o cabeçalho',
+    !intermediaria.includes(marca.CABECALHO), intermediaria);
+
+  // Operador lê no meio do atendimento: quer o dado, não a moldura. E cada
+  // linha a mais é uma linha a mais para conferir no mesmo número comercial.
+  for (const cmd of ['#fila', '#ajuda', '#limpar']) {
+    const saida = String(await operador.executar(cmd));
+    t(`${cmd} sem marca`,
+      !saida.includes(marca.CABECALHO) && !saida.includes(marca.ASSINATURA));
+  }
+
+  // A marca não pode furar nenhuma das outras regras.
+  const textoMarca = `${marca.CABECALHO} ${marca.ASSINATURA}`;
+  // require inline: mais abaixo neste mesmo escopo há um `const politica`, e
+  // usar o nome aqui cairia na temporal dead zone dele.
+  t('a marca não entrega origem nem automação',
+    !PROIBIDO.test(textoMarca) && !AUTOMACAO.test(textoMarca) &&
+      !REPASSE.test(textoMarca) && !require('./src/ponte/politica').temCJK(textoMarca),
+    textoMarca);
+
   // ── Erro técnico não vira mensagem de WhatsApp ─────────────
   // O texto abaixo é REAL: saiu pelo número comercial em 15/08 num alerta de
   // "Envio pela metade". Log de Playwright inteiro numa conversa de loja.

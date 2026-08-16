@@ -34,6 +34,7 @@
 const codigo = require('./codigo');
 const cfg = require('./config');
 const janela = require('./janela');
+const marca = require('./marca');
 const { dados, persist } = require('./estado');
 
 /** Quanto tempo uma metade do pedido espera pela outra. */
@@ -104,9 +105,13 @@ function pedeCodigo(texto) {
 
 // Curtas de propósito. Cliente no meio de uma compra lê a primeira linha e
 // age; parágrafo faz ele parar para entender e perguntar de novo.
-const MSG_PEDE_FOTO =
+// Cabeçalho SÓ aqui: esta é a primeira mensagem do atendimento, a que abre a
+// conversa e posiciona quem está falando. As seguintes não repetem — ver
+// marca.js para o motivo.
+const MSG_PEDE_FOTO = marca.abertura(
   'Vou pegar seu código! Preciso de *2 coisas* 👇\n\n' +
-  '1️⃣ *Foto da tela do console*, na página que está pedindo o código.';
+    '1️⃣ *Foto da tela do console*, na página que está pedindo o código.',
+);
 
 const MSG_PEDE_USUARIO =
   'Foto recebida ✅\n\n' +
