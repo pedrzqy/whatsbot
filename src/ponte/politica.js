@@ -174,7 +174,9 @@ function motivoNeutro(erro) {
 // Última rede antes do sender. Cobre o texto que a gente mesmo escreve nos
 // alertas — inclusive o que alguém venha a interpolar ali no futuro sem
 // lembrar desta regra.
-const RE_AUTOMACAO = /bra[çc]o|rob[ôo]|\bbots?\b|autom[aá]tic[oa]s?|taobao|fornecedor|playwright|chrome|selenium|puppeteer/gi;
+// Sufixo aberto em autom[aá]tic\w*: "automaticamente" escapava de
+// autom[aá]tic[oa]s?, e foi essa palavra exata que chegou ao cliente.
+const RE_AUTOMACAO = /\bbra[çc]o|rob[ôo]|\bbots?\b|autom[aá]tic\w*|automatiza\w*|taobao|fornecedor|playwright|chrome|selenium|puppeteer/gi;
 // Cara de stack trace: "algo.algo:", "at Objeto.func", caminho de arquivo, ms.
 const RE_TECNICO = /\b\w+\.\w+:\s|\bat\s+\w+[.:]|\/[\w./-]+\.js\b|\b\d+ms\b|\bTypeError\b|\bError:/g;
 

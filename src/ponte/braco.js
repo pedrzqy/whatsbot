@@ -74,6 +74,13 @@ router.post('/sms-usado', (_req, res) => {
  * que importa é o das ações no navegador, e esse continua igual.
  */
 router.get('/proxima', async (req, res) => {
+  // Marca de vida. Esta rota é o long-poll: enquanto o outro serviço estiver de
+  // pé, ela é chamada continuamente. É o sinal mais barato de "o outro lado
+  // está no ar", e sem ele o #fila mostrava a tarefa liberada e mais nada —
+  // não dava para distinguir "trabalhando" de "serviço caído" sem abrir o
+  // painel do Easypanel, que é justamente o que trava a depuração à noite.
+  dados.coletaVistaEm = Date.now();
+
   const pegar = () => {
     if (limites.disjuntor().estado === 'aberto') return null;
     if (!janela.estado().aberta) return null;

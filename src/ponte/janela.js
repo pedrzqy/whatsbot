@@ -82,7 +82,12 @@ function estado(agora = new Date()) {
       // O cliente nunca fica sabendo de onde vem o código. Para ele é a Phaze
       // que gera, e é isso que a mensagem diz — sem "canal", sem "parceiro",
       // sem nada que sugira que existe alguém do outro lado.
-      avisoCliente: 'Já estou pegando seu código automaticamente. Só um instante 👍',
+      //
+      // E sem "automaticamente", que estava aqui: descreve o processo como
+      // máquina no número comercial, exatamente o que não pode. Passou porque
+      // o teste procurava "automatico\b" e a palavra é "automaticamente" —
+      // o regex foi corrigido junto.
+      avisoCliente: 'Já estou pegando seu código. Só um instante 👍',
     };
   }
 

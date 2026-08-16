@@ -16,6 +16,7 @@ const fila = require('./fila');
 const limites = require('./limites');
 const janela = require('./janela');
 const ponte = require('./index');
+const politica = require('./politica');
 const sender = require('../sender');
 const { dados, persistAgora } = require('./estado');
 
@@ -120,6 +121,21 @@ async function executar(texto) {
       '',
     ];
 
+    // Sinal de vida do outro serviço, e o que ele está fazendo agora.
+    //
+    // Sem isto, depois do #ok o painel dizia apenas que a tarefa saiu da fila —
+    // e "trabalhando", "serviço caído" e "travado" ficavam idênticos daqui.
+    // "Coleta" e não a outra palavra: isto sai pelo número comercial.
+    const visto = dados.coletaVistaEm || 0;
+    const idade = visto ? Date.now() - visto : Infinity;
+    if (!visto) {
+      linhas.push('🔌 Coleta: *nunca conectou* — confira se o outro serviço subiu');
+    } else if (idade > 90_000) {
+      linhas.push(`🔌 Coleta: *SEM SINAL há ${min(idade)} min* — o outro serviço parece fora do ar`);
+    } else {
+      linhas.push(`🔌 Coleta: ativa (há ${Math.round(idade / 1000)}s)`);
+    }
+
     if (s.ativo) {
       linhas.push(
         `*Em atendimento:* ${s.ativo.cliente}`,
@@ -157,8 +173,24 @@ async function executar(texto) {
     // ele fazer" — e essa dúvida já custou uma investigação inteira. Escondida
     // quando zero, ela não responde nem uma coisa nem outra.
     const naFila = dados.tarefas.filter((t) => t.estado === 'pendente').length;
-    const emCurso = dados.tarefas.filter((t) => t.estado === 'executando').length;
-    linhas.push('', `📤 envios: ${naFila} na fila · ${emCurso} saindo agora`);
+    const emCurso = dados.tarefas.filter((t) => t.estado === 'executando');
+    linhas.push('', `📤 envios: ${naFila} na fila · ${emCurso.length} saindo agora`);
+
+    // HÁ QUANTO TEMPO cada um está saindo. "1 saindo agora" parece progresso
+    // tanto no primeiro segundo quanto na segunda hora; o relógio é o que
+    // separa lento de travado, e era a pergunta que sobrava depois do #ok.
+    for (const t of emCurso.slice(0, 3)) {
+      linhas.push(`   \`${t.usuario}\` — começou há ${min(Date.now() - (t.pegaEm || Date.now()))} min`);
+    }
+
+    // Por que o último não foi. Motivo neutro: isto sai no WhatsApp.
+    const falhou = dados.tarefas.filter((t) => t.estado === 'falhou');
+    if (falhou.length) {
+      const ultima = falhou[falhou.length - 1];
+      linhas.push(
+        `❌ ${falhou.length} sem sucesso · último: ${politica.motivoNeutro(ultima.ultimoErro)}`,
+      );
+    }
 
     return linhas.join('\n');
   }

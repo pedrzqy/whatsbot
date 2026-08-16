@@ -250,6 +250,19 @@ t('número do operador é ignorado',
 // ninguém relê antes de sair.
 bloco('nada de "fornecedor"/"taobao" no que o cliente lê');
 const PROIBIDO = /fornecedor|taobao|chin[êe]s|vendedor|parceiro/i;
+
+// Vocabulário de automação. Vale para o cliente E para o operador: as duas
+// coisas saem pelo mesmo número comercial.
+//
+// `autom[aá]tic\w*` e não `autom[aá]tico\b`: a versão antiga não casava
+// "automaticamente", e foi assim que "Já estou pegando seu código
+// automaticamente" ficou meses indo para o cliente. Sufixo aberto pega
+// automático/automática/automaticamente/automatizado de uma vez.
+//
+// `\bbra[çc]o` com fronteira à esquerda para não acusar "abraço".
+const AUTOMACAO =
+  /\bbra[çc]o|rob[ôo]|\bbots?\b|autom[aá]tic\w*|automatiza\w*|\bscripts?\b|taobao|fornecedor/i;
+
 const paraCliente = [];
 
 paraCliente.push(janela.estado(emBRT('09:00')).avisoCliente);
@@ -266,6 +279,11 @@ paraCliente.push(politica.paraCliente('看 https://item.taobao.com/i.htm 有货'
 
 paraCliente.forEach((m, i) => {
   t(`mensagem ${i + 1} não entrega a origem`, typeof m === 'string' && m.length > 0 && !PROIBIDO.test(m), m);
+  // Faltava esta. As mensagens do cliente só eram conferidas contra a ORIGEM
+  // (fornecedor/taobao), nunca contra vocabulário de robô — por isso
+  // "automaticamente" passou batido mesmo com esta lista já montada aqui.
+  t(`mensagem ${i + 1} sem vocabulário de robô`,
+    typeof m === 'string' && !AUTOMACAO.test(m), (String(m).match(AUTOMACAO) || [''])[0] || 'limpo');
 });
 
 bloco('id fácil de copiar');
@@ -313,7 +331,9 @@ const OP = '5541999999999';
   // Vale também para as mensagens do OPERADOR: elas saem pelo mesmo número
   // comercial, e é a conta inteira que corre risco, não só o 1-a-1 do cliente.
   bloco('nada de "braço"/"robô"/"bot" no WhatsApp');
-  const AUTOMACAO = /bra[çc]o|rob[ôo]|\bbot\b|autom[aá]tico\b|taobao|fornecedor/i;
+  // Mesma AUTOMACAO usada nas mensagens do cliente, definida uma vez lá em
+  // cima. Ter duas cópias do regex foi parte do problema: a de cima nem
+  // existia, e reforçar uma não reforçava a outra.
 
   for (const cmd of ['#ajuda', '#fila', '#limpar', '#destravar', '#teste']) {
     const saida = String(await operador.executar(cmd));
@@ -389,6 +409,10 @@ const OP = '5541999999999';
     !AUTOMACAO.test(congelado.mensagem) && !PROIBIDO.test(congelado.mensagem), congelado.mensagem);
   t('mas recebe algum retorno', congelado.mensagem.length > 0);
   limitesMod.fechar();
+  // persistAgora e não persist: o teste sai por process.exit e o persist normal
+  // tem debounce de 400ms — sem o flush, o disjuntor ficava ABERTO no
+  // data/ponte.json e a execução seguinte começava congelada do nada.
+  estadoPonte.persistAgora();
 
   const comVnc = politica.limparAlerta(
     '🛑 *Verificação na tela*\n\n1. Abre a tela: http://89.116.186.155:6080/vnc.html\n3. Responde *#liberar*',
