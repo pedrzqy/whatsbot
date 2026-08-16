@@ -94,7 +94,10 @@ async function pedirCodigo(from, nome, usuarioBruto, imagemPath = null) {
       // conversa de compra, admitir problema derruba a confiança e leva a
       // venda junto. O cliente acabou de mandar foto e usuário, então algum
       // retorno ele precisa — só que neutro, de espera, não de falha.
-      mensagem: 'Recebi ✅ Já estou pegando seu código, só um instante 🙏',
+      // Mesma frase do pedido que espera aprovação, e pelo mesmo motivo: aqui
+      // o pedido NÃO entrou (a fila está parada), então prometer que já está
+      // pegando é prometer o que não começou.
+      mensagem: 'Recebi tudo ✅ Já te retorno com o código 👍',
     };
   }
 
@@ -144,7 +147,16 @@ async function pedirCodigo(from, nome, usuarioBruto, imagemPath = null) {
     };
   }
 
-  await despachar(atendimento);
+  const tarefa = await despachar(atendimento);
+
+  // No copiloto NADA foi mandado ainda — a tarefa está parada esperando o #ok.
+  // Dizer "já estou pegando seu código" aqui é prometer uma ação que só
+  // acontece se o operador aprovar, e que pode nunca acontecer (#nao). O
+  // cliente confirma que chegou; a promessa sai no #ok, quando vira verdade.
+  if (tarefa && tarefa.estado === 'aguardando_aprovacao') {
+    return { aceito: true, mensagem: 'Recebi tudo ✅ Já te retorno com o código 👍' };
+  }
+
   return { aceito: true, mensagem: janela.estado().avisoCliente };
 }
 
@@ -177,9 +189,17 @@ async function despachar(atendimento) {
         `Cliente: *${atendimento.nome}*\n` +
         `Usuário: \`${tarefa.usuario}\`\n` +
         `Foto: ${tarefa.imagemPath ? 'sim' : 'NÃO'}\n\n` +
-        `*#ok ${tarefa.id}* para mandar ao fornecedor · *#nao ${tarefa.id}* para descartar`,
+        // "ao sistema" e não a outra palavra. O limparAlerta já trocava isto na
+        // saída — dava para ver no WhatsApp — mas depender do filtro para uma
+        // string fixa que a gente escreve é usar a rede de segurança como se
+        // fosse o piso.
+        `*#ok ${tarefa.id}* para mandar ao sistema · *#nao ${tarefa.id}* para descartar`,
     );
   }
+
+  // Quem chama precisa saber se ficou esperando o #ok: é isso que decide o que
+  // o CLIENTE ouve agora.
+  return tarefa;
 }
 
 // ============================================================

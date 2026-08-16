@@ -263,6 +263,16 @@ const PROIBIDO = /fornecedor|taobao|chin[êe]s|vendedor|parceiro/i;
 const AUTOMACAO =
   /\bbra[çc]o|rob[ôo]|\bbots?\b|autom[aá]tic\w*|automatiza\w*|\bscripts?\b|taobao|fornecedor/i;
 
+// NUNCA dizer ao cliente que o pedido dele vai para outra pessoa.
+//
+// Não basta não escrever "fornecedor": "vou encaminhar", "vamos solicitar",
+// "nosso parceiro vai responder" entregam a cadeia inteira sem usar nenhuma
+// palavra da lista acima. Para o cliente quem gera o código é a Phaze, e é por
+// isso que TODA mensagem fala em primeira pessoa — "eu pego", "te mando".
+// Verbo de repasse é o sinal de que alguém escorregou para a terceira.
+const REPASSE =
+  /encaminh\w*|repass\w*|\bterceir\w*|nosso\s+parceir\w*|outra\s+empresa|solicit\w*\s+(ao|para|pro)\b|\bpedir?\s+(ao|para|pro)\s+\w*\s*(fornecedor|parceir\w*|loja|vendedor|eles)|mand\w*\s+(para|pro|pra|ao)\s+\w*\s*(fornecedor|parceir\w*|loja|vendedor|eles)/i;
+
 const paraCliente = [];
 
 paraCliente.push(janela.estado(emBRT('09:00')).avisoCliente);
@@ -284,7 +294,30 @@ paraCliente.forEach((m, i) => {
   // "automaticamente" passou batido mesmo com esta lista já montada aqui.
   t(`mensagem ${i + 1} sem vocabulário de robô`,
     typeof m === 'string' && !AUTOMACAO.test(m), (String(m).match(AUTOMACAO) || [''])[0] || 'limpo');
+  t(`mensagem ${i + 1} não diz que repassa a alguém`,
+    typeof m === 'string' && !REPASSE.test(m), (String(m).match(REPASSE) || [''])[0] || 'limpo');
 });
+
+// A rede só vale se pegar o que ela existe para pegar. Sem estas, um regex
+// quebrado passaria despercebido e o bloco acima viraria decoração — foi
+// exatamente o que aconteceu com "automaticamente".
+bloco('a própria rede pega o que deve');
+for (const ruim of [
+  'Já encaminhei seu pedido, aguarde',
+  'Vou repassar para o fornecedor agora',
+  'Nosso parceiro já está resolvendo',
+  'Vamos solicitar ao fornecedor e te aviso',
+  'Mandei para a loja, logo responde',
+]) {
+  t(`pega "${ruim.slice(0, 28)}"`, REPASSE.test(ruim) || PROIBIDO.test(ruim));
+}
+for (const bom of [
+  'Já estou pegando seu código. Só um instante 👍',
+  'Recebi tudo ✅ Já te retorno com o código 👍',
+  'Anotei! Tem 2 pessoas na sua frente. Já já pego seu código e te mando 👍',
+]) {
+  t(`deixa passar "${bom.slice(0, 28)}"`, !REPASSE.test(bom) && !PROIBIDO.test(bom) && !AUTOMACAO.test(bom));
+}
 
 bloco('id fácil de copiar');
 const { proximoId } = require('./src/ponte/estado');
@@ -413,6 +446,46 @@ const OP = '5541999999999';
   // tem debounce de 400ms — sem o flush, o disjuntor ficava ABERTO no
   // data/ponte.json e a execução seguinte começava congelada do nada.
   estadoPonte.persistAgora();
+
+  // ── A promessa só sai depois do #ok ────────────────────────
+  // No copiloto nada foi enviado enquanto a tarefa espera aprovação. Dizer
+  // "já estou pegando seu código" ali é prometer uma ação que depende do
+  // operador e que o #nao pode cancelar — o cliente ficava esperando algo
+  // que nunca tinha começado.
+  bloco('nada de promessa antes da aprovação');
+
+  const CLI_OK = '5541911115555';
+  const antesDoOk = await ponteMod.pedirCodigo(CLI_OK, 'Fulano', 'usuario9', null);
+  const tarefaCriada = estadoPonte.dados.tarefas.find((x) => x.usuario === 'usuario9');
+
+  if (tarefaCriada && tarefaCriada.estado === 'aguardando_aprovacao') {
+    t('o pedido não promete que já está pegando',
+      !/estou pegando|já pego|vou pegar/i.test(antesDoOk.mensagem), antesDoOk.mensagem);
+    t('mas confirma que chegou', /recebi/i.test(antesDoOk.mensagem), antesDoOk.mensagem);
+
+    // O #ok manda a promessa ao cliente. Intercepta o sender para ver o que sai.
+    const sender = require('./src/sender');
+    const original = sender.send;
+    const enviadas = [];
+    sender.send = async (para, texto) => { enviadas.push({ para, texto }); };
+    try {
+      await operador.executar(`#ok ${tarefaCriada.id}`);
+    } finally {
+      sender.send = original;
+    }
+
+    const aoCliente = enviadas.find((e) => e.para === CLI_OK);
+    t('o #ok avisa o cliente', Boolean(aoCliente), JSON.stringify(enviadas.map((e) => e.para)));
+    if (aoCliente) {
+      t('e aí sim promete', /pegando seu código|na fila/i.test(aoCliente.texto), aoCliente.texto);
+      t('sem entregar a origem',
+        !PROIBIDO.test(aoCliente.texto) && !AUTOMACAO.test(aoCliente.texto) && !REPASSE.test(aoCliente.texto),
+        aoCliente.texto);
+    }
+  } else {
+    t('cenário do #ok montado', false,
+      `tarefa ficou como ${tarefaCriada ? tarefaCriada.estado : 'inexistente'}`);
+  }
 
   const comVnc = politica.limparAlerta(
     '🛑 *Verificação na tela*\n\n1. Abre a tela: http://89.116.186.155:6080/vnc.html\n3. Responde *#liberar*',

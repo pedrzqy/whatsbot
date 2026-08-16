@@ -278,6 +278,25 @@ async function executar(texto) {
     if (t.estado !== 'aguardando_aprovacao') return `Essa tarefa já está como *${t.estado}*.`;
     t.estado = 'pendente';
     persistAgora();
+
+    // SÓ AGORA o cliente ouve que o código está sendo buscado.
+    //
+    // Antes isso saía no momento do pedido, com a tarefa ainda parada
+    // esperando aprovação: o cliente lia "já estou pegando seu código" e nada
+    // tinha saído — e se a resposta fosse #nao, a promessa nunca se cumpria.
+    // No copiloto quem decide é o operador, então a mensagem acompanha a
+    // decisão, não o pedido.
+    const at = fila.porId(t.atendimentoId);
+    if (at) {
+      const j = janela.estado();
+      await sender.send(
+        at.from,
+        j.aberta
+          ? 'Já estou pegando seu código. Só um instante 👍'
+          : j.avisoCliente,
+      );
+    }
+
     return janela.estado().aberta
       ? '✅ Aprovado. Sai em segundos.'
       : `✅ Aprovado. Sai quando reabrir (em ${Math.round(janela.estado().esperaMinutos / 60)}h).`;
