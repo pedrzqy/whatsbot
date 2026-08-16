@@ -37,6 +37,15 @@ router.use((req, res, next) => {
     console.warn('[ponte/braco] chave recusada — PONTE_BRACO_KEY diferente entre os dois serviços?');
     return res.status(401).json({ erro: 'chave inválida' });
   }
+
+  // Marca de vida em QUALQUER rota autenticada, não só no long-poll.
+  //
+  // Carimbar só /proxima dava falso negativo: na subida o outro serviço fala
+  // primeiro com /estado e só depois começa a pedir tarefa — e enquanto o
+  // Chrome abre (~30s, mais na primeira vez) o #fila dizia "nunca conectou"
+  // com ele perfeitamente conectado. Passar por aqui já é prova de contato:
+  // alcançou a rede e a chave bate.
+  dados.coletaVistaEm = Date.now();
   next();
 });
 
@@ -82,13 +91,6 @@ router.post('/sms-usado', (_req, res) => {
  * que importa é o das ações no navegador, e esse continua igual.
  */
 router.get('/proxima', async (req, res) => {
-  // Marca de vida. Esta rota é o long-poll: enquanto o outro serviço estiver de
-  // pé, ela é chamada continuamente. É o sinal mais barato de "o outro lado
-  // está no ar", e sem ele o #fila mostrava a tarefa liberada e mais nada —
-  // não dava para distinguir "trabalhando" de "serviço caído" sem abrir o
-  // painel do Easypanel, que é justamente o que trava a depuração à noite.
-  dados.coletaVistaEm = Date.now();
-
   const pegar = () => {
     if (limites.disjuntor().estado === 'aberto') return null;
     if (!janela.estado().aberta) return null;
