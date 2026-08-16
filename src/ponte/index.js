@@ -289,8 +289,18 @@ async function promoverProximo() {
   const at = fila.ativo();
   if (!at || !at.usuario) return;
 
-  await sender.send(at.from, 'Chegou sua vez! Já estou pegando seu código 👍');
-  await despachar(at);
+  // Despacha ANTES de falar, porque é o estado da tarefa que decide o que
+  // dizer. No copiloto ela nasce esperando o #ok e nada saiu ainda — prometer
+  // "já estou pegando" aqui repetiria o defeito que já corrigimos no pedido:
+  // promessa de uma ação que depende do operador e que o #nao pode cancelar.
+  const tarefa = await despachar(at);
+
+  await sender.send(
+    at.from,
+    tarefa && tarefa.estado === 'aguardando_aprovacao'
+      ? 'Chegou sua vez! Já te retorno com o código 👍'
+      : 'Chegou sua vez! Já estou pegando seu código 👍',
+  );
 }
 
 // ============================================================
