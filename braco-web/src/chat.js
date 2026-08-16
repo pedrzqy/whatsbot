@@ -91,6 +91,14 @@ class Chat {
     // ele acompanha o re-render em vez de morrer com ele. `visible=true` mantém
     // o filtro que evita os nós ocultos da lista de conversas ao lado.
     let achadosOcultos = 0;
+    // Última alternativa aceitável. O log de produção mostrou TODOS os
+    // candidatos escopados sendo recusados por "dentro de mensagem" — o DOM
+    // deste chat aninha a caixa de edição de um jeito que faz o closest()
+    // subir até um .message-item. Recusar e ficar sem campo seria pior que o
+    // problema original, então o alvo dentro de mensagem vira reserva em vez
+    // de ser descartado: só é usado se nenhum outro aparecer.
+    let reserva = null;
+    const jaAvisado = new Set();
 
     while (Date.now() < limite) {
       achadosOcultos = 0;
@@ -113,7 +121,12 @@ class Chat {
             .catch(() => false);
 
           if (dentroDeMensagem) {
-            console.warn(`[chat] "${chave}": "${sel}" casou DENTRO de uma mensagem — ignorado`);
+            // Uma vez por seletor, não a cada volta de 300ms.
+            if (!jaAvisado.has(sel)) {
+              console.warn(`[chat] "${chave}": "${sel}" casou dentro de mensagem — deixando de reserva`);
+              jaAvisado.add(sel);
+            }
+            if (!reserva) reserva = { el: visivel, sel };
           } else {
             return { el: visivel, sel };
           }
@@ -128,6 +141,14 @@ class Chat {
     // segundo é a tela em outro estado — modal por cima, conversa não aberta,
     // painel ainda montando. Antes os dois davam a mesma mensagem, e o custo
     // era 8s de clique cego antes de descobrir qual era.
+    // Nada limpo apareceu, mas há um alvo visível — usa. Ficar sem campo trava
+    // o envio inteiro; o alvo de reserva pelo menos tem chance de ser o certo,
+    // e foi o que manteve o fluxo de pé quando o closest() recusou todos.
+    if (reserva) {
+      console.warn(`[chat] "${chave}": usando a reserva "${reserva.sel}" — nenhum alvo fora de mensagem`);
+      return reserva;
+    }
+
     if (achadosOcultos) {
       throw new SeletorNaoEncontrado(
         `"${chave}": ${achadosOcultos} elemento(s) casaram mas NENHUM está visível. ` +
@@ -846,13 +867,6 @@ class Chat {
       await this.pagina.waitForTimeout(humaniza.ms(2500, 5000));
     }
 
-    // Confirmada no diálogo, mas o balão não apareceu a tempo e por isso
-    // nenhum outro caminho rodou. Conta como enviada: o 确定 já foi clicado, a
-    // imagem está no ar, e insistir agora seria o segundo print no chat.
-    if (!via && this._imagemComprometida) {
-      via = 'Ctrl+V (confirmada; balão demorou a aparecer)';
-    }
-
     await this.checarBloqueio();
 
     const comoArquivo = await this._ultimaSaiuComoArquivo();
@@ -880,9 +894,25 @@ class Chat {
       this._imagemComprometida = true;
       if (await this._esperarNovaMinha(antes)) return true;
 
-      // Submetida e ainda sem balão depois de 25s. NÃO é caso de tentar outro
-      // caminho — seria a segunda foto no chat.
-      console.warn('[chat] imagem confirmada no diálogo mas o balão não apareceu em 25s');
+      // Confirmado no diálogo e SEM balão depois de 25s.
+      //
+      // Clicar em 确定 submete, mas não garante que subiu — e 25s é tempo de
+      // sobra para um print de console aparecer. Sem balão, o mais provável é
+      // que o envio NÃO completou.
+      //
+      // Aqui a trava tinha que ceder. Segurando os outros caminhos, este caso
+      // virava zero foto: o fornecedor recebia só o usuário, o cliente não
+      // recebia nada e o atendimento morria no timeout. Duas fotos é ruim
+      // (o fornecedor não sabe qual vale, mas o operador conserta na conversa);
+      // nenhuma foto quebra o fluxo inteiro e não tem conserto automático.
+      //
+      // Os 25s de espera continuam valendo: eles é que tornam a duplicata
+      // improvável, porque o caso do balão lento já foi absorvido antes daqui.
+      console.warn(
+        '[chat] confirmada no diálogo mas sem balão em 25s — provavelmente não subiu, ' +
+          'liberando os outros caminhos de envio',
+      );
+      this._imagemComprometida = false;
       return false;
     }
 
