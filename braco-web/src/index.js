@@ -91,6 +91,9 @@ let smsPedidoEm = 0;
 // Só loga quando MUDA. O laço agora gira a cada 6s enquanto alguém espera
 // resposta, e um "sessão ok" por volta afogaria os logs que interessam.
 let sessaoLogada = null;
+// Mesma ideia do sessaoLogada: o motivo do congelamento carrega o erro inteiro,
+// e o laço volta a cada 15s — logar sempre afogaria o painel.
+let motivoCongeladoLogado = null;
 
 async function garantirLogin(pagina, chat) {
   try {
@@ -379,11 +382,28 @@ async function main() {
 
       if (!st.podeAgir) {
         if (st.disjuntor === 'aberto') {
-          console.log(`[braço] congelado: ${st.motivoDisjuntor}`);
+          // Só quando MUDA. O motivo carrega o erro inteiro, e repeti-lo a cada
+          // volta enterrava qualquer linha útil no log do painel.
+          if (motivoCongeladoLogado !== st.motivoDisjuntor) {
+            console.log(`[braço] congelado: ${st.motivoDisjuntor}`);
+            motivoCongeladoLogado = st.motivoDisjuntor;
+          }
+
+          // 15s e não 5 min. Quem descongela é o operador pelo #liberar, e ele
+          // está olhando o WhatsApp esperando o envio sair na hora — com
+          // 300s ele liberava, não acontecia nada por minutos e parecia que o
+          // comando não tinha funcionado. É uma chamada HTTP interna, não toca
+          // no navegador nem no chat: não conta como atividade na conta.
+          await dormir(15_000);
+          continue;
         }
+
+        // Fora da janela do fornecedor: aí sim esperar muito é o certo, porque
+        // o que muda é o relógio e não uma ação do operador.
         await dormir(300_000);
         continue;
       }
+      motivoCongeladoLogado = null;
 
       const titulo = st.chatTitulo;
       if (!titulo) {
