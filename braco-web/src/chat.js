@@ -96,7 +96,28 @@ class Chat {
       achadosOcultos = 0;
       for (const sel of lista) {
         const visivel = this.frame.locator(`${sel} >> visible=true`).first();
-        if (await visivel.count().catch(() => 0)) return { el: visivel, sel };
+        if (await visivel.count().catch(() => 0)) {
+          // NUNCA aceitar um alvo que esteja DENTRO de um balão de mensagem.
+          //
+          // "[contenteditable='true']" casa também com o corpo das mensagens
+          // deste chat. Quando o campo real não estava montado, a busca caía
+          // nesse candidato e devolvia uma MENSAGEM: o log mostrou o campo
+          // "ficando com" 机器在身边么, que é fala do outro lado, e o texto do
+          // cliente nunca chegava ao lugar certo.
+          //
+          // Nenhuma das chaves procuradas por aqui (campoTexto, botaoEnviar,
+          // conversaNaLista) vive dentro de uma mensagem, então a regra vale
+          // para todas.
+          const dentroDeMensagem = await visivel
+            .evaluate((n) => Boolean(n.closest('.message-item')))
+            .catch(() => false);
+
+          if (dentroDeMensagem) {
+            console.warn(`[chat] "${chave}": "${sel}" casou DENTRO de uma mensagem — ignorado`);
+          } else {
+            return { el: visivel, sel };
+          }
+        }
         achadosOcultos += await this.frame.locator(sel).count().catch(() => 0);
       }
       await this.pagina.waitForTimeout(300);
@@ -139,7 +160,17 @@ class Chat {
    * enquanto o cliente ainda está na conversa.
    */
   async _clicar(el, { timeout = 8000 } = {}) {
-    await el.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+    // SEM scrollIntoViewIfNeeded.
+    //
+    // Ele entrou aqui para resolver o "element is not visible", mas quem
+    // resolveu aquilo foi o locator com `visible=true` — se o elemento já veio
+    // filtrado por visível, não há o que trazer para a vista.
+    //
+    // E ele tinha um efeito colateral caro: quando a busca errava o alvo e
+    // devolvia um balão de mensagem em vez do campo, este scroll rolava o chat
+    // até a mensagem ANTIGA. Era a tela subindo sozinha uns segundos depois da
+    // foto — o sintoma parecia rolagem descontrolada e era o clique mirando no
+    // lugar errado.
     await el.click({ delay: humaniza.msCurto(), timeout });
   }
 

@@ -22,8 +22,15 @@
   },
 
   "campoTexto": {
-    "_o_que_e": "Onde se digita. É um <pre class='edit'> contenteditable, não um textarea — por isso o braço usa type() e não fill().",
-    "candidatos": ["pre.edit", ".editBox pre", "[contenteditable='true']"]
+    "_o_que_e": "Onde se digita. É um <pre class='edit'> contenteditable, não um textarea — por isso o braço cola (Ctrl+V) e, se falhar, usa type(); fill() não funciona. ORDEM IMPORTA: os primeiros são escopados na caixa de edição. O genérico [contenteditable='true'] fica por último porque casa TAMBÉM com o corpo das mensagens deste chat — quando o campo real ainda não estava montado, a busca caía nele e devolvia um balão do fornecedor (o log pegou o campo 'ficando com' 机器在身边么). O chat.js recusa qualquer alvo dentro de .message-item, mas manter o genérico por último evita depender só disso.",
+    "candidatos": [
+      ".editBox pre.edit",
+      "[class*='editBox'] pre",
+      "[class*='edit-box'] pre",
+      "pre.edit",
+      "[class*='input'] [contenteditable='true']",
+      "[contenteditable='true']"
+    ]
   },
 
   "botaoEnviar": {
