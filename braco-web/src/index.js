@@ -190,6 +190,28 @@ async function baixarFoto(nome) {
 
 // ------------------------------------------------------------
 
+/**
+ * A SEQUÊNCIA no chat, na ordem definida pelo operador. Não reordenar sem
+ * motivo escrito — cada passo aqui existe porque a falta dele já quebrou um
+ * envio em produção:
+ *
+ *   1. entrar no chat                    ─┐ abrirConversa()
+ *   2. clicar na conversa do fornecedor  ─┘
+ *   3. descer até o final                 ─ marca() começa por irParaOFim()
+ *   4. clicar no campo                   ─┐
+ *   5. Ctrl+V da foto                     │ enviarFoto()
+ *   6. confirmar a foto (确定)            ─┘
+ *   7. descer até o final DE NOVO         ─ o diálogo deixa a lista rolada
+ *   8. esperar ~5s                        ─ upload assenta, cadência humana
+ *   9. clicar no campo                   ─┐
+ *  10. Ctrl+V do usuário                  │ enviarTexto()
+ *  11. enviar (发送)                      ─┘
+ *  12. esperar a resposta                 ─ lerRespostas(), fora daqui
+ *  13. mandar ao cliente                  ─ no outro serviço, com #ok
+ *
+ * Os passos 3 e 7 são o mesmo remédio para o mesmo problema: lista rolada
+ * para cima faz a tela saltar E o clique seguinte errar o alvo.
+ */
 async function executarTarefa(chat, tarefa, titulo) {
   const { pode, motivo } = humaniza.podeEnviar();
   if (!pode) {
@@ -228,12 +250,26 @@ async function executarTarefa(chat, tarefa, titulo) {
       }
     }
 
-    // Respira entre a foto e o usuário.
-    //
-    // Duas mensagens coladas uma na outra é assinatura de script — pessoa
-    // nenhuma anexa um print e digita no mesmo segundo. E dá tempo do upload
-    // assentar antes de o texto entrar na fila de envio.
-    if (fotoEnviada) await dormir(humaniza.ms(3000, 4500));
+    if (fotoEnviada) {
+      // DESCER de novo, agora que a foto entrou.
+      //
+      // O diálogo de confirmação da imagem deixa a lista rolada para cima, e é
+      // desse estado que vêm os dois sintomas juntos: a tela saltando e o
+      // clique seguinte batendo em elemento fora da área visível ("element is
+      // not visible" / "not stable" no log). Descer antes de mexer no campo
+      // resolve os dois de uma vez.
+      await chat.irParaOFim();
+
+      // Respira entre a foto e o usuário.
+      //
+      // Duas mensagens coladas uma na outra é assinatura de script — pessoa
+      // nenhuma anexa um print e digita no mesmo segundo. E dá tempo do upload
+      // assentar antes de o texto entrar na fila de envio.
+      //
+      // 5s é o piso pedido; o resto é jitter para a cadência não ficar
+      // idêntica a cada envio, que por si só já é um padrão de máquina.
+      await dormir(humaniza.ms(5000, 6500));
+    }
 
     await chat.enviarTexto(tarefa.usuario);
     humaniza.registrarEnvio();

@@ -338,6 +338,17 @@ class Chat {
    *    mensagem com horário anterior é passado, apareça ela no DOM quando
    *    aparecer. Rolagem e virtualização não mexem no relógio.
    */
+  /**
+   * Desce a conversa até o fim. Público porque o fluxo de envio precisa dele
+   * ENTRE os passos, não só antes de ler: depois de confirmar o print a lista
+   * fica rolada para cima (o diálogo de imagem faz isso sozinho), e é dali que
+   * vem tanto a tela saltando quanto o clique que erra o alvo por estar fora
+   * da área visível.
+   */
+  async irParaOFim() {
+    await this._irParaOFim();
+  }
+
   async marca() {
     await this._irParaOFim();
 
@@ -397,13 +408,35 @@ class Chat {
       });
       await this._clicar(el);
 
-      // É um <pre contenteditable>, não um input: fill() não funciona.
-      // type() com delay por tecla também produz cadência de digitação humana.
-      for (const bloco of humaniza.blocos(texto)) {
-        // timeout explícito: type() também cai no default de 30s do Playwright
-        // se o campo perder a condição de editável no meio da digitação.
-        await el.type(bloco, { delay: humaniza.msTecla(), timeout: 15_000 });
-        await this.pagina.waitForTimeout(humaniza.ms(150, 500));
+      // COLAR primeiro, digitar só se a colagem não pegar.
+      //
+      // A ordem é essa por causa do 请输入内容~: com type(), o texto aparecia
+      // na tela mas o framework da Taobao não o via como conteúdo, e o envio
+      // saía vazio. A colagem dispara o evento `paste` nativo, que é o caminho
+      // que o chat escuta de verdade.
+      //
+      // O type() fica atrás porque depende só do Playwright — se o xclip não
+      // estiver na imagem, ou o clipboard do X não assumir, ele ainda salva o
+      // envio.
+      let colou = false;
+      try {
+        await comLimite(this._ctrlVTexto(texto), 15_000, 'Ctrl+V de texto');
+        const agora = await el.evaluate((node) => node.innerText || node.textContent || '');
+        colou = agora.includes(texto);
+        if (!colou) console.warn('[chat] colagem do texto não pegou — vou digitar');
+      } catch (err) {
+        console.warn(`[chat] Ctrl+V de texto falhou: ${err.message} — vou digitar`);
+      }
+
+      if (!colou) {
+        // É um <pre contenteditable>, não um input: fill() não funciona.
+        // type() com delay por tecla produz cadência de digitação humana.
+        for (const bloco of humaniza.blocos(texto)) {
+          // timeout explícito: type() também cai no default de 30s do Playwright
+          // se o campo perder a condição de editável no meio da digitação.
+          await el.type(bloco, { delay: humaniza.msTecla(), timeout: 15_000 });
+          await this.pagina.waitForTimeout(humaniza.ms(150, 500));
+        }
       }
 
       await this.pagina.waitForTimeout(humaniza.ms(400, 1100));
@@ -584,28 +617,16 @@ class Chat {
     const antes = await this._quantasMinhas();
     let via = null;
 
-    // ── 1. Uploader que se declara de imagem ──────────────────
+    // ── 1. Ctrl+V de verdade ──────────────────────────────────
     //
-    // O log de produção confirmou que ele existe e se identifica sozinho:
-    // accept=".jpg,.jpeg,.gif,.png,.bmp" com pai "moxie-shim". O outro input,
-    // accept vazio e name="file" dentro de "next-upload-inner", é o de ARQUIVO
-    // — era ele que mandava o cartão "下载文件" que o fornecedor não abre.
+    // É o que uma pessoa faz, e colagem NUNCA vira anexo: ela entra pelo
+    // caminho de imagem do próprio chat, com a prévia e o 确定. O input, mesmo
+    // o que se declara de imagem, é upload de arquivo por baixo — e foi de lá
+    // que saiu o cartão "下载文件" que o outro lado não abre.
     //
-    // Vem primeiro por ser o caminho mais curto: uma chamada, sem clipboard,
-    // sem binário externo, sem diálogo. O Ctrl+V continua logo atrás.
-    const i = mapa.findIndex((m) => /image|jpg|jpeg|png|gif|bmp/i.test(m.accept));
-    if (i !== -1) {
-      const inputs = await this.frame.$$("input[type='file']");
-      try {
-        console.log(`[chat] tentando input de imagem #${i} (${mapa[i].accept})`);
-        await comLimite(inputs[i].setInputFiles(caminhoLocal), 20_000, 'setInputFiles');
-        if (await this._tentar(async () => {}, antes)) via = `accept "${mapa[i].accept}"`;
-      } catch (err) {
-        console.warn(`[chat] input de imagem recusou: ${err.message}`);
-      }
-    }
-
-    // ── 2. Ctrl+V de verdade ──────────────────────────────────
+    // Já esteve em segundo lugar, atrás do input de imagem, por ser o caminho
+    // mais curto. Voltou para a frente porque curto não vale nada se a foto
+    // chega de um jeito que ninguém abre.
     if (!via) {
       try {
         console.log('[chat] tentando Ctrl+V');
@@ -614,6 +635,25 @@ class Chat {
         }
       } catch (err) {
         console.warn(`[chat] Ctrl+V falhou: ${err.message}`);
+      }
+    }
+
+    // ── 2. Uploader que se declara de imagem ──────────────────
+    //
+    // Reserva para quando o clipboard do X não estiver disponível (xclip fora
+    // da imagem, seleção não assumida). O log de produção confirmou que este
+    // input existe e se identifica sozinho: accept=".jpg,.jpeg,.gif,.png,.bmp"
+    // com pai "moxie-shim". O outro, accept vazio e name="file" dentro de
+    // "next-upload-inner", é o de ARQUIVO e não entra aqui.
+    const i = mapa.findIndex((m) => /image|jpg|jpeg|png|gif|bmp/i.test(m.accept));
+    if (!via && i !== -1) {
+      const inputs = await this.frame.$$("input[type='file']");
+      try {
+        console.log(`[chat] tentando input de imagem #${i} (${mapa[i].accept})`);
+        await comLimite(inputs[i].setInputFiles(caminhoLocal), 20_000, 'setInputFiles');
+        if (await this._tentar(async () => {}, antes)) via = `accept "${mapa[i].accept}"`;
+      } catch (err) {
+        console.warn(`[chat] input de imagem recusou: ${err.message}`);
       }
     }
 
@@ -749,6 +789,44 @@ class Chat {
       console.warn('[chat] diálogo 发送图片 na tela mas não achei o 确定');
     }
     return false;
+  }
+
+  /**
+   * Ctrl+V de TEXTO: põe o usuário no clipboard do X e cola no campo.
+   *
+   * Por que colar em vez de digitar: `type()` escreve caractere a caractere no
+   * <pre contenteditable>, e o framework da Taobao nem sempre registra isso
+   * como conteúdo. O sintoma é o aviso amarelo 请输入内容~ ("digite algum
+   * conteúdo") no clique em 发送, com o texto visível na tela — a mensagem
+   * some, a foto já foi, e o cliente espera o timeout inteiro.
+   *
+   * A colagem dispara o evento `paste` nativo, que é o caminho que o próprio
+   * chat espera. Mesmo mecanismo do print, só muda o alvo do clipboard.
+   */
+  async _ctrlVTexto(texto) {
+    const xclip = spawn('xclip', ['-selection', 'clipboard', '-t', 'text/plain'], {
+      detached: true,
+      stdio: ['pipe', 'ignore', 'ignore'],
+    });
+    // Mesmo motivo do _ctrlV: sem handler, xclip ausente vira 'error' sem
+    // ouvinte, e no Node isso derruba o processo inteiro em vez de só falhar
+    // este caminho.
+    xclip.on('error', (e) => console.warn(`[chat] xclip não rodou: ${e.message}`));
+    xclip.stdin.on('error', () => {}); // EPIPE se o xclip morreu antes de ler
+    xclip.stdin.end(texto);
+    xclip.unref();
+
+    try {
+      await this.pagina.waitForTimeout(600); // o xclip precisa assumir a seleção
+      const campo = await this._achar('campoTexto', { timeout: 8000 });
+      await this._clicar(campo.el);
+      await this.pagina.keyboard.press('Control+V');
+      await this.pagina.waitForTimeout(humaniza.ms(600, 1200));
+    } finally {
+      setTimeout(() => {
+        try { process.kill(xclip.pid); } catch { /* já saiu sozinho */ }
+      }, 1500);
+    }
   }
 
   /**
