@@ -113,10 +113,24 @@ function paraCliente(traduzido) {
     flags.push('decisao_comercial');
   }
 
+  // O que chega aqui já passou pelo tradutor. Se sobrou caractere chinês, a
+  // tradução falhou naquele trecho — e mandar isso ao cliente entrega a origem
+  // tão bem quanto escrever "fornecedor". Sai, e a flag avisa o operador.
+  // temCJK() e não RE_CJK.test(): RE_CJK tem /g, e .test() com global guarda
+  // lastIndex entre chamadas — alternaria true/false na mesma entrada. É a
+  // armadilha que o comentário lá em cima já documenta para os outros regex.
+  if (temCJK(texto)) {
+    flags.push('sobrou_original');
+    texto = texto.replace(RE_CJK, '').replace(/[ \t]{2,}/g, ' ');
+  }
+
   return {
     texto: texto.trim(),
     flags,
-    precisaRevisao: flags.includes('preco_cny') || flags.includes('decisao_comercial'),
+    precisaRevisao:
+      flags.includes('preco_cny') ||
+      flags.includes('decisao_comercial') ||
+      flags.includes('sobrou_original'),
   };
 }
 
@@ -180,6 +194,18 @@ const RE_AUTOMACAO = /\bbra[çc]o|rob[ôo]|\bbots?\b|autom[aá]tic\w*|automatiza
 // Cara de stack trace: "algo.algo:", "at Objeto.func", caminho de arquivo, ms.
 const RE_TECNICO = /\b\w+\.\w+:\s|\bat\s+\w+[.:]|\/[\w./-]+\.js\b|\b\d+ms\b|\bTypeError\b|\bError:/g;
 
+// Han, hiragana, katakana e o título de loja. Caractere chinês no número
+// comercial entrega a origem exatamente como a palavra "fornecedor" — e não
+// adianta para o operador, que decide lendo o português.
+const RE_CJK = /[　-〿぀-ヿ㐀-䶿一-鿿豈-﫿＀-￯]+/g;
+
+/**
+ * Sobrou algum caractere chinês/japonês? Usado pelo teste e pela limpeza.
+ */
+function temCJK(texto) {
+  return new RegExp(RE_CJK.source).test(String(texto || ''));
+}
+
 /**
  * Limpa QUALQUER texto que vá para o WhatsApp pelo canal de alerta.
  * @returns {{texto:string, limpou:boolean}}
@@ -207,6 +233,11 @@ function limparAlerta(original) {
   texto = texto
     .replace(RE_TECNICO, ' ')
     .replace(RE_AUTOMACAO, 'sistema')
+    // Chinês some. Última rede: o texto do outro lado só deve sair daqui já
+    // traduzido, e se sobrou caractere original é porque a tradução falhou em
+    // algum caminho — melhor a linha ficar curta do que sair em chinês pelo
+    // número comercial.
+    .replace(RE_CJK, '')
     .replace(/[ \t]{2,}/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
@@ -214,4 +245,4 @@ function limparAlerta(original) {
   return { texto, limpou: texto !== antes.trim() };
 }
 
-module.exports = { paraFornecedor, paraCliente, motivoNeutro, limparAlerta };
+module.exports = { paraFornecedor, paraCliente, motivoNeutro, limparAlerta, temCJK };

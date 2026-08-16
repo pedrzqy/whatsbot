@@ -154,7 +154,18 @@ async function pedirCodigo(from, nome, usuarioBruto, imagemPath = null) {
   // acontece se o operador aprovar, e que pode nunca acontecer (#nao). O
   // cliente confirma que chegou; a promessa sai no #ok, quando vira verdade.
   if (tarefa && tarefa.estado === 'aguardando_aprovacao') {
-    return { aceito: true, mensagem: 'Recebi tudo ✅ Já te retorno com o código 👍' };
+    // No #teste o operador é o cliente, e as duas mensagens caem no mesmo
+    // número. "Recebi tudo, já te retorno" lido ali parece o fim do fluxo, e o
+    // #ok ficava esquecido esperando um envio que nunca ia sair sozinho.
+    //
+    // SÓ no teste. Para cliente de verdade, "#ok 45" é comando de operador
+    // vazando para quem não pode nem saber que existe um do outro lado.
+    return {
+      aceito: true,
+      mensagem: testando
+        ? `Recebi tudo ✅\n\n🧪 *Modo teste* — manda *#ok ${tarefa.id}* para o envio sair.`
+        : 'Recebi tudo ✅ Já te retorno com o código 👍',
+    };
   }
 
   return { aceito: true, mensagem: janela.estado().avisoCliente };
@@ -258,11 +269,21 @@ async function receberDoFornecedor(entrada) {
   dados.aprovacoes.push(aprovacao);
   persistAgora();
 
+  // SEM o texto original.
+  //
+  // Ele vinha logo acima da tradução, em chinês, e isso é duas coisas ruins de
+  // uma vez. A primeira é prática: para decidir entre #enviar e #nao, o
+  // operador lê o português — o chinês é ruído que ele não consegue conferir.
+  // A segunda é a regra: caractere chinês no número comercial ENTREGA A ORIGEM
+  // igual à palavra "fornecedor", e sai pelo mesmo número que fala com o
+  // cliente.
+  //
+  // O original continua guardado em `aprovacao.origem`, que é onde ele serve —
+  // depurar tradução ruim sem passar pelo WhatsApp.
   await alertar(
     `⚠️ *Resposta sem código*\n\n` +
       `Cliente: *${at.nome}* · usuário \`${at.usuario}\`\n\n` +
-      `*Original:* ${entrada.texto}\n` +
-      `*Tradução:* ${traduzido}\n\n` +
+      `💬 ${traduzido}\n\n` +
       `*#enviar ${aprovacao.id}* manda essa explicação ao cliente\n` +
       `*#editar ${aprovacao.id} <texto>* · *#nao ${aprovacao.id}* descarta`,
     entrada.printPath,

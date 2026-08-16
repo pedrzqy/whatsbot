@@ -318,6 +318,9 @@ paraCliente.forEach((m, i) => {
     typeof m === 'string' && !AUTOMACAO.test(m), (String(m).match(AUTOMACAO) || [''])[0] || 'limpo');
   t(`mensagem ${i + 1} não diz que repassa a alguém`,
     typeof m === 'string' && !REPASSE.test(m), (String(m).match(REPASSE) || [''])[0] || 'limpo');
+  // Caractere chinês entrega a origem igual à palavra "fornecedor", e ainda
+  // por cima o operador não consegue conferir o que não sabe ler.
+  t(`mensagem ${i + 1} sem caractere chinês`, !politica.temCJK(m), m);
 });
 
 // A rede só vale se pegar o que ela existe para pegar. Sem estas, um regex
@@ -440,6 +443,31 @@ const OP = '5541999999999';
   t('nem sobra dump de log',
     !/Call log|attempting|waiting for|Timeout/i.test(sujo.texto), JSON.stringify(sujo.texto));
 
+  // ── Nada em chinês no WhatsApp ─────────────────────────────
+  // Vale para o alerta do operador também: sai pelo mesmo número comercial, e
+  // ele decide entre #enviar e #nao lendo o português — o original em chinês
+  // era ruído que ele não tinha como conferir.
+  bloco('nada em chinês no WhatsApp');
+
+  const comChines = politica.limparAlerta(
+    '⚠️ *Resposta sem código*\n\n*Original:* 稍等 没有收到邮件\n*Tradução:* Só um momento.',
+  );
+  t('limparAlerta tira o chinês', !politica.temCJK(comChines.texto), comChines.texto);
+  t('e mantém o português', /Só um momento/.test(comChines.texto), comChines.texto);
+
+  // O que o #enviar leva ao cliente: se a tradução falhou num trecho, o
+  // original não pode ir junto.
+  const meioTraduzido = politica.paraCliente('Só um momento 稍等 有货');
+  t('paraCliente tira o que não foi traduzido', !politica.temCJK(meioTraduzido.texto), meioTraduzido.texto);
+  t('e marca para o operador revisar',
+    meioTraduzido.flags.includes('sobrou_original') && meioTraduzido.precisaRevisao === true);
+
+  // temCJK com regex /g alternaria true/false na mesma entrada se fosse
+  // reaproveitado — a armadilha que o topo do politica.js documenta.
+  t('temCJK é estável em chamadas seguidas',
+    politica.temCJK('稍等') && politica.temCJK('稍等') && politica.temCJK('稍等'));
+  t('e não acusa português', !politica.temCJK('Só um momento, já te retorno 👍'));
+
   const limpo = politica.limparAlerta('🛑 Envios congelados. Responde #liberar.');
   t('texto já limpo passa intacto', limpo.limpou === false, limpo.texto);
 
@@ -484,6 +512,10 @@ const OP = '5541999999999';
     t('o pedido não promete que já está pegando',
       !/estou pegando|já pego|vou pegar/i.test(antesDoOk.mensagem), antesDoOk.mensagem);
     t('mas confirma que chegou', /recebi/i.test(antesDoOk.mensagem), antesDoOk.mensagem);
+    // Cliente de verdade NUNCA pode ver comando de operador: ele não pode nem
+    // saber que existe alguém aprovando do outro lado.
+    t('e cliente de verdade não vê comando de operador',
+      !/#\w+/.test(antesDoOk.mensagem), antesDoOk.mensagem);
 
     // O #ok manda a promessa ao cliente. Intercepta o sender para ver o que sai.
     const sender = require('./src/sender');
@@ -508,6 +540,26 @@ const OP = '5541999999999';
     t('cenário do #ok montado', false,
       `tarefa ficou como ${tarefaCriada ? tarefaCriada.estado : 'inexistente'}`);
   }
+
+  // No #teste o operador É o cliente, e as duas mensagens caem no mesmo
+  // número. Sem a instrução ali, "Recebi tudo" parece o fim do fluxo e o #ok
+  // fica esquecido esperando um envio que nunca sai sozinho.
+  // Fila limpa antes: o cenário acima deixou um atendimento na vez, e com
+  // alguém sendo atendido o pedido novo entra na fila em vez de virar tarefa.
+  estadoPonte.dados.atendimentos.length = 0;
+  estadoPonte.dados.tarefas.length = 0;
+
+  await operador.executar('#teste'); // liga
+  const noTeste = await ponteMod.pedirCodigo(OP, 'Pedro', 'testeok1', null);
+  const tarefaTeste = estadoPonte.dados.tarefas.find((x) => x.usuario === 'testeok1');
+  if (tarefaTeste && tarefaTeste.estado === 'aguardando_aprovacao') {
+    t('no modo teste a mensagem cobra o #ok', /#ok \d+/.test(noTeste.mensagem), noTeste.mensagem);
+    t('e traz o id certo', noTeste.mensagem.includes(`#ok ${tarefaTeste.id}`), noTeste.mensagem);
+  } else {
+    t('cenário do modo teste montado', false,
+      `tarefa ficou como ${tarefaTeste ? tarefaTeste.estado : 'inexistente'}`);
+  }
+  await operador.executar('#teste'); // desliga
 
   const comVnc = politica.limparAlerta(
     '🛑 *Verificação na tela*\n\n1. Abre a tela: http://89.116.186.155:6080/vnc.html\n3. Responde *#liberar*',
