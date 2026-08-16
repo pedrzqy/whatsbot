@@ -7,6 +7,21 @@
  *   node teste-ponte.js
  */
 
+// Estado em pasta DESCARTÁVEL, antes de qualquer require.
+//
+// Dois motivos, os dois aprendidos aqui: rodar este arquivo no servidor
+// gravava por cima do data/ponte.json de verdade e apagaria a fila de quem
+// está esperando código; e, mesmo local, o teste herdava a execução anterior —
+// os contadores de limite não eram zerados pela limpeza abaixo, e o cenário do
+// #ok começou a falhar com "já pediu vários códigos agora há pouco" só porque
+// as execuções foram se somando no arquivo.
+const os = require('os');
+const pathMod = require('path');
+const fsMod = require('fs');
+const DATA_TESTE = pathMod.join(os.tmpdir(), 'phaze-teste-ponte');
+fsMod.rmSync(DATA_TESTE, { recursive: true, force: true });
+process.env.PONTE_DATA_DIR = DATA_TESTE;
+
 process.env.PONTE_ATIVA = 'true';
 process.env.PONTE_OPERADOR_NUMERO = '5541999999999';
 process.env.PONTE_BRACO_KEY = 'teste';
@@ -23,6 +38,13 @@ process.env.PONTE_SELLER_JANELAS = '00:00-15:30,17:15-23:59';
 // do fluxo atravessar um deploy. Só que num teste isso vira contaminação: a
 // foto guardada na rodada anterior ainda está lá dentro dos 10 min de validade,
 // e o "usuário sozinho pede a foto" passa a fechar o par com uma foto fantasma.
+// Sender de mentira desde o começo.
+//
+// Cada alertar() tentava falar com a Evolution de VERDADE e esperava o timeout
+// da rede — o arquivo inteiro levava 33s, quase tudo em conexão que nunca ia
+// completar. Teste lento é teste que ninguém roda antes de dar deploy.
+require('./src/sender').send = async () => {};
+
 const estadoPonte = require('./src/ponte/estado');
 Object.assign(estadoPonte.dados, {
   pendentes: {},

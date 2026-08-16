@@ -13,7 +13,14 @@
 const fs = require('fs');
 const path = require('path');
 
-const DATA_DIR = path.join(__dirname, '..', '..', 'data');
+// PONTE_DATA_DIR existe para o teste NÃO escrever no estado de verdade.
+//
+// Sem ela, teste-ponte.js gravava no mesmo data/ponte.json da produção: rodar
+// o teste no servidor apagaria a fila de quem está esperando código. E mesmo
+// na máquina local ele herdava o que a execução anterior deixou — os
+// contadores de limite sobreviviam à limpeza do teste, e daí um cenário
+// passava ou falhava conforme a ordem em que as coisas rodaram.
+const DATA_DIR = process.env.PONTE_DATA_DIR || path.join(__dirname, '..', '..', 'data');
 const FILE = path.join(DATA_DIR, 'ponte.json');
 
 /**
