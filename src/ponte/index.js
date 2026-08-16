@@ -162,8 +162,14 @@ async function pedirCodigo(from, nome, usuarioBruto, imagemPath = null) {
     // vazando para quem não pode nem saber que existe um do outro lado.
     return {
       aceito: true,
+      // No teste NÃO começa com "Recebi tudo ✅": lido no celular, o certo
+      // verde dá a sensação de etapa concluída e o #ok fica esperando. A
+      // primeira palavra tem que ser a pendência, não a confirmação.
+      //
+      // Para cliente de verdade o "Recebi tudo" está certo — ele realmente não
+      // tem mais nada a fazer, só esperar.
       mensagem: testando
-        ? `Recebi tudo ✅\n\n🧪 *Modo teste* — manda *#ok ${tarefa.id}* para o envio sair.`
+        ? `⏳ *Aguardando confirmação* — manda *#ok ${tarefa.id}* para o envio sair.`
         : 'Recebi tudo ✅ Já te retorno com o código 👍',
     };
   }

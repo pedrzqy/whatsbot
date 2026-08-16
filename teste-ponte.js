@@ -555,6 +555,10 @@ const OP = '5541999999999';
   if (tarefaTeste && tarefaTeste.estado === 'aguardando_aprovacao') {
     t('no modo teste a mensagem cobra o #ok', /#ok \d+/.test(noTeste.mensagem), noTeste.mensagem);
     t('e traz o id certo', noTeste.mensagem.includes(`#ok ${tarefaTeste.id}`), noTeste.mensagem);
+    // "Recebi tudo ✅" na frente dá sensação de etapa concluída e o #ok fica
+    // esperando. A pendência tem que ser a primeira coisa lida.
+    t('e não abre com confirmação de recebido',
+      !/^Recebi/i.test(noTeste.mensagem.trim()), noTeste.mensagem);
   } else {
     t('cenário do modo teste montado', false,
       `tarefa ficou como ${tarefaTeste ? tarefaTeste.estado : 'inexistente'}`);
