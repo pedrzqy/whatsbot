@@ -270,26 +270,41 @@ class Chat {
     //    está no fim, então a presença do botão já é o diagnóstico e o clique
     //    é a cura — sem adivinhar qual elemento rola. Busca curta e sem espera:
     //    botão ausente quer dizer "já está no fim", não "ainda vai aparecer".
-    for (const sel of SEL.voltarAoFundo.candidatos) {
-      const botao = await this.frame.$(sel).catch(() => null);
-      if (!botao) continue;
+    //    Procurado no iframe E na página: o botão apareceu na tela com a
+    //    lista rolada no meio enquanto o braço seguia adiante, o que só
+    //    acontece se a busca não o alcança. _cancelarDialogoImagem() já busca
+    //    nas duas raízes pelo mesmo motivo — nem tudo deste chat mora dentro
+    //    do chat-core.
+    const raizes = [this.frame, this.pagina];
 
-      // Só considera resolvido se o clique DEU CERTO. Engolir a falha e sair
-      // deixava a lista onde estava e ainda pulava a rolagem de reserva — o
-      // pior dos dois mundos, e silencioso. O botão pode existir no DOM e
-      // estar coberto por um modal, que é justamente quando a reserva importa.
-      try {
-        await this._clicar(botao, { timeout: 4000 });
-        await this.pagina.waitForTimeout(humaniza.ms(400, 900));
-        return;
-      } catch {
-        // cai na rolagem manual abaixo
+    for (const raiz of raizes) {
+      for (const sel of SEL.voltarAoFundo.candidatos) {
+        const botao = await raiz.$(sel).catch(() => null);
+        if (!botao) continue;
+
+        // Só considera resolvido se o clique DEU CERTO. Engolir a falha e sair
+        // deixava a lista onde estava e ainda pulava a rolagem de reserva — o
+        // pior dos dois mundos, e silencioso.
+        try {
+          await this._clicar(botao, { timeout: 4000 });
+          await this.pagina.waitForTimeout(humaniza.ms(400, 900));
+          console.log(`[chat] desci pelo botão nativo (${sel})`);
+          return;
+        } catch (err) {
+          console.warn(`[chat] botão "${sel}" existe mas não clicou: ${err.message}`);
+        }
       }
     }
 
-    // 2) Reserva, para quando a Taobao mudar o botão de nome: rolagem manual.
-    await this.frame
-      .evaluate((cands) => {
+    // 2) Reserva: rolagem manual, também nas duas raízes.
+    //
+    // Ela LOGA o que fez. Sem isso, "a lista não desceu" e "a função nem
+    // rodou" ficavam idênticos daqui, e foi o que travou o diagnóstico: dava
+    // para ver a barra de rolagem no meio, mas não onde a descida se perdeu.
+    let desceu = '';
+    for (const raiz of raizes) {
+      const r = await raiz
+        .evaluate((cands) => {
         // Parte da ÚLTIMA mensagem, não da primeira. A versão anterior pegava
         // querySelector('.message-item') — a mais ANTIGA — e subia a partir
         // dela, o que ancorava a rolagem no topo do histórico.
@@ -298,7 +313,7 @@ class Chat {
           const els = document.querySelectorAll(s);
           if (els.length) { ultima = els[els.length - 1]; break; }
         }
-        if (!ultima) return;
+        if (!ultima) return '';
 
         // Sobe até o primeiro ancestral que realmente rola, mas PARA no body.
         // Sem esse limite o laço chegava em <html> quando a lista ainda não
@@ -314,16 +329,31 @@ class Chat {
         }
 
         if (caixa) {
+          const antes = caixa.scrollTop;
           caixa.scrollTop = caixa.scrollHeight;
-          return;
+          // Diz se MEXEU de verdade. "Rolei" sem deslocamento nenhum é o mesmo
+          // que não ter rolado, e era indistinguível no log.
+          return `container ${caixa.className || caixa.tagName} ${antes}->${caixa.scrollTop}`;
         }
 
         // Nenhum container próprio: leva a mensagem à vista com o MÍNIMO de
         // deslocamento. 'nearest' de propósito — 'end'/'start' mexem em todos
         // os ancestrais e devolvem o salto de página que a gente acabou de tirar.
         ultima.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-      }, SEL.mensagem.candidatos)
-      .catch(() => {});
+        return 'scrollIntoView';
+        }, SEL.mensagem.candidatos)
+        .catch(() => '');
+      if (r) desceu = r;
+    }
+
+    if (desceu) {
+      console.log(`[chat] desci rolando — ${desceu}`);
+    } else {
+      // Alto de propósito: daqui em diante todo clique tem chance de bater em
+      // elemento fora da área visível, que é o "element is not visible" do log.
+      console.warn('[chat] NÃO consegui descer a lista — nem botão nativo nem container rolável');
+    }
+
     await this.pagina.waitForTimeout(humaniza.ms(400, 900));
   }
 
@@ -385,6 +415,13 @@ class Chat {
 
     // Modal aberto engole clique. Cancela antes de tentar digitar.
     await this._cancelarDialogoImagem();
+
+    // E desce ANTES de procurar o campo. Cancelar o diálogo devolve a lista
+    // rolada para o meio, e é dali que sai o "element is not visible" do
+    // clique seguinte. O executarTarefa já desce depois da foto, mas este
+    // caminho também é usado sozinho (reenvio, tentativa 2) — descer nos dois
+    // lugares custa uma rolagem local e fecha o buraco.
+    await this._irParaOFim();
 
     for (let tentativa = 1; tentativa <= 2; tentativa++) {
       const { el } = await this._achar('campoTexto');
