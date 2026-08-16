@@ -78,15 +78,26 @@ class Chat {
     // esperando ele aparecer, coisa que nunca ia acontecer.
     //
     // Um elemento que não fica visível em 8s não está lento, está errado.
+    // Devolve LOCATOR, não ElementHandle.
+    //
+    // O handle aponta para um nó específico. Este chat é React (o log entregou
+    // o container "rc-scrollbars-view"), e depois que a foto entra o componente
+    // re-renderiza: o nó do campo é destruído e recriado. O handle antigo fica
+    // apontando para um órfão fora do documento — que nunca mais fica visível,
+    // e é por isso que o clique gastava os 8s inteiros repetindo "element is
+    // not visible" mesmo depois de a busca ter conferido a visibilidade.
+    //
+    // O locator guarda o SELETOR e reencontra o elemento na hora da ação, então
+    // ele acompanha o re-render em vez de morrer com ele. `visible=true` mantém
+    // o filtro que evita os nós ocultos da lista de conversas ao lado.
     let achadosOcultos = 0;
 
     while (Date.now() < limite) {
       achadosOcultos = 0;
       for (const sel of lista) {
-        for (const el of await this.frame.$$(sel).catch(() => [])) {
-          if (await el.isVisible().catch(() => false)) return { el, sel };
-          achadosOcultos++;
-        }
+        const visivel = this.frame.locator(`${sel} >> visible=true`).first();
+        if (await visivel.count().catch(() => 0)) return { el: visivel, sel };
+        achadosOcultos += await this.frame.locator(sel).count().catch(() => 0);
       }
       await this.pagina.waitForTimeout(300);
     }
@@ -629,6 +640,23 @@ class Chat {
   }
 
   /** Quantas mensagens NOSSAS existem agora. Serve para saber se algo saiu. */
+  /**
+   * Espera uma mensagem NOSSA nova aparecer, em vez de dormir um tempo fixo.
+   *
+   * O sleep de ~2s depois de confirmar o diálogo não cobre o upload de um print
+   * de console, e o resultado era o pior possível: a foto SAIU, a contagem
+   * ainda não tinha subido, o código concluiu "não pegou" e mandou de novo pelo
+   * input. O fornecedor recebia dois prints.
+   */
+  async _esperarNovaMinha(antes, timeout = 25_000) {
+    const limite = Date.now() + timeout;
+    while (Date.now() < limite) {
+      if ((await this._quantasMinhas()) > antes) return true;
+      await this.pagina.waitForTimeout(700);
+    }
+    return false;
+  }
+
   async _quantasMinhas() {
     const classeSelf = SEL.minhaMensagem.classe;
     return this.frame
@@ -696,6 +724,19 @@ class Chat {
     const antes = await this._quantasMinhas();
     let via = null;
 
+    // Trava contra foto DUPLA.
+    //
+    // O log de produção mostrou a sequência: "tentando Ctrl+V" → "diálogo
+    // 发送图片 confirmado" → "tentando input de imagem" → "foto enviada". Ou
+    // seja: o Ctrl+V deu certo, o balão demorou a aparecer, o código achou que
+    // tinha falhado e mandou o MESMO print de novo por outro caminho. Dois
+    // prints e um usuário só é pior que nenhum print — o fornecedor não sabe
+    // qual dos dois vale.
+    //
+    // Confirmar o diálogo marca aqui, e nenhum caminho seguinte roda depois
+    // disso, aconteça o que acontecer com a contagem de mensagens.
+    this._imagemComprometida = false;
+
     // ── 1. Ctrl+V de verdade ──────────────────────────────────
     //
     // É o que uma pessoa faz, e colagem NUNCA vira anexo: ela entra pelo
@@ -725,7 +766,7 @@ class Chat {
     // com pai "moxie-shim". O outro, accept vazio e name="file" dentro de
     // "next-upload-inner", é o de ARQUIVO e não entra aqui.
     const i = mapa.findIndex((m) => /image|jpg|jpeg|png|gif|bmp/i.test(m.accept));
-    if (!via && i !== -1) {
+    if (!via && !this._imagemComprometida && i !== -1) {
       const inputs = await this.frame.$$("input[type='file']");
       try {
         console.log(`[chat] tentando input de imagem #${i} (${mapa[i].accept})`);
@@ -737,7 +778,7 @@ class Chat {
     }
 
     // ── 3. Colagem forjada ────────────────────────────────────
-    if (!via) {
+    if (!via && !this._imagemComprometida) {
       try {
         console.log('[chat] tentando colagem forjada');
         if (await this._tentar(() => this._colarForjado(caminhoLocal), antes)) via = 'colagem';
@@ -747,7 +788,7 @@ class Chat {
     }
 
     // ── 4. Último recurso: qualquer input ─────────────────────
-    if (!via && (await this._quantasMinhas()) === antes) {
+    if (!via && !this._imagemComprometida && (await this._quantasMinhas()) === antes) {
       const inputs = await this.frame.$$("input[type='file']");
       if (!inputs.length) {
         throw new SeletorNaoEncontrado('nenhum input[type=file] no frame do chat');
@@ -774,6 +815,13 @@ class Chat {
       await this.pagina.waitForTimeout(humaniza.ms(2500, 5000));
     }
 
+    // Confirmada no diálogo, mas o balão não apareceu a tempo e por isso
+    // nenhum outro caminho rodou. Conta como enviada: o 确定 já foi clicado, a
+    // imagem está no ar, e insistir agora seria o segundo print no chat.
+    if (!via && this._imagemComprometida) {
+      via = 'Ctrl+V (confirmada; balão demorou a aparecer)';
+    }
+
     await this.checarBloqueio();
 
     const comoArquivo = await this._ultimaSaiuComoArquivo();
@@ -795,7 +843,16 @@ class Chat {
     // Colar abre o diálogo 发送图片 com a prévia. Enquanto ele estiver na tela
     // nada foi enviado — e o 发送 lá atrás nem está clicável.
     if (await this._confirmarEnvioImagem()) {
-      await this.pagina.waitForTimeout(humaniza.ms(1500, 2800));
+      // Clicar em 确定 é o ponto sem volta: a imagem FOI submetida. O que falta
+      // é upload, e upload de print de console não termina nos ~2s que este
+      // passo dormia. Esperar de verdade, não por tempo fixo.
+      this._imagemComprometida = true;
+      if (await this._esperarNovaMinha(antes)) return true;
+
+      // Submetida e ainda sem balão depois de 25s. NÃO é caso de tentar outro
+      // caminho — seria a segunda foto no chat.
+      console.warn('[chat] imagem confirmada no diálogo mas o balão não apareceu em 25s');
+      return false;
     }
 
     if ((await this._quantasMinhas()) > antes) return true; // enviou sozinho

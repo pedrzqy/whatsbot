@@ -115,7 +115,14 @@ async function executar(texto) {
 
     const linhas = [
       `*Códigos* — modo ${cfg.modo}`,
-      d.estado === 'aberto' ? `🛑 CONGELADA: ${d.motivo}` : '✅ operando',
+      // Motivo NEUTRO e o comando junto. O motivo cru é o erro inteiro com
+      // Call log — o limparAlerta truncava na saída, então o operador via um
+      // pedaço de log sem começo nem fim e sem dizer como sair. Congelado nada
+      // sai, para sempre, até alguém mandar #liberar: essa é a informação que
+      // precisa estar na linha.
+      d.estado === 'aberto'
+        ? `🛑 *CONGELADA* — ${politica.motivoNeutro(d.motivo)}\n   Responde *#liberar* para voltar a operar.`
+        : '✅ operando',
       janela.resumo(),
       `Cota: ${lim.hora.usado}/${lim.hora.teto} nesta hora · ${lim.dia.usado}/${lim.dia.teto} hoje`,
       '',
