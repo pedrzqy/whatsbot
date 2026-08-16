@@ -280,12 +280,17 @@ async function receberDoFornecedor(entrada) {
   //
   // O original continua guardado em `aprovacao.origem`, que é onde ele serve —
   // depurar tradução ruim sem passar pelo WhatsApp.
+  // Duas linhas e os comandos. Sem cabeçalho de alerta e sem linha em branco
+  // no meio: o operador lê isso no celular, no meio de um atendimento, e o que
+  // ele precisa saber é de quem é e o que o outro lado disse. O resto era
+  // moldura.
+  //
+  // Os comandos ficam porque é neles que está o id — sem eles não há como
+  // aprovar, e o id não aparece em nenhum outro lugar da conversa.
   await alertar(
-    `⚠️ *Resposta sem código*\n\n` +
-      `Cliente: *${at.nome}* · usuário \`${at.usuario}\`\n\n` +
+    `Cliente: *${at.nome}* · usuário \`${at.usuario}\`\n` +
       `💬 ${traduzido}\n\n` +
-      `*#enviar ${aprovacao.id}* manda essa explicação ao cliente\n` +
-      `*#editar ${aprovacao.id} <texto>* · *#nao ${aprovacao.id}* descarta`,
+      `*#enviar ${aprovacao.id}* · *#editar ${aprovacao.id} <texto>* · *#nao ${aprovacao.id}*`,
     entrada.printPath,
   );
 }
