@@ -700,10 +700,13 @@ class Chat {
    * ainda não tinha subido, o código concluiu "não pegou" e mandou de novo pelo
    * input. O fornecedor recebia dois prints.
    */
-  async _esperarNovaMinha(antes, timeout = 25_000) {
+  async _esperarNovaMinha(antes, antesTotal, timeout = 25_000) {
     const limite = Date.now() + timeout;
     while (Date.now() < limite) {
       if ((await this._quantasMinhas()) > antes) return true;
+      // O total é o que de fato pega a foto: o balão de imagem colada não
+      // recebe `.self`, então só a contagem de cima jamais o veria.
+      if (Number.isFinite(antesTotal) && (await this._quantasTotais()) > antesTotal) return true;
       await this.pagina.waitForTimeout(700);
     }
     return false;
@@ -713,6 +716,29 @@ class Chat {
     const classeSelf = SEL.minhaMensagem.classe;
     return this.frame
       .evaluate((c) => document.querySelectorAll(`.message-item.${c}`).length, classeSelf)
+      .catch(() => 0);
+  }
+
+  /**
+   * TODAS as mensagens da conversa, nossas e do outro lado.
+   *
+   * Existe porque _quantasMinhas() não serve para confirmar foto: ela conta
+   * `.message-item.self`, e o balão de imagem COLADA não recebe a classe
+   * `.self` — o mesmo defeito do DOM que _lerFornecedor() já documenta, e que
+   * lá faz a nossa própria foto passar por mensagem do outro lado.
+   *
+   * A consequência aqui era cara: depois do Ctrl+V a contagem NUNCA subia, o
+   * envio era dado como falho, e a foto ia de novo pelo input — que a entrega
+   * como cartão 下载文件. Foi assim que o mesmo print saiu duas vezes, a
+   * segunda num formato que o outro lado não abre.
+   *
+   * Contar o total resolve porque o instante é curto: entre confirmar o 确定 e
+   * o balão surgir, uma mensagem nova é a nossa. Se o outro lado escrever
+   * exatamente aí, o pior caso é darmos o envio por bom — que é o que ele é.
+   */
+  async _quantasTotais() {
+    return this.frame
+      .evaluate(() => document.querySelectorAll('.message-item').length)
       .catch(() => 0);
   }
 
@@ -774,6 +800,7 @@ class Chat {
     console.log(`[chat] ${mapa.length} input[type=file]: ${JSON.stringify(mapa)}`);
 
     const antes = await this._quantasMinhas();
+    const antesTotal = await this._quantasTotais();
     let via = null;
 
     // Trava contra foto DUPLA.
@@ -802,7 +829,7 @@ class Chat {
     if (!via) {
       try {
         console.log('[chat] tentando Ctrl+V');
-        if (await this._tentar(() => comLimite(this._ctrlV(caminhoLocal), 30_000, 'Ctrl+V'), antes)) {
+        if (await this._tentar(() => comLimite(this._ctrlV(caminhoLocal), 30_000, 'Ctrl+V'), antes, antesTotal)) {
           via = 'Ctrl+V';
         }
       } catch (err) {
@@ -823,7 +850,7 @@ class Chat {
       try {
         console.log(`[chat] tentando input de imagem #${i} (${mapa[i].accept})`);
         await comLimite(inputs[i].setInputFiles(caminhoLocal), 20_000, 'setInputFiles');
-        if (await this._tentar(async () => {}, antes)) via = `accept "${mapa[i].accept}"`;
+        if (await this._tentar(async () => {}, antes, antesTotal)) via = `accept "${mapa[i].accept}"`;
       } catch (err) {
         console.warn(`[chat] input de imagem recusou: ${err.message}`);
       }
@@ -833,14 +860,22 @@ class Chat {
     if (!via && !this._imagemComprometida) {
       try {
         console.log('[chat] tentando colagem forjada');
-        if (await this._tentar(() => this._colarForjado(caminhoLocal), antes)) via = 'colagem';
+        if (await this._tentar(() => this._colarForjado(caminhoLocal), antes, antesTotal)) via = 'colagem';
       } catch (err) {
         console.warn(`[chat] colagem forjada falhou: ${err.message}`);
       }
     }
 
     // ── 4. Último recurso: qualquer input ─────────────────────
-    if (!via && !this._imagemComprometida && (await this._quantasMinhas()) === antes) {
+    // O input genérico manda como ARQUIVO (o cartão 下载文件 que o outro lado
+    // não abre). Só entra se NADA tiver aparecido no chat — e o total é o que
+    // responde isso, porque a contagem de mensagens nossas não enxerga foto.
+    if (
+      !via &&
+      !this._imagemComprometida &&
+      (await this._quantasMinhas()) === antes &&
+      (await this._quantasTotais()) === antesTotal
+    ) {
       const inputs = await this.frame.$$("input[type='file']");
       if (!inputs.length) {
         throw new SeletorNaoEncontrado('nenhum input[type=file] no frame do chat');
@@ -881,7 +916,16 @@ class Chat {
    * ao que acontece quando a gente cola um print. Por isso o clique no botão
    * faz parte da tentativa — sem ele a foto some no próximo envio de texto.
    */
-  async _tentar(acao, antes) {
+  async _tentar(acao, antes, antesTotal) {
+    // Retrato do TOTAL antes de agir. É por ele que a foto é confirmada — ver
+    // _quantasTotais(): o balão de imagem colada não recebe `.self`, e contar
+    // só as nossas dava o envio por falho mesmo com a foto no chat.
+    //
+    // Vem de fora quando quem chama já anexou o arquivo antes de entrar aqui
+    // (o caminho do input faz isso): tirar o retrato agora já pegaria a foto
+    // no chat e nenhum aumento seria detectado.
+    if (!Number.isFinite(antesTotal)) antesTotal = await this._quantasTotais();
+
     await acao();
     await this.pagina.waitForTimeout(humaniza.ms(1200, 2200));
 
@@ -892,7 +936,7 @@ class Chat {
       // é upload, e upload de print de console não termina nos ~2s que este
       // passo dormia. Esperar de verdade, não por tempo fixo.
       this._imagemComprometida = true;
-      if (await this._esperarNovaMinha(antes)) return true;
+      if (await this._esperarNovaMinha(antes, antesTotal)) return true;
 
       // Confirmado no diálogo e SEM balão depois de 25s.
       //
@@ -916,7 +960,10 @@ class Chat {
       return false;
     }
 
-    if ((await this._quantasMinhas()) > antes) return true; // enviou sozinho
+    // Enviou sozinho, sem passar pelo diálogo. Confere os dois: a foto entra
+    // pelo total, o texto pela contagem de mensagens nossas.
+    if ((await this._quantasMinhas()) > antes) return true;
+    if ((await this._quantasTotais()) > antesTotal) return true;
 
     // Só clica em enviar se HÁ o que enviar. Clicar com o campo vazio rende o
     // aviso amarelo "请输入内容~", e aviso é atrito registrado na conta — não
