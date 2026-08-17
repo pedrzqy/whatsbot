@@ -142,6 +142,35 @@ nerix.checkPayment = async (codigo) => {
   // Mandar "pague aqui" para quem já pagou faz o cliente achar que a compra
   // não passou — e, na pior das hipóteses, pagar de novo.
   t('pedido pago não leva link de pagamento', ok.link_pagamento === undefined, ok.link_pagamento);
+  t('nem o Pix copia-e-cola', ok.pix_copia_e_cola === undefined, ok.pix_copia_e_cola);
+
+  // ── Pendente leva o Pix para o cliente pagar ────────────────
+  // Nomes conferidos num pedido real: payment.pix_qr_code é o copia-e-cola,
+  // e o _base64 ao lado é a imagem do QR (8 mil chars) — esse não pode entrar
+  // no retorno, estouraria o contexto do modelo.
+  bloco('pendente leva o Pix, sem a imagem');
+  const getOrderOriginal = nerix.getOrder;
+  const checkOriginal = nerix.checkPayment;
+  nerix.getOrder = async () => ({
+    data: {
+      order_number: 'PEND1',
+      status: 'pending',
+      total: 10,
+      payment: { pix_qr_code: '00020126...COPIA', pix_qr_code_base64: 'x'.repeat(8000) },
+    },
+  });
+  nerix.checkPayment = async () => ({ data: { status: 'pending' } });
+
+  const pendente = await tools.execute('consultar_pedido', {
+    codigo: 'PEND1',
+    email: 'dono@exemplo.com',
+  });
+  nerix.getOrder = getOrderOriginal;
+  nerix.checkPayment = checkOriginal;
+
+  t('pendente traz o copia-e-cola', pendente.pix_copia_e_cola === '00020126...COPIA', pendente.pix_copia_e_cola);
+  t('e NÃO traz a imagem base64',
+    !JSON.stringify(pendente).includes('xxxxxxxxxx'), `${JSON.stringify(pendente).length} chars`);
 
   // ── Nenhuma ferramenta de admin exposta ─────────────────────
   bloco('nada de admin exposto à IA');

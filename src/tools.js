@@ -213,6 +213,15 @@ function formatOrder(p) {
     // já pagou faz o cliente achar que a compra não passou e, na pior das
     // hipóteses, pagar de novo.
     link_pagamento: pago ? undefined : p.payment_url || p.checkout_url || undefined,
+
+    // Pix copia-e-cola, também só enquanto falta pagar.
+    //
+    // Vem em p.payment.pix_qr_code (confirmado num pedido real). É a resposta
+    // direta para "não consegui pagar" / "perdi o código do Pix", sem o
+    // cliente ter que voltar ao site. O _base64 do mesmo objeto é a IMAGEM do
+    // QR, com 8 mil caracteres — fora daqui de propósito: estouraria o
+    // contexto do modelo e ele não tem como mandar imagem por este caminho.
+    pix_copia_e_cola: pago ? undefined : p.payment?.pix_qr_code || p.payment?.qr_code || undefined,
   };
 }
 
