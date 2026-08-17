@@ -593,6 +593,34 @@ const OP = '5541999999999';
   await operador.executar('#teste'); // desliga
   t('depois de desligar, não passa mais', ponteMod.operadorEmTeste(OP) === false);
 
+  // ── Interruptor do atendimento (#atender) ─────────────────
+  // Precisa mudar NA HORA, sem deploy: é o que serve quando o bot começa a
+  // responder errado com cliente na linha às 22h de sábado.
+  bloco("#atender liga e desliga o atendimento");
+  const estadoAnterior = estadoPonte.dados.botLigado;
+
+  await operador.executar('#atender on');
+  t('#atender on liga', ponteMod.atendimentoLigado() === true);
+  await operador.executar('#atender off');
+  t('#atender off desliga', ponteMod.atendimentoLigado() === false);
+
+  // O comando tem que VENCER a variável de ambiente — senão um "#atender off"
+  // dado de madrugada seria desfeito pelo próximo deploy sem ninguém notar.
+  t('e vence a configuração do serviço',
+    ponteMod.atendimentoLigado() === false && require('./src/config').autoReply === true);
+
+  const semArg = await operador.executar('#atender');
+  t('#atender sozinho informa o estado', /DESLIGADO/i.test(semArg), semArg.split('\n')[0]);
+  // Sem escapar, o `*` do negrito do WhatsApp virava quantificador e o teste
+  // passava por acidente, casando "por" seguido de nada.
+  t('e diz quem definiu',
+    /Definido por/i.test(semArg) && semArg.includes('#atender'), semArg.split('\n')[1]);
+
+  // Sem comando nenhum, vale a env — undefined não pode virar "desligado".
+  delete estadoPonte.dados.botLigado;
+  t('sem comando, vale a configuração', ponteMod.atendimentoLigado() === true);
+  estadoPonte.dados.botLigado = estadoAnterior;
+
   bloco('#teste despausa o número do operador');
   const storeMod = require('./src/store');
   storeMod.saveContact(OP, { paused: true });

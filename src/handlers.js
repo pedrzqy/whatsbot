@@ -213,7 +213,10 @@ async function handleMessage(msg) {
   // A alternativa seria ligar BOT_AUTOREPLY para testar — o que faria o bot
   // responder a loja INTEIRA só para o operador conferir um fluxo. Este furo
   // vale exatamente para um número, o dele, e por 30 minutos.
-  if (!config.autoReply && !ponte.operadorEmTeste(from)) {
+  // O #bot do operador VENCE a variável de ambiente: ele muda na hora, sem
+  // deploy, e é o que serve quando o bot começa a responder errado com cliente
+  // na linha. A env fica valendo enquanto ninguém tiver usado o comando.
+  if (!ponte.atendimentoLigado() && !ponte.operadorEmTeste(from)) {
     store.saveContact(from, {
       lastSeen: Date.now(),
       name: pushName || store.getContact(from)?.name,

@@ -556,8 +556,24 @@ function operadorEmTeste(from) {
   );
 }
 
+/**
+ * O atendimento automático está no ar?
+ *
+ * `dados.botLigado` (comando #bot) VENCE a variável de ambiente. Enquanto
+ * ninguém tiver usado o comando, ele é undefined e vale o BOT_AUTOREPLY — sem
+ * isso, um deploy novo desfaria silenciosamente um "#bot off" dado às 22h.
+ */
+function atendimentoLigado() {
+  if (dados.botLigado === true || dados.botLigado === false) return dados.botLigado;
+  // config RAIZ, não o da ponte: `cfg` aqui é ./config (ponte/config.js), que
+  // não tem autoReply — usar ele devolvia undefined, e undefined não é false.
+  // O bot seguiria respondendo com a variável desligada.
+  return require('../config').autoReply;
+}
+
 module.exports = {
   operadorEmTeste,
+  atendimentoLigado,
   pedirCodigo,
   receberDoFornecedor,
   entregarCodigo,

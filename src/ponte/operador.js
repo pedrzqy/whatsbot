@@ -34,6 +34,7 @@ const AJUDA = [
   '*#destravar* — devolve à fila envio que ficou preso',
   '*#pular* — encerra o atendimento atual e chama o próximo',
   '*#teste* — vira cliente por 30 min, para testar o fluxo do seu número',
+  '*#atender* — mostra se o atendimento está no ar · *#atender on* / *#atender off*',
 ].join('\n');
 
 /** Quanto tempo o operador fica valendo como cliente depois do #teste. */
@@ -45,7 +46,7 @@ const min = (ms) => Math.round(ms / 60000);
 function ehComando(from, texto) {
   if (!cfg.ativa || !cfg.operador.numero) return false;
   if (from !== cfg.operador.numero) return false;
-  return /^#(fila|liberar|ok|enviar|editar|nao|não|pular|ajuda|sms|taobao|teste|limpar|destravar)\b/i.test(
+  return /^#(fila|liberar|ok|enviar|editar|nao|não|pular|ajuda|sms|taobao|teste|limpar|destravar|atender)\b/i.test(
     String(texto || '').trim(),
   );
 }
@@ -111,6 +112,53 @@ async function executar(texto) {
       '_Os #comandos continuam funcionando e o limite de 5 códigos/hora não ' +
       'vale para você agora. Nada sai sem #ok. ' +
       'Mande #teste de novo para desligar antes da hora._'
+    );
+  }
+
+  // ── #atender [on|off] ──────────────────────────────────
+  //
+  // Liga/desliga o atendimento NA HORA, sem deploy.
+  //
+  // Antes o único jeito era mudar BOT_AUTOREPLY no painel e esperar o build.
+  // Com cliente real na linha isso é tempo demais: se as respostas saírem
+  // erradas às 22h de sábado, o operador precisa de um botão, não de um
+  // deploy. O estado é persistido e VENCE a variável de ambiente.
+  //
+  // O comando NÃO se chama "#bot" de propósito: o nome apareceria no #ajuda e
+  // em toda confirmação, e é o mesmo número comercial que fala com o cliente.
+  // O teste de vocabulário pegou isso na primeira tentativa.
+  if (cmd === 'atender') {
+    const arg = (id || '').toLowerCase();
+
+    if (/^(on|liga|ligar|sim)$/.test(arg)) {
+      dados.botLigado = true;
+      persistAgora();
+      return (
+        '✅ *Atendimento LIGADO.*\n\n' +
+        'Quem mandar mensagem recebe o menu e é atendido na hora.\n\n' +
+        '_Para desligar: *#atender off*._'
+      );
+    }
+
+    if (/^(off|desliga|desligar|nao|não)$/.test(arg)) {
+      dados.botLigado = false;
+      persistAgora();
+      return (
+        '🔕 *Atendimento DESLIGADO.*\n\n' +
+        'As mensagens continuam chegando, mas ninguém é respondido sozinho — ' +
+        'você atende na mão. A ponte de códigos e os #comandos seguem funcionando.\n\n' +
+        '_Para ligar de novo: *#atender on*._'
+      );
+    }
+
+    // Sem argumento: só informa. `botLigado` só existe depois de alguém ter
+    // usado o comando; antes disso vale a variável de ambiente.
+    const porComando = dados.botLigado === true || dados.botLigado === false;
+    const ligado = porComando ? dados.botLigado : require('../config').autoReply;
+    return (
+      `${ligado ? '✅ Atendimento LIGADO' : '🔕 Atendimento DESLIGADO'}\n` +
+      `_Definido ${porComando ? 'por *#atender*' : 'pela configuração do serviço'}._\n\n` +
+      `Use *#atender on* ou *#atender off* para mudar agora, sem deploy.`
     );
   }
 
