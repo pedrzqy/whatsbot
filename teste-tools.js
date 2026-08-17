@@ -220,6 +220,54 @@ nerix.checkPayment = async (codigo) => {
   t('texto não resolve', menu.resolve('main', 'oi') === null);
   t('opção 1 resolve', Boolean(menu.resolve('main', '1')));
 
+  // ── Consulta de pedido sem IA ───────────────────────────────
+  bloco('extrai pedido da frase, sem IA');
+  const handlers = require('./src/handlers');
+  const { extrairPedido, respostaDePedido } = handlers;
+
+  const frase = extrairPedido(
+    'comprei e nao recebi, meu pedido e 01a00ba2-da37-7c72-a16e-ef6db7862985 e meu email e laureano@gmail.com',
+  );
+  t('acha UUID e e-mail na frase solta',
+    frase?.codigo === '01a00ba2-da37-7c72-a16e-ef6db7862985' && frase?.email === 'laureano@gmail.com',
+    JSON.stringify(frase));
+
+  t('aceita código curto também',
+    extrairPedido('pedido ABC123XYZ email joao@teste.com')?.codigo === 'ABC123XYZ');
+
+  // Sem os DOIS não consulta: o e-mail é o que prova que o pedido é do
+  // cliente, e a chave da Nerix é admin.
+  t('só e-mail não basta', extrairPedido('meu email é joao@teste.com') === null);
+  t('só código não basta',
+    extrairPedido('pedido 01a00ba2-da37-7c72-a16e-ef6db7862985') === null);
+  t('frase sem nada disso', extrairPedido('oi tudo bem') === null);
+
+  // O trecho antes do @ não pode virar "código".
+  const soEmail = extrairPedido('joaosilva123@teste.com');
+  t('não confunde o começo do e-mail com código', soEmail === null, JSON.stringify(soEmail));
+
+  bloco('resposta do pedido é texto pronto');
+  const pago = respostaDePedido(
+    { codigo: 'X1', status: 'entregue', total: 'R$ 94.90', pago: true, itens: [{ nome: 'Mario', quantidade: 1 }] },
+    { codigo: 'X1' },
+  );
+  t('mostra status e item', /entregue/.test(pago) && /Mario/.test(pago));
+  t('e não oferece pagamento a quem pagou', !/Pix copia|Pagar:/.test(pago));
+
+  const naoPago = respostaDePedido(
+    { codigo: 'X2', status: 'aguardando pagamento', pago: false, pix_copia_e_cola: '00020126ABC' },
+    { codigo: 'X2' },
+  );
+  t('pendente recebe o Pix', /00020126ABC/.test(naoPago));
+
+  // Problema NOSSO não vira culpa do cliente — o 401 já fez isso uma vez.
+  const nosso = respostaDePedido({ erro: 'sistema_indisponivel' }, { codigo: 'X3' });
+  t('erro do sistema não culpa o cliente',
+    !/e-mail|email|código está/i.test(nosso) && /atendente/i.test(nosso), nosso);
+
+  const emailErrado = respostaDePedido({ erro: 'email_nao_confere' }, { codigo: 'X4' });
+  t('e-mail errado explica o que fazer', /e-mail/i.test(emailErrado));
+
   console.log('\n' + (falhas ? falhas + ' FALHA(S)' : 'todos os testes passaram'));
   process.exit(falhas ? 1 : 0);
 })();

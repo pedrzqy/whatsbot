@@ -21,6 +21,37 @@ const operador = require('./ponte/operador');
 const recepcao = require('./ponte/recepcao');
 const ponte = require('./ponte');
 const menu = require('./menu');
+const tools = require('./tools');
+
+// E-mail e código de pedido dentro de uma frase solta.
+//
+// O cliente escreve "meu pedido é 01a00ba2-... e o email é fulano@x.com", tudo
+// numa linha. Antes quem separava isso era a IA; agora é regex, que responde
+// na hora e não inventa argumento.
+const RE_EMAIL = /[\w.+-]+@[\w-]+\.[\w.-]+/;
+// UUID é o formato que a Nerix usa no order_number (confirmado em pedido real).
+// O segundo padrão cobre código curto, caso a loja passe a emitir um.
+const RE_UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+const RE_CODIGO_CURTO = /\b[A-Z0-9]{6,20}\b/;
+
+/**
+ * Acha código do pedido + e-mail numa mensagem livre.
+ * Só devolve quando tem os DOIS — sem e-mail a consulta não sai (é ele que
+ * prova que o pedido é do cliente).
+ */
+function extrairPedido(texto) {
+  const t = String(texto || '');
+  const email = (t.match(RE_EMAIL) || [])[0];
+  if (!email) return null;
+
+  // Tira o e-mail antes de procurar o código: senão o trecho antes do @ pode
+  // casar com o padrão de código curto.
+  const semEmail = t.replace(RE_EMAIL, ' ');
+  const codigo = (semEmail.match(RE_UUID) || semEmail.match(RE_CODIGO_CURTO) || [])[0];
+  if (!codigo) return null;
+
+  return { codigo, email };
+}
 
 /**
  * O que cada opção de AÇÃO do menu faz. Retorna true se já respondeu.
@@ -87,7 +118,16 @@ async function acaoDoMenu(acao, { from, pushName }) {
 }
 
 // Palavras que reativam o autoatendimento quando o cliente está com um humano.
-const RESUME = new Set(['#inicio', '#início', 'inicio', 'início', 'menu', 'voltar', 'atendimento', 'recomecar', 'recomeçar']);
+// Com e SEM "#": o cliente digita "#menu" tanto quanto "menu", e a versão com
+// cerquilha caía fora da lista — ia parar na conversa livre e voltava um menu
+// inventado, diferente a cada vez. Quem lê "digite #inicio" no rodapé tende a
+// digitar #menu também.
+const RESUME = new Set([
+  '#inicio', '#início', 'inicio', 'início',
+  '#menu', 'menu', '#voltar', 'voltar',
+  'atendimento', 'recomecar', 'recomeçar', '#recomecar',
+  'opcoes', 'opções', '#opcoes', '#opções',
+]);
 
 // Serializa o processamento das mensagens de um MESMO contato, para não
 // re-saudar nem trocar a ordem quando várias mensagens chegam em sequência.
@@ -276,10 +316,39 @@ async function handleMessage(msg) {
     }
   }
   // Foto sem legenda ainda é mensagem: o cliente manda a imagem do produto e
-  // pergunta depois. Sem isto, a foto seria descartada antes de chegar na IA.
+  // pergunta depois.
   if (!trimmed && !imagem) return;
 
-  // ─── 4) Todo o resto → IA (conversa livre; ela transfere p/ atendente se preciso) ───
+  // ─── 3.2) Código do pedido + e-mail na mensagem → consulta DIRETA ───
+  //
+  // Sem IA. Antes quem separava "meu pedido é X e o email é Y" era o modelo;
+  // agora é regex, que responde na hora, não inventa argumento e não custa
+  // token. Só dispara com os DOIS presentes — o e-mail é o que prova que o
+  // pedido é do cliente, e a Nerix valida isso do lado dela.
+  const achado = trimmed && extrairPedido(trimmed);
+  if (achado) {
+    const r = await tools.execute('consultar_pedido', achado, { from });
+    await sender.send(from, respostaDePedido(r, achado));
+    return;
+  }
+
+  // ─── 4) Não reconhecido ───
+  //
+  // Com a IA desligada (BOT_IA=false, o padrão) NADA é gerado: o cliente
+  // recebe o menu de volta em vez de uma frase inventada. Trocar isso por uma
+  // resposta de LLM foi o que fazia o mesmo "#menu" voltar diferente a cada
+  // envio — e o que abria espaço para prometer prazo e garantia que a loja não
+  // pratica.
+  if (!config.iaLigada) {
+    store.saveContact(from, { menuNode: 'main' });
+    await sender.send(
+      from,
+      `${variator.pick(NAO_ENTENDI)}\n\n${menu.render('main')}`,
+    );
+    return;
+  }
+
+  // IA só quando ligada de propósito (BOT_IA=true).
   try {
     const texto = trimmed || '(o cliente mandou uma foto sem escrever nada)';
     const answer = await ai.reply(from, texto, pushName, { imagem });
@@ -288,6 +357,64 @@ async function handleMessage(msg) {
     console.error('[ai] erro ao responder:', err.response?.data || err.message);
     await sender.send(from, variator.error());
   }
+}
+
+const NAO_ENTENDI = [
+  'Não entendi bem 🤔 Escolhe uma opção abaixo:',
+  'Deixa eu te ajudar melhor — escolhe pelo número:',
+  'Pra te atender mais rápido, escolhe uma das opções:',
+];
+
+/**
+ * Texto PRONTO para cada resultado da consulta de pedido.
+ *
+ * Cada erro tem uma saída diferente, e nenhuma delas culpa o cliente por
+ * problema nosso — foi o que o 401 fazia quando estava junto do 403.
+ */
+function respostaDePedido(r, { codigo }) {
+  if (r.erro === 'pedido_nao_encontrado') {
+    return (
+      `Não achei o pedido \`${codigo}\` 🤔\n\n` +
+      'Confere se o código está completo. Ele fica no e-mail da compra e na sua ' +
+      'conta no site.\n\n_Digite *#menu* para ver as opções._'
+    );
+  }
+  if (r.erro === 'email_nao_confere') {
+    return (
+      'Achei o pedido, mas esse e-mail não é o que foi usado na compra 🤔\n\n' +
+      'Manda o e-mail que recebeu a confirmação.\n\n_Digite *#menu* para ver as opções._'
+    );
+  }
+  if (r.erro) {
+    // Inclui sistema_indisponivel (nossa chave) — problema nosso, atendente
+    // assume. NÃO dizer que o dado do cliente está errado.
+    return (
+      'Não consegui consultar agora 🙏 Já estou chamando um atendente pra ' +
+      'resolver com você.'
+    );
+  }
+
+  const linhas = [`📦 *Pedido ${r.codigo}*`, `Status: *${r.status}*`];
+  if (r.total) linhas.push(`Total: ${r.total}`);
+
+  if (r.itens?.length) {
+    linhas.push('', '*Itens:*');
+    for (const i of r.itens) {
+      linhas.push(`• ${i.nome}${i.quantidade > 1 ? ` (${i.quantidade}x)` : ''}`);
+      // A chave só chega aqui depois de a Nerix validar o e-mail — mesmo gate
+      // do site. É o que o cliente veio buscar.
+      if (i.chave) linhas.push(`  🔑 \`${i.chave}\``);
+    }
+  }
+
+  if (!r.pago && r.pix_copia_e_cola) {
+    linhas.push('', '💠 *Pix copia e cola:*', `\`${r.pix_copia_e_cola}\``);
+  } else if (!r.pago && r.link_pagamento) {
+    linhas.push('', `💳 Pagar: ${r.link_pagamento}`);
+  }
+
+  linhas.push('', '_Digite *#menu* para ver as opções._');
+  return linhas.join('\n');
 }
 
 /**
@@ -312,4 +439,7 @@ async function onNerixEvent(event) {
   }
 }
 
-module.exports = { onIncomingMessage, onNerixEvent };
+// extrairPedido e respostaDePedido exportados para teste: são eles que
+// substituíram a IA no caminho de consulta, e um erro ali entrega dado de
+// pedido errado ou deixa o cliente sem resposta.
+module.exports = { onIncomingMessage, onNerixEvent, extrairPedido, respostaDePedido };

@@ -39,9 +39,20 @@ function parseStagesMin(raw, fallbackMin) {
 const config = {
   port: Number(process.env.PORT || 3000),
 
-  // Responder automaticamente as mensagens 1-a-1 (IA de vendas). Ligado por padrão.
+  // Responder automaticamente as mensagens 1-a-1. Ligado por padrão.
   // BOT_AUTOREPLY=false desliga (o bot recebe/loga a msg, mas NÃO responde — humano atende).
   autoReply: process.env.BOT_AUTOREPLY !== 'false',
+
+  // IA de conversa livre. DESLIGADA por padrão.
+  //
+  // O atendimento é todo por TEXTO PRONTO: menu numerado, fatos do
+  // knowledge.js e consulta de pedido por regex. A IA devolvia resposta
+  // DIFERENTE a cada envio — o mesmo "#menu" voltava com outra lista e outro
+  // preço de combo — e cada mensagem custava segundos de espera e token. Pior:
+  // podia prometer prazo ou garantia que a loja não pratica.
+  //
+  // BOT_IA=true religa, e aí ela volta a atender o que o menu não cobre.
+  iaLigada: process.env.BOT_IA === 'true',
 
   evolution: {
     url: (process.env.EVOLUTION_API_URL || 'http://localhost:8080').replace(/\/$/, ''),
