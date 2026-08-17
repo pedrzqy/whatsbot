@@ -20,6 +20,71 @@ const variator = require('./variator');
 const operador = require('./ponte/operador');
 const recepcao = require('./ponte/recepcao');
 const ponte = require('./ponte');
+const menu = require('./menu');
+
+/**
+ * O que cada opção de AÇÃO do menu faz. Retorna true se já respondeu.
+ *
+ * Tudo aqui é texto pronto — a única ação que acorda a IA é 'ia', e ela só
+ * marca o contato e devolve o convite para escrever. Assim o custo de LLM
+ * aparece uma vez, no ramo onde a conversa é realmente livre, em vez de em
+ * toda pergunta de prazo e garantia.
+ */
+async function acaoDoMenu(acao, { from, pushName }) {
+  if (acao === 'ia') {
+    // A partir daqui a conversa é livre: sai do menu e entra na IA, que tem as
+    // ferramentas (consultar pedido, buscar produto, chamar atendente).
+    store.saveContact(from, { modoIA: true, menuNode: null });
+    await sender.send(
+      from,
+      'Sem problema, vou te ajudar 👍\n\n' +
+        'Me conta *o que aconteceu* com sua compra. Se puder, manda também o ' +
+        '*código do pedido* e o *e-mail* que você usou — assim eu já consulto aqui.',
+    );
+    return true;
+  }
+
+  if (acao === 'pedido') {
+    // Também pronto: pede os dois dados de uma vez e deixa a IA consultar
+    // quando eles chegarem. Pedir os dois juntos evita a ida e volta de "qual
+    // o código?" / "qual o e-mail?" — e sem os dois a consulta nem sai.
+    store.saveContact(from, { modoIA: true, menuNode: null });
+    await sender.send(
+      from,
+      '📦 Para consultar seu pedido eu preciso de *2 coisas*:\n\n' +
+        '1️⃣ O *código do pedido*\n' +
+        '2️⃣ O *e-mail* usado na compra\n\n' +
+        'Pode mandar os dois na mesma mensagem 👍',
+    );
+    return true;
+  }
+
+  if (acao === 'codigo') {
+    // Não chama a ponte aqui: quem detecta o pedido de código é a recepcao.js,
+    // sem IA, e ela já conduz o passo a passo (foto → usuário). Aqui só se
+    // manda o cliente começar esse fluxo do jeito que a recepção reconhece.
+    store.saveContact(from, { menuNode: null });
+    await sender.send(
+      from,
+      '🔑 Beleza! Me manda a mensagem *preciso do código* que eu já começo o ' +
+        'passo a passo com você.',
+    );
+    return true;
+  }
+
+  if (acao === 'atendente') {
+    store.saveContact(from, { paused: true, menuNode: null, modoIA: false });
+    console.log(`[handoff] ${from} -> atendente (pelo menu)`);
+    await sender.send(
+      from,
+      'Certo! Já estou chamando um atendente pra continuar com você 🧑‍💼\n\n' +
+        '_Se quiser voltar ao atendimento automático, digite *#inicio*._',
+    );
+    return true;
+  }
+
+  return false;
+}
 
 // Palavras que reativam o autoatendimento quando o cliente está com um humano.
 const RESUME = new Set(['#inicio', '#início', 'inicio', 'início', 'menu', 'voltar', 'atendimento', 'recomecar', 'recomeçar']);
@@ -133,13 +198,24 @@ async function handleMessage(msg) {
     });
     const greeting = await welcome.buildGreeting(pushName);
     await sender.send(from, greeting);
+    // O menu vem junto — o buildGreeting já dizia "(o menu é enviado logo
+    // depois)" e isso nunca acontecia: menu.js não era importado por ninguém.
+    // Sem ele, toda pergunta caía na IA, inclusive as de resposta fixa.
+    store.saveContact(from, { menuNode: 'main', modoIA: false });
+    await sender.send(from, menu.render('main'));
     return;
   }
 
   // ─── 2) Palavras de recomeço (#inicio/menu/voltar) — barato, sem IA ───
   if (RESUME.has(lower)) {
-    store.saveContact(from, { paused: false, followupCount: 0, ...nameFields });
-    await sender.send(from, variator.resumed());
+    store.saveContact(from, {
+      paused: false,
+      followupCount: 0,
+      menuNode: 'main',
+      modoIA: false, // volta ao menu = sai da conversa livre
+      ...nameFields,
+    });
+    await sender.send(from, `${variator.resumed()}\n\n${menu.render('main')}`);
     return;
   }
 
@@ -152,6 +228,53 @@ async function handleMessage(msg) {
   // Cliente entrou na conversa (não é só boas-vindas): vira candidato à recuperação
   // e, por estar ativo agora, zera qualquer ciclo de cutucada pendente.
   store.saveContact(from, { ...nameFields, engaged: true, followupCount: 0 });
+
+  // ─── 3.1) Menu numerado — resposta PRONTA, sem IA ───
+  //
+  // Vem antes da IA de propósito. "Qual é o prazo de envio?" tem a MESMA
+  // resposta todo dia: gastar uma chamada de LLM nela custa segundos de espera
+  // por mensagem, tokens, e abre a chance de o modelo inventar prazo ou
+  // garantia que a loja não pratica.
+  //
+  // Só entra enquanto o cliente está navegando o menu (menuNode) e ainda não
+  // pediu conversa livre (modoIA). Depois que ele escolhe "problema com a
+  // compra", tudo passa direto para a IA.
+  if (contact?.menuNode && !contact?.modoIA && /^\d{1,2}$/.test(trimmed)) {
+    const escolha = menu.resolve(contact.menuNode, trimmed);
+
+    if (!escolha) {
+      await sender.send(
+        from,
+        `Não achei essa opção 🤔\n\n${menu.render(contact.menuNode)}`,
+      );
+      return;
+    }
+
+    // Submenu: só troca de nó e mostra as opções de lá.
+    if (escolha.goto) {
+      store.saveContact(from, { menuNode: escolha.goto });
+      await sender.send(from, menu.render(escolha.goto));
+      return;
+    }
+
+    // Tópico: fato do knowledge, na hora.
+    if (escolha.topic) {
+      const texto = menu.resposta(escolha.topic);
+      if (texto) {
+        await sender.send(from, texto);
+        return;
+      }
+      // Tópico sem fato cadastrado cai na IA em vez de deixar o cliente no
+      // vazio — mas avisa no log, porque é buraco no knowledge.js.
+      console.warn(`[menu] tópico "${escolha.topic}" não existe no knowledge.js`);
+    }
+
+    if (escolha.action) {
+      const feito = await acaoDoMenu(escolha.action, { from, pushName });
+      if (feito) return;
+      // ação desconhecida: segue para a IA
+    }
+  }
   // Foto sem legenda ainda é mensagem: o cliente manda a imagem do produto e
   // pergunta depois. Sem isto, a foto seria descartada antes de chegar na IA.
   if (!trimmed && !imagem) return;

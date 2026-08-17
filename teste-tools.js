@@ -187,6 +187,39 @@ nerix.checkPayment = async (codigo) => {
     t(`${d.function.name} exige e-mail`, req.includes('email'), req.join(','));
   }
 
+  // ── Menu: resposta pronta, IA só num ramo ───────────────────
+  bloco('menu responde sem IA');
+  const menu = require('./src/menu');
+
+  // Toda opção tem que levar a ALGUMA coisa. Uma opção com topic sem fato no
+  // knowledge cai na IA em silêncio — o cliente escolhe o número, espera, e
+  // recebe texto gerado onde devia haver fato da loja.
+  for (const [nodeId, node] of Object.entries(menu.NODES)) {
+    for (const [i, o] of node.options.entries()) {
+      const destino = o.goto || o.topic || o.action;
+      t(`${nodeId}[${i + 1}] tem destino`, Boolean(destino), o.label);
+      if (o.topic) {
+        t(`${nodeId}[${i + 1}] tem fato pronto`, Boolean(menu.resposta(o.topic)), o.topic);
+      }
+      if (o.goto) {
+        t(`${nodeId}[${i + 1}] aponta para nó existente`, Boolean(menu.NODES[o.goto]), o.goto);
+      }
+    }
+  }
+
+  // A IA custa segundos e token por mensagem. Se mais de um ramo a acordasse,
+  // o menu deixaria de ser a economia que ele existe para ser.
+  const comIA = Object.values(menu.NODES)
+    .flatMap((n) => n.options)
+    .filter((o) => o.action === 'ia');
+  t('só UM ramo do menu acorda a IA', comIA.length === 1, comIA.map((o) => o.label).join(', '));
+
+  // Número inválido não pode virar escolha silenciosa.
+  t('opção 99 não resolve', menu.resolve('main', '99') === null);
+  t('opção 0 não resolve', menu.resolve('main', '0') === null);
+  t('texto não resolve', menu.resolve('main', 'oi') === null);
+  t('opção 1 resolve', Boolean(menu.resolve('main', '1')));
+
   console.log('\n' + (falhas ? falhas + ' FALHA(S)' : 'todos os testes passaram'));
   process.exit(falhas ? 1 : 0);
 })();
