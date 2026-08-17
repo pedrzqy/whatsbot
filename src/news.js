@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * NOTÍCIAS de games (Steam/PlayStation/Nintendo) via RSS, para o agente de comunidade.
+ * NOTÍCIAS de games (Nintendo/Steam) via RSS, para o agente de comunidade.
  *
  * Sem dependência nova: fetch com axios + parser mínimo de RSS/Atom (title/link/data).
  * Defensivo: qualquer falha de rede/parse retorna [] (o gerador só pula, nunca quebra o bot).
@@ -16,17 +16,19 @@ const http = axios.create({
 });
 
 // Fontes padrão (RSS). Podem ser trocadas por env sem mexer no código.
+// PlayStation saiu daqui junto com o catálogo (17/08/2026): post de jogo que a
+// loja não vende gera pergunta de preço que termina em "não temos" — atrito à
+// toa no grupo, e a chance de alguém comprar em outro lugar por causa do nosso
+// post. Para voltar, é só reincluir aqui ou pela env de feeds.
 const DEFAULT_FEEDS = [
   // Nintendo Everything: focado em Nintendo E com imagem acessível (Nintendo Life bloqueia).
   { source: 'Nintendo', emoji: '🔴', url: 'https://nintendoeverything.com/feed/' },
-  { source: 'PlayStation', emoji: '🔵', url: 'https://www.pushsquare.com/feeds/latest' },
   { source: 'Steam/PC', emoji: '⚫', url: 'https://www.pcgamer.com/rss/' },
 ];
 
 // Feeds de REVIEW (o título já traz o veredito — nada de copiar texto).
 const DEFAULT_REVIEW_FEEDS = [
   { source: 'Nintendo', emoji: '🔴', url: 'https://www.nintendolife.com/feeds/reviews' },
-  { source: 'PlayStation', emoji: '🔵', url: 'https://www.pushsquare.com/feeds/reviews' },
 ];
 
 /** Lê "Label|emoji|url ; ..." de uma env, ou usa o default informado. */

@@ -29,7 +29,6 @@ const NODES = {
     ],
     options: [
       { label: '🤔 Tenho dúvidas sobre os jogos', goto: 'duvidas' },
-      { label: '🎮 Suporte PlayStation', topic: 'plataforma_playstation' },
       { label: '🕹️ Suporte Nintendo Switch', topic: 'plataforma_nintendo' },
       { label: '💨 Suporte Steam', topic: 'plataforma_steam' },
       { label: '🔑 Preciso de um código de segurança', action: 'codigo' },
@@ -49,7 +48,6 @@ const NODES = {
     options: [
       { label: 'Qual é o prazo de envio?', topic: 'prazo_envio' },
       { label: 'Como funcionam os jogos de *Nintendo Switch*?', topic: 'plataforma_nintendo' },
-      { label: 'Como funcionam os jogos de *PlayStation*?', topic: 'plataforma_playstation' },
       { label: 'Como funcionam os jogos de *Steam*?', topic: 'plataforma_steam' },
       { label: 'Qual é o prazo de garantia?', topic: 'garantia' },
       { label: 'Quais são as formas de pagamento?', topic: 'pagamento' },
