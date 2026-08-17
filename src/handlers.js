@@ -95,7 +95,20 @@ async function handleMessage(msg) {
   // Auto-resposta DESLIGADA (BOT_AUTOREPLY=false): o bot não RESPONDE no 1-a-1
   // (um humano atende). Mas marca o contato como engajado, pra a RECUPERAÇÃO DE
   // VENDA ainda cutucar quem mandou mensagem e sumiu. Não envia nada agora.
-  if (!config.autoReply) {
+  //
+  // EXCEÇÃO: o operador com #teste ligado.
+  //
+  // O #teste diz "agora suas mensagens normais entram como se fossem de um
+  // cliente" — e com o autoreply desligado isso era falso: o retorno acontecia
+  // aqui, antes até do #inicio, então nem "ola" nem "#inicio" recebiam
+  // resposta. Só os #comandos da ponte respondiam, porque eles são tratados
+  // acima. O sintoma (bot mudo logo depois de confirmar o modo teste) aponta
+  // para todos os lugares errados.
+  //
+  // A alternativa seria ligar BOT_AUTOREPLY para testar — o que faria o bot
+  // responder a loja INTEIRA só para o operador conferir um fluxo. Este furo
+  // vale exatamente para um número, o dele, e por 30 minutos.
+  if (!config.autoReply && !ponte.operadorEmTeste(from)) {
     store.saveContact(from, {
       lastSeen: Date.now(),
       name: pushName || store.getContact(from)?.name,

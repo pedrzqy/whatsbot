@@ -541,7 +541,23 @@ function iniciar() {
 const ativa = () => cfg.ativa;
 const salvarImagem = (base64, mimetype) => midia.salvar(base64, mimetype);
 
+/**
+ * Este número é o operador COM o modo teste ligado?
+ *
+ * Exportado para o handlers: o #teste promete que "suas mensagens normais
+ * entram como se fossem de um cliente", e com BOT_AUTOREPLY=false isso era
+ * falso — o handler retornava antes de qualquer coisa e nem o #inicio era
+ * lido. Sem isto, testar o fluxo de vendas obrigaria a ligar a resposta
+ * automática para a loja INTEIRA.
+ */
+function operadorEmTeste(from) {
+  return Boolean(
+    from && from === cfg.operador.numero && dados.testeOperador?.ate > Date.now(),
+  );
+}
+
 module.exports = {
+  operadorEmTeste,
   pedirCodigo,
   receberDoFornecedor,
   entregarCodigo,

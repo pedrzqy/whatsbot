@@ -580,6 +580,19 @@ const OP = '5541999999999';
   // `paused` é o estado do falar_com_atendente, e handlers.js devolve SILÊNCIO
   // TOTAL nele. Com o número pausado, o #teste dizia "suas mensagens entram
   // como se fossem de um cliente" e nada acontecia — parecia bot quebrado.
+  // ── O furo do autoreply vale só para o operador em teste ───
+  // Com BOT_AUTOREPLY=false o handlers retorna antes do #inicio e da IA. O
+  // #teste promete o contrário, então ele fura essa porta — mas só para um
+  // número e por 30 min. Se valesse para qualquer um, desligar o autoreply
+  // deixaria de significar alguma coisa.
+  bloco('só o operador em teste fura o autoreply');
+  await operador.executar('#teste'); // liga
+  t('operador em teste passa', ponteMod.operadorEmTeste(OP) === true);
+  t('cliente qualquer NÃO passa', ponteMod.operadorEmTeste('5511900000000') === false);
+  t('número vazio não passa', ponteMod.operadorEmTeste('') === false);
+  await operador.executar('#teste'); // desliga
+  t('depois de desligar, não passa mais', ponteMod.operadorEmTeste(OP) === false);
+
   bloco('#teste despausa o número do operador');
   const storeMod = require('./src/store');
   storeMod.saveContact(OP, { paused: true });
