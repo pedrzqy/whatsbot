@@ -49,10 +49,19 @@ const config = require('./src/config');
 
   if (certo.erro) {
     console.log('');
-    console.log('Deu erro. O que cada um significa:');
-    console.log('  pedido_nao_encontrado -> código errado, ou de outra loja');
-    console.log('  email_nao_confere     -> o e-mail não é o da compra');
-    console.log('  falha_ao_consultar    -> chave inválida, rede, ou a API mudou (veja o log acima)');
+    if (certo.erro === 'sistema_indisponivel') {
+      console.log('A Nerix recusou a NOSSA chave (401). O pedido e o e-mail podem estar certos —');
+      console.log('o problema é a NERIX_API_KEY inválida ou inativa.');
+      console.log('');
+      console.log('  1. Gere uma chave nova no painel da Nerix');
+      console.log('  2. Atualize NERIX_API_KEY no .env local E no Environment do whatsbot');
+      console.log('  3. Rode este script de novo');
+    } else {
+      console.log('Deu erro. O que cada um significa:');
+      console.log('  pedido_nao_encontrado -> código errado, ou de outra loja');
+      console.log('  email_nao_confere     -> o e-mail não é o da compra (403 da Nerix)');
+      console.log('  falha_ao_consultar    -> rede, ou a API mudou (veja o log acima)');
+    }
     process.exit(1);
   }
 

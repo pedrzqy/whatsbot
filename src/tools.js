@@ -306,7 +306,30 @@ async function execute(name, args = {}, ctx = {}) {
   } catch (err) {
     const status = err.response?.status;
     if (status === 404) return { erro: 'pedido_nao_encontrado' };
-    if (status === 401 || status === 403) return { erro: 'email_nao_confere' };
+
+    // 403 é o CLIENTE: o e-mail não é o dono daquele pedido.
+    if (status === 403) return { erro: 'email_nao_confere' };
+
+    // 401 é a LOJA: a Nerix recusou a NOSSA chave.
+    //
+    // Estavam juntos, e isso fazia o cliente ouvir "seu e-mail não confere"
+    // quando a NERIX_API_KEY estava inválida ou inativa — ele ficaria tentando
+    // outros e-mails por um problema que não é dele e que não tem como
+    // resolver. E o defeito ficaria invisível: o log diria "email errado" e
+    // todo mundo procuraria no lugar errado.
+    if (status === 401) {
+      console.error(
+        '[tools] a Nerix recusou NOSSA chave (401) — NERIX_API_KEY inválida ou inativa. ' +
+          'Gere outra no painel e atualize o Environment do serviço.',
+      );
+      return {
+        erro: 'sistema_indisponivel',
+        instrucao:
+          'A consulta está fora do ar por um problema NOSSO, não do cliente. ' +
+          'NÃO diga que o e-mail ou o código dele está errado. Peça desculpa pela demora ' +
+          'e passe para um atendente humano.',
+      };
+    }
     console.error(`[tools] falha em ${name}:`, err.response?.data || err.message);
     return { erro: 'falha_ao_consultar' };
   }

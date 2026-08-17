@@ -96,6 +96,28 @@ nerix.checkPayment = async (codigo) => {
   });
   t('404 vira pedido_nao_encontrado', inexistente.erro === 'pedido_nao_encontrado');
 
+  // ── Problema NOSSO não vira culpa do cliente ────────────────
+  // 401 e 403 estavam no mesmo if, e com a chave da loja inativa o cliente
+  // ouvia "seu e-mail não confere" — ficaria tentando outros e-mails por um
+  // defeito que não é dele. E o log apontaria para o lugar errado.
+  bloco('401 é a nossa chave, não o e-mail do cliente');
+  const getOrderBom = nerix.getOrder;
+  nerix.getOrder = async () => {
+    const e = new Error('unauthorized');
+    e.response = { status: 401 };
+    throw e;
+  };
+  const chaveRuim = await tools.execute('consultar_pedido', {
+    codigo: 'ABC123',
+    email: 'dono@exemplo.com',
+  });
+  nerix.getOrder = getOrderBom;
+
+  t('401 NÃO culpa o e-mail do cliente', chaveRuim.erro !== 'email_nao_confere', JSON.stringify(chaveRuim));
+  t('e sinaliza problema nosso', chaveRuim.erro === 'sistema_indisponivel', chaveRuim.erro);
+  t('e manda a IA não culpar o cliente',
+    /NÃO diga que o e-mail/i.test(chaveRuim.instrucao || ''), chaveRuim.instrucao);
+
   // ── Consulta boa ────────────────────────────────────────────
   bloco('consulta com código e e-mail certos');
 
