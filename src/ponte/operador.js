@@ -81,10 +81,33 @@ async function executar(texto) {
     }
     dados.testeOperador = { ate: Date.now() + TESTE_MS };
     persistAgora();
+
+    // DESPAUSA o próprio número antes de prometer que ele vira cliente.
+    //
+    // `paused` é o estado que o falar_com_atendente liga para um humano
+    // assumir, e handlers.js:134 devolve SILÊNCIO TOTAL nesse caso — sem
+    // resposta e sem log. Com o número pausado, o #teste dizia "suas mensagens
+    // entram como se fossem de um cliente" e depois nada acontecia: "ola",
+    // "oi", nada. Parece bot quebrado e é só o estado anterior sobrevivendo.
+    let estavaPausado = false;
+    try {
+      // O operador é sempre este número — executar() nem recebe o remetente,
+      // porque ehComando() já garantiu que só ele chega aqui.
+      const numero = cfg.operador.numero;
+      const store = require('../store');
+      estavaPausado = Boolean(store.getContact(numero)?.paused);
+      if (estavaPausado) store.saveContact(numero, { paused: false, followupCount: 0 });
+    } catch (err) {
+      console.warn('[ponte/operador] não consegui despausar o número do teste:', err.message);
+    }
+
     return (
       '🧪 *Modo teste ligado por 30 min.*\n\n' +
       'Agora suas mensagens normais entram como se fossem de um cliente. ' +
       'Manda *preciso do código* e segue o passo a passo.\n\n' +
+      (estavaPausado
+        ? '_Seu número estava em atendimento humano e voltou a ser respondido._\n\n'
+        : '') +
       '_Os #comandos continuam funcionando e o limite de 5 códigos/hora não ' +
       'vale para você agora. Nada sai sem #ok. ' +
       'Mande #teste de novo para desligar antes da hora._'

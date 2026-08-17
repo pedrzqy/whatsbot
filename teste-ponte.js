@@ -576,6 +576,18 @@ const OP = '5541999999999';
   // No #teste o operador É o cliente, e as duas mensagens caem no mesmo
   // número. Sem a instrução ali, "Recebi tudo" parece o fim do fluxo e o #ok
   // fica esquecido esperando um envio que nunca sai sozinho.
+  // ── #teste tem que despausar o próprio número ──────────────
+  // `paused` é o estado do falar_com_atendente, e handlers.js devolve SILÊNCIO
+  // TOTAL nele. Com o número pausado, o #teste dizia "suas mensagens entram
+  // como se fossem de um cliente" e nada acontecia — parecia bot quebrado.
+  bloco('#teste despausa o número do operador');
+  const storeMod = require('./src/store');
+  storeMod.saveContact(OP, { paused: true });
+  const respTeste = await operador.executar('#teste');
+  t('o #teste tira o número da pausa', storeMod.getContact(OP)?.paused === false);
+  t('e avisa que fez isso', /atendimento humano/i.test(respTeste), respTeste.slice(0, 60));
+  await operador.executar('#teste'); // desliga
+
   // Fila limpa antes: o cenário acima deixou um atendimento na vez, e com
   // alguém sendo atendido o pedido novo entra na fila em vez de virar tarefa.
   estadoPonte.dados.atendimentos.length = 0;
