@@ -65,6 +65,33 @@ const definitions = [
   {
     type: 'function',
     function: {
+      name: 'consultar_pedido',
+      description:
+        'Consulta um pedido da loja e o status do pagamento em tempo real. ' +
+        'Use para "cadê meu pedido", "meu Pix caiu?", "já aprovou?", "não recebeu o jogo". ' +
+        'EXIGE o código do pedido E o e-mail da compra: a Nerix confere se o e-mail é dono ' +
+        'daquele pedido antes de responder qualquer coisa. Se o cliente não informou os dois, ' +
+        'PEÇA o que faltar antes de chamar — chamar sem os dois só devolve erro. ' +
+        'Nunca invente nem adivinhe código ou e-mail.',
+      parameters: {
+        type: 'object',
+        properties: {
+          codigo: {
+            type: 'string',
+            description: 'Código/número do pedido, exatamente como o cliente informou.',
+          },
+          email: {
+            type: 'string',
+            description: 'E-mail usado na compra. Obrigatório — é ele que prova que o pedido é dele.',
+          },
+        },
+        required: ['codigo', 'email'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'falar_com_atendente',
       description: 'Transfere p/ atendente humano e pausa o bot. OBRIGATÓRIO colete NOME e SOBRENOME antes. Use p/ qualquer questão de PEDIDO (cliente disse que comprou, quer receber o jogo/login, entrega não chegou, dúvida/problema de pedido), opção online/perfil próprio, ou pedido de atendente. Se só tiver o primeiro nome, peça o sobrenome. Se o cliente tiver informado, passe também o e-mail OU o código da compra em "contato".',
       parameters: {
@@ -123,6 +150,72 @@ function formatProducts(list) {
   });
 }
 
+/**
+ * Status da Nerix → palavra que o cliente entende.
+ *
+ * O valor cru vai junto em `status_bruto`: se a Nerix criar um status novo, o
+ * bot ainda tem o que dizer em vez de responder "undefined" — e o log mostra o
+ * nome novo para adicionar aqui depois.
+ */
+const STATUS = {
+  pending: 'aguardando pagamento',
+  waiting_payment: 'aguardando pagamento',
+  paid: 'pago',
+  approved: 'pago',
+  completed: 'concluído',
+  delivered: 'entregue',
+  processing: 'em processamento',
+  cancelled: 'cancelado',
+  canceled: 'cancelado',
+  refunded: 'reembolsado',
+  expired: 'expirado',
+  failed: 'falhou',
+};
+
+const ESPERANDO_PAGAMENTO = new Set(['pending', 'waiting_payment', 'processing']);
+
+/**
+ * O que o modelo recebe sobre um pedido.
+ *
+ * Defensivo de propósito: a forma exata da resposta da Nerix pode variar entre
+ * endpoints e versões, então cada campo é opcional e some quando não vier, em
+ * vez de virar "undefined" na conversa com o cliente.
+ */
+function formatOrder(p) {
+  if (!p) return { erro: 'pedido_nao_encontrado' };
+
+  const bruto = String(p.status || p.payment_status || '').toLowerCase();
+  const itens = (p.items || p.order_items || []).map((i) => {
+    const item = {
+      nome: i.product_name || i.name || i.product?.name,
+      quantidade: i.quantity || 1,
+    };
+    // A chave/licença só chega aqui porque a Nerix já validou o e-mail contra
+    // o pedido — é o mesmo gate que o site usa. Entregar no WhatsApp é o que o
+    // cliente veio buscar; segurar exigiria um segundo canal para a mesma
+    // prova de identidade.
+    const chave = i.product_key || i.key || i.license;
+    if (chave) item.chave = chave;
+    return item;
+  });
+
+  const pago = ['paid', 'approved', 'completed', 'delivered'].includes(bruto);
+
+  return {
+    codigo: p.order_number || p.code || p.id,
+    status: STATUS[bruto] || bruto || 'desconhecido',
+    status_bruto: bruto || null,
+    total: brl(p.total ?? p.amount),
+    criado_em: p.created_at || p.createdAt || null,
+    pago,
+    itens: itens.length ? itens : undefined,
+    // Link de pagamento SÓ enquanto falta pagar. Mandar "pague aqui" para quem
+    // já pagou faz o cliente achar que a compra não passou e, na pior das
+    // hipóteses, pagar de novo.
+    link_pagamento: pago ? undefined : p.payment_url || p.checkout_url || undefined,
+  };
+}
+
 async function execute(name, args = {}, ctx = {}) {
   try {
     if (name === 'pedir_codigo_fornecedor') {
@@ -154,6 +247,53 @@ async function execute(name, args = {}, ctx = {}) {
       if (ctx.from) store.saveContact(ctx.from, { paused: true, name: nome, ...(contato ? { pedidoContato: contato } : {}) });
       console.log(`[handoff] ${ctx.from} -> atendente (${nome})${contato ? ` | contato: ${contato}` : ''} | motivo: ${args.motivo || '-'}`);
       return { transferido: true, instrucao: 'Confirme ao cliente, de forma calorosa, que um atendente humano vai continuar o atendimento em instantes.' };
+    }
+
+    if (name === 'consultar_pedido') {
+      const codigo = String(args.codigo || '').trim();
+      const email = String(args.email || '').trim();
+
+      // Os DOIS são obrigatórios, e a checagem é aqui e não só no schema.
+      //
+      // A chave da Nerix é de ADMIN: com ela dá para ler qualquer pedido da
+      // loja. O e-mail é o que prova que quem pergunta é o dono — sem ele,
+      // qualquer pessoa com um número de pedido leria o nome, o valor e a
+      // licença de outro cliente. O modelo pode alucinar um argumento; o
+      // schema não impede.
+      if (!codigo) return { erro: 'falta_codigo', instrucao: 'Peça o código do pedido ao cliente.' };
+      if (!email) {
+        return {
+          erro: 'falta_email',
+          instrucao: 'Peça o e-mail usado na compra — sem ele a consulta não é feita.',
+        };
+      }
+
+      const resp = await nerix.getOrder(codigo, { email });
+      let pedido = resp?.data || resp;
+
+      // Ainda esperando pagamento: confere em tempo real antes de responder.
+      //
+      // É exatamente a pergunta do cliente ("meu Pix caiu?"), e o estado salvo
+      // pode estar velho — o Pix cai em segundos e o webhook pode atrasar.
+      // checkPayment é POST e, se estiver pago, a própria Nerix dispara a
+      // entrega das chaves. Falha aqui não derruba a consulta: o pior caso é
+      // responder com o status que já tínhamos.
+      const bruto = String(pedido?.status || pedido?.payment_status || '').toLowerCase();
+      if (ESPERANDO_PAGAMENTO.has(bruto)) {
+        try {
+          const check = await nerix.checkPayment(codigo);
+          const atualizado = check?.data || check;
+          if (atualizado && (atualizado.status || atualizado.payment_status)) {
+            pedido = { ...pedido, ...atualizado };
+          }
+        } catch (err) {
+          console.warn(`[tools] check-payment de ${codigo} falhou: ${err.response?.status || err.message}`);
+        }
+      }
+
+      const out = formatOrder(pedido);
+      console.log(`[tools] pedido ${codigo} consultado por ${ctx.from || '?'} — status ${out.status}`);
+      return out;
     }
 
     if (name === 'buscar_produtos') {
