@@ -88,15 +88,16 @@ async function pedirJogo(from, nomeJogo, pushName) {
 
   // Não tem na loja: vira solicitação para o operador.
   //
+  // Mesmo formato do alerta de resposta sem código: duas linhas, quem é em
+  // cima e o que ele quer embaixo. O operador lê isso no celular, no meio de
+  // outra coisa — cabeçalho e rótulo ("Pedido de jogo", "Telefone:", "Quer:")
+  // eram moldura ocupando a tela sem dizer nada que as duas linhas não digam.
+  //
   // O telefone vai junto porque é por ele que o operador responde — sem isso
   // ele teria a pergunta e nenhum jeito de achar quem perguntou.
   const nome = store.getContact(from)?.name || pushName || 'cliente';
   await ponte.alertar(
-    `🎯 *Pedido de jogo*\n\n` +
-      `Cliente: *${nome}*\n` +
-      `Telefone: ${from.replace(/@.*/, '')}\n\n` +
-      `Quer: *${nomeJogo}*\n\n` +
-      `_Não achei esse título na loja._`,
+    `Cliente: *${nome}* · ${from.replace(/@.*/, '')}\n🎯 Quer *${nomeJogo}* — não temos no site.`,
   );
   console.log(`[pedirjogo] ${from} pediu "${nomeJogo}" — NÃO achou, avisei o operador`);
 
