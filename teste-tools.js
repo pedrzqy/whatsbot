@@ -268,6 +268,32 @@ nerix.checkPayment = async (codigo) => {
   const emailErrado = respostaDePedido({ erro: 'email_nao_confere' }, { codigo: 'X4' });
   t('e-mail errado explica o que fazer', /e-mail/i.test(emailErrado));
 
+  // ── Pedir jogo ──────────────────────────────────────────────
+  bloco('pedir jogo');
+  const nerixMod = require('./src/nerix');
+  const listOriginal = nerixMod.listProducts;
+
+  // Jogo que a loja TEM: o cliente recebe o link e compra na hora. Encaminhar
+  // ao operador um título que já está à venda perde uma venda pronta e faz o
+  // cliente esperar resposta manual por algo que estava a um clique.
+  nerixMod.listProducts = async () => ({
+    data: [{ name: 'Hollow Knight', slug: 'hollow-knight', price: 49.9 }],
+  });
+  const naLoja = await tools.execute('buscar_produtos', { termo: 'hollow knight' });
+  t('acha o jogo que a loja tem', naLoja.produtos?.length === 1, JSON.stringify(naLoja.produtos));
+  t('e traz o link para comprar', Boolean(naLoja.produtos?.[0]?.link));
+
+  nerixMod.listProducts = async () => ({ data: [] });
+  const foraDaLoja = await tools.execute('buscar_produtos', { termo: 'jogo que nao existe xyz' });
+  t('não acha o que a loja não tem', foraDaLoja.produtos?.length === 0);
+  nerixMod.listProducts = listOriginal;
+
+  // O nome do jogo pode ser SÓ dígitos — "1080 Snowboarding", "Fifa 23".
+  // Se o passo do pedido não vier ANTES do menu numerado, a resposta vira
+  // escolha de opção e o cliente nunca consegue pedir esses títulos.
+  t('“3” seria opção de menu válida', Boolean(menu.resolve('main', '3')));
+  t('e “23” não resolve como opção', menu.resolve('main', '23') === null);
+
   console.log('\n' + (falhas ? falhas + ' FALHA(S)' : 'todos os testes passaram'));
   process.exit(falhas ? 1 : 0);
 })();

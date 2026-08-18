@@ -31,6 +31,7 @@ const NODES = {
       { label: '🤔 Tenho dúvidas sobre os jogos', goto: 'duvidas' },
       { label: '🕹️ Suporte Nintendo Switch', topic: 'plataforma_nintendo' },
       { label: '💨 Suporte Steam', topic: 'plataforma_steam' },
+      { label: '🎯 Pedir um jogo que não achei', action: 'pedirjogo' },
       { label: '🔑 Preciso de um código de segurança', action: 'codigo' },
       { label: '💰 Meu pedido / financeiro', action: 'pedido' },
       // O ÚNICO ramo que acorda a IA. Aqui o cliente escreve livre, cada caso

@@ -54,6 +54,61 @@ function extrairPedido(texto) {
 }
 
 /**
+ * Cliente pediu um jogo pelo nome.
+ *
+ * Procura na loja ANTES de encaminhar. Se o jogo já está no catálogo, mandar o
+ * pedido para o operador seria perder uma venda que estava pronta: o cliente
+ * esperaria uma resposta manual por algo que ele podia comprar naquele
+ * segundo. Só o que a loja não tem vira solicitação.
+ *
+ * A busca é a API da Nerix, não IA — resposta na hora e sem inventar título.
+ */
+async function pedirJogo(from, nomeJogo, pushName) {
+  let achados = [];
+  try {
+    const r = await tools.execute('buscar_produtos', { termo: nomeJogo }, { from });
+    achados = r.produtos || [];
+  } catch (err) {
+    // Busca fora do ar não pode travar o pedido: segue como se não houvesse na
+    // loja, que é o caminho que termina com um humano olhando.
+    console.warn('[pedirjogo] busca falhou, encaminhando mesmo assim:', err.message);
+  }
+
+  if (achados.length) {
+    const linhas = ['🎉 Achei na nossa loja:', ''];
+    for (const p of achados.slice(0, 3)) {
+      linhas.push(`• *${p.nome}*${p.por ? ` — ${p.por}` : ''}`);
+      if (p.link) linhas.push(`  ${p.link}`);
+    }
+    linhas.push('', '_Não era esse? Digite *#menu* e peça de novo com o nome completo._');
+    await sender.send(from, linhas.join('\n'));
+    console.log(`[pedirjogo] ${from} pediu "${nomeJogo}" — achou ${achados.length} na loja`);
+    return;
+  }
+
+  // Não tem na loja: vira solicitação para o operador.
+  //
+  // O telefone vai junto porque é por ele que o operador responde — sem isso
+  // ele teria a pergunta e nenhum jeito de achar quem perguntou.
+  const nome = store.getContact(from)?.name || pushName || 'cliente';
+  await ponte.alertar(
+    `🎯 *Pedido de jogo*\n\n` +
+      `Cliente: *${nome}*\n` +
+      `Telefone: ${from.replace(/@.*/, '')}\n\n` +
+      `Quer: *${nomeJogo}*\n\n` +
+      `_Não achei esse título na loja._`,
+  );
+  console.log(`[pedirjogo] ${from} pediu "${nomeJogo}" — NÃO achou, avisei o operador`);
+
+  await sender.send(
+    from,
+    `Anotei seu pedido de *${nomeJogo}* ✅\n\n` +
+      `Vou verificar a disponibilidade e te retorno aqui mesmo 👍\n\n` +
+      `_Digite *#menu* para ver as outras opções._`,
+  );
+}
+
+/**
  * O que cada opção de AÇÃO do menu faz. Retorna true se já respondeu.
  *
  * Tudo aqui é texto pronto — a única ação que acorda a IA é 'ia', e ela só
@@ -86,6 +141,19 @@ async function acaoDoMenu(acao, { from, pushName }) {
         '1️⃣ O *código do pedido*\n' +
         '2️⃣ O *e-mail* usado na compra\n\n' +
         'Pode mandar os dois na mesma mensagem 👍',
+    );
+    return true;
+  }
+
+  if (acao === 'pedirjogo') {
+    // Marca que a PRÓXIMA mensagem é o nome do jogo. Sem isso, o cliente
+    // responderia o título e cairia no fallback do menu, que devolveria as
+    // opções de novo — e ele repetiria achando que o bot não leu.
+    store.saveContact(from, { aguardandoJogo: true, menuNode: null });
+    await sender.send(
+      from,
+      '🎯 Me diz o *nome do jogo* que você procura.\n\n' +
+        'Manda só o título, tipo: *Hollow Knight Silksong*.',
     );
     return true;
   }
@@ -271,6 +339,16 @@ async function handleMessage(msg) {
   // Cliente entrou na conversa (não é só boas-vindas): vira candidato à recuperação
   // e, por estar ativo agora, zera qualquer ciclo de cutucada pendente.
   store.saveContact(from, { ...nameFields, engaged: true, followupCount: 0 });
+
+  // ─── 3.05) Nome do jogo pedido ───
+  //
+  // Vem ANTES do menu numerado: se o jogo se chama "1080 Snowboarding" ou
+  // "Fifa 23", a mensagem é só dígitos e seria lida como escolha de opção.
+  if (contact?.aguardandoJogo && trimmed) {
+    store.saveContact(from, { aguardandoJogo: false, menuNode: 'main' });
+    await pedirJogo(from, trimmed, pushName);
+    return;
+  }
 
   // ─── 3.1) Menu numerado — resposta PRONTA, sem IA ───
   //
