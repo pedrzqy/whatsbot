@@ -119,8 +119,24 @@ async function pedirJogo(from, nomeJogo, pushName) {
  */
 async function acaoDoMenu(acao, { from, pushName }) {
   if (acao === 'ia') {
-    // A partir daqui a conversa é livre: sai do menu e entra na IA, que tem as
-    // ferramentas (consultar pedido, buscar produto, chamar atendente).
+    // Com a IA DESLIGADA (o padrão), quem atende é gente.
+    //
+    // Antes esta opção marcava modoIA e convidava o cliente a escrever — mas
+    // sem IA não havia ninguém para ler, e a mensagem seguinte caía no
+    // fallback. O cliente contava o problema e recebia o menu de volta.
+    if (!config.iaLigada) {
+      store.saveContact(from, { aguardandoProblema: true, menuNode: null, modoIA: false });
+      await sender.send(
+        from,
+        'Sem problema, vou te ajudar 👍\n\n' +
+          'Me conta *o que aconteceu* — se puder, manda o *código do pedido* e o ' +
+          '*e-mail* da compra junto.',
+      );
+      return true;
+    }
+
+    // Conversa livre com a IA, que tem as ferramentas (consultar pedido,
+    // buscar produto, chamar atendente).
     store.saveContact(from, { modoIA: true, menuNode: null });
     await sender.send(
       from,
@@ -132,10 +148,13 @@ async function acaoDoMenu(acao, { from, pushName }) {
   }
 
   if (acao === 'pedido') {
-    // Também pronto: pede os dois dados de uma vez e deixa a IA consultar
-    // quando eles chegarem. Pedir os dois juntos evita a ida e volta de "qual
-    // o código?" / "qual o e-mail?" — e sem os dois a consulta nem sai.
-    store.saveContact(from, { modoIA: true, menuNode: null });
+    // Pede os dois dados de uma vez: sem os dois a consulta nem sai, então
+    // perguntar separado seria ida e volta à toa.
+    //
+    // NÃO marca modoIA: quem lê a resposta é a regex de extrairPedido(), que
+    // roda antes do fallback e independe disso. Marcar aqui era o que prendia
+    // o cliente no laço do menu quando ele mandava outra coisa.
+    store.saveContact(from, { menuNode: 'main', modoIA: false });
     await sender.send(
       from,
       '📦 Para consultar seu pedido eu preciso de *2 coisas*:\n\n' +
@@ -351,6 +370,28 @@ async function handleMessage(msg) {
     return;
   }
 
+  // ─── 3.06) Problema com a compra, com a IA desligada ───
+  //
+  // O cliente acabou de contar o que houve. Sem IA não há quem leia, então vai
+  // para o operador — e o cliente é PAUSADO, senão continuaria conversando com
+  // o menu enquanto espera atendimento humano.
+  if (contact?.aguardandoProblema && trimmed) {
+    const nome = store.getContact(from)?.name || pushName || 'cliente';
+    store.saveContact(from, { aguardandoProblema: false, paused: true, menuNode: null });
+
+    await ponte.alertar(
+      `Cliente: *${nome}* · ${from.replace(/@.*/, '')}\n🛠️ ${trimmed}`,
+    );
+    console.log(`[problema] ${from}: ${trimmed}`);
+
+    await sender.send(
+      from,
+      'Anotei ✅ Já estou chamando um atendente pra resolver isso com você 🧑‍💼\n\n' +
+        '_Se quiser voltar ao menu, digite *#inicio*._',
+    );
+    return;
+  }
+
   // ─── 3.1) Menu numerado — resposta PRONTA, sem IA ───
   //
   // Vem antes da IA de propósito. "Qual é o prazo de envio?" tem a MESMA
@@ -422,7 +463,17 @@ async function handleMessage(msg) {
   // envio — e o que abria espaço para prometer prazo e garantia que a loja não
   // pratica.
   if (!config.iaLigada) {
-    store.saveContact(from, { menuNode: 'main' });
+    // LIMPA o modoIA junto — este era o bug que prendia o cliente em laço.
+    //
+    // As opções 6 e 7 marcavam modoIA:true para a conversa seguir livre. Com a
+    // IA desligada, a mensagem seguinte caía aqui... e aqui só o menuNode era
+    // reposto. Resultado: modoIA ficava true para sempre, a condição do menu
+    // (que exige !modoIA) nunca mais passava, e TODA escolha numérica voltava
+    // para cá — o mesmo menu de 8 opções, sem fim.
+    //
+    // Pior: como a escolha nunca era executada, "falar com um atendente"
+    // também não rodava, e o cliente que pediu humano continuava no laço.
+    store.saveContact(from, { menuNode: 'main', modoIA: false });
     await sender.send(
       from,
       `${variator.pick(NAO_ENTENDI)}\n\n${menu.render('main')}`,

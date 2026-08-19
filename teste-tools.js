@@ -268,6 +268,66 @@ nerix.checkPayment = async (codigo) => {
   const emailErrado = respostaDePedido({ erro: 'email_nao_confere' }, { codigo: 'X4' });
   t('e-mail errado explica o que fazer', /e-mail/i.test(emailErrado));
 
+  // ── O laço do menu ──────────────────────────────────────────
+  // Bug real (17/08): o cliente escolhia 6 ou 7, ficava com modoIA:true, e o
+  // fallback repunha só o menuNode. Como a condição do menu exige !modoIA,
+  // TODA escolha seguinte voltava para o fallback — o mesmo menu de 8 opções,
+  // sem fim. E como a escolha nunca era executada, "falar com um atendente"
+  // também não rodava: quem pedia humano continuava preso no laço.
+  bloco('não prende o cliente no laço do menu');
+
+  const senderMod = require('./src/sender');
+  const storeMod = require('./src/store');
+  const enviadas = [];
+  const sendOriginal = senderMod.send;
+  senderMod.send = async (para, texto) => { enviadas.push(String(texto)); };
+
+  const CLI_LOOP = '5511977776666@s.whatsapp.net';
+  // greetedAt E lastSeen: o shouldWelcome sauda de novo quando o cliente some
+  // por mais que a janela de sessão, e sem o lastSeen recente ele trataria
+  // este contato como quem voltou depois de dias.
+  storeMod.saveContact(CLI_LOOP, {
+    greetedAt: Date.now(),
+    lastSeen: Date.now(),
+    menuNode: 'main',
+    modoIA: false,
+    paused: false,
+  });
+
+  const manda = async (texto) => {
+    enviadas.length = 0;
+    await handlers.onIncomingMessage({ from: CLI_LOOP, text: texto, pushName: 'Teste' });
+    return enviadas.join('\n');
+  };
+
+  // 6 = "Meu pedido / financeiro" — era ele que ligava o modoIA.
+  const apos6 = await manda('6');
+  t('opção 6 pede código e e-mail', /código do pedido/i.test(apos6), apos6.slice(0, 50));
+
+  // A escolha SEGUINTE tem que funcionar. Com o bug, voltava o menu.
+  const apos4 = await manda('4');
+  t('e a opção 4 ainda funciona depois dela',
+    /nome do jogo/i.test(apos4), apos4.slice(0, 60));
+  t('não devolveu o menu de novo', !/Tenho dúvidas sobre os jogos/.test(apos4));
+
+  // O caminho do atendente: escolher 8 tem que PAUSAR de verdade.
+  storeMod.saveContact(CLI_LOOP, { menuNode: 'main', modoIA: false, aguardandoJogo: false });
+  const apos8 = await manda('8');
+  t('opção 8 chama o atendente', /atendente/i.test(apos8), apos8.slice(0, 40));
+  t('e pausa o contato', storeMod.getContact(CLI_LOOP)?.paused === true);
+
+  // Pausado = silêncio. Sem isso o cliente que pediu humano segue conversando
+  // com o menu enquanto espera.
+  const aposPausa = await manda('4');
+  t('pausado, o bot fica calado', aposPausa === '', JSON.stringify(aposPausa.slice(0, 40)));
+
+  // E o #inicio tira da pausa.
+  const aposInicio = await manda('#inicio');
+  t('#inicio despausa e traz o menu', /Tenho dúvidas sobre os jogos/.test(aposInicio));
+  t('e o contato sai da pausa', storeMod.getContact(CLI_LOOP)?.paused === false);
+
+  senderMod.send = sendOriginal;
+
   // ── Pedir jogo ──────────────────────────────────────────────
   bloco('pedir jogo');
   const nerixMod = require('./src/nerix');
