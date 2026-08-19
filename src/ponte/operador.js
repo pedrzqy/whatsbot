@@ -30,7 +30,8 @@ const AJUDA = [
   '*#enviar <id>* — manda a resposta ao cliente',
   '*#editar <id> <texto>* — corrige antes de mandar',
   '*#nao <id>* — descarta',
-  '*#limpar* — descarta tudo que está esperando aprovação',
+  '*#limpar* — descarta o que espera aprovação',
+  '*#limpar fila* — encerra TODOS os atendimentos e avisa cada cliente',
   '*#destravar* — devolve à fila envio que ficou preso',
   '*#pular* — encerra o atendimento atual e chama o próximo',
   '*#teste* — vira cliente por 30 min, para testar o fluxo do seu número',
@@ -303,7 +304,22 @@ async function executar(texto) {
   // automática depois de 5 min; isto é o botão para não esperar.
   if (cmd === 'destravar') {
     const presas = dados.tarefas.filter((t) => t.estado === 'executando');
-    if (!presas.length) return 'Nenhum envio preso. Veja o *#fila*.';
+    if (!presas.length) {
+      // "Veja o #fila" mandava o operador para uma tela que ele já tinha
+      // acabado de ver. Aqui o caso comum é atendimento parado SEM tarefa
+      // nenhuma — o pedido morreu antes de virar envio — e o que resolve é
+      // #pular ou #limpar fila, não destravar.
+      const s = fila.situacao();
+      const parado = s.ativo && !s.ativo.turnos;
+      if (parado) {
+        return (
+          `Nenhum envio preso — o que está parado é o *atendimento*.\n\n` +
+          `*${s.ativo.cliente}* está na vez há ${min(Date.now() - s.ativo.desde)} min sem nenhum envio criado.\n` +
+          `*#pular* passa para o próximo · *#limpar fila* encerra todos.`
+        );
+      }
+      return 'Nenhum envio preso.';
+    }
     for (const t of presas) {
       t.estado = 'pendente';
       t.tentativas = Math.max(0, t.tentativas - 1);
@@ -316,15 +332,74 @@ async function executar(texto) {
   // Existe para teste: cada rodada deixa uma tarefa esperando #ok, e depois de
   // algumas o operador tem uma pilha de lixo que atrapalha ler o #fila.
   // Só descarta o que AINDA não saiu — envio em andamento não é tocado.
+  // ── #limpar [fila] ─────────────────────────────────────
+  //
+  // Sem argumento limpa o que espera APROVAÇÃO. `#limpar fila` vai além e
+  // encerra os atendimentos, avisando cada cliente.
+  //
+  // A separação existe porque as duas coisas têm consequências diferentes:
+  // descartar aprovação não afeta ninguém de fora, enquanto encerrar a fila
+  // mexe com gente que está esperando — e essa gente precisa ser avisada, ou
+  // fica esperando para sempre uma resposta que não vem mais.
   if (cmd === 'limpar') {
+    const tudo = /^(fila|tudo|geral|all)$/i.test((id || '').trim());
     const tarefas = dados.tarefas.filter((t) => t.estado === 'aguardando_aprovacao').length;
     const respostas = dados.aprovacoes.length;
-    if (!tarefas && !respostas) return 'Não há nada esperando aprovação.';
+    const s = fila.situacao();
+    const presos = (s.ativo ? 1 : 0) + s.aguardando.length;
 
-    dados.tarefas = dados.tarefas.filter((t) => t.estado !== 'aguardando_aprovacao');
+    if (!tudo) {
+      if (!tarefas && !respostas) {
+        // Mensagem que AJUDA. Antes dizia só "não há nada esperando
+        // aprovação" — e com três clientes travados na fila isso é verdade e
+        // inútil ao mesmo tempo: o operador via a fila cheia no #fila, o
+        // #limpar dizendo que não havia nada, e ficava sem saída.
+        return presos
+          ? `Não há nada esperando aprovação.\n\n` +
+              `Mas tem *${presos}* cliente(s) na fila de atendimento.\n` +
+              `*#limpar fila* encerra todos e avisa cada um · *#pular* passa só o da vez.`
+          : 'Não há nada esperando aprovação, e a fila está vazia.';
+      }
+
+      dados.tarefas = dados.tarefas.filter((t) => t.estado !== 'aguardando_aprovacao');
+      dados.aprovacoes = [];
+      persistAgora();
+      return (
+        `🧹 Descartei ${tarefas} envio(s) e ${respostas} resposta(s). Nada saiu.` +
+        (presos ? `\n\n_Ainda tem ${presos} cliente(s) na fila. Use *#limpar fila* para encerrar._` : '')
+      );
+    }
+
+    // ── #limpar fila ──
+    if (!presos && !tarefas && !respostas) return 'Já está tudo vazio.';
+
+    const paraAvisar = [s.ativo, ...s.aguardando].filter(Boolean);
+    for (const a of paraAvisar) {
+      const at = fila.porId(a.id);
+      if (!at?.from) continue;
+      // Avisa ANTES de encerrar: depois o atendimento não existe mais e o
+      // número se perde junto.
+      await sender
+        .send(
+          at.from,
+          'Oi! Não consegui concluir seu pedido de código agora 🙏\n\n' +
+            'Se ainda precisar, é só me mandar *preciso do código* que eu começo de novo.',
+        )
+        .catch(() => {});
+      await fila.concluir(at.id, 'limpeza_operador');
+    }
+
+    dados.tarefas = dados.tarefas.filter(
+      (t) => t.estado !== 'aguardando_aprovacao' && t.estado !== 'pendente' && t.estado !== 'executando',
+    );
     dados.aprovacoes = [];
     persistAgora();
-    return `🧹 Descartei ${tarefas} envio(s) e ${respostas} resposta(s). Nada saiu.`;
+
+    return (
+      `🧹 *Fila limpa.*\n\n` +
+      `${paraAvisar.length} cliente(s) encerrado(s) e avisado(s).\n` +
+      `${tarefas} envio(s) e ${respostas} resposta(s) descartados.`
+    );
   }
 
   // ── #pular ─────────────────────────────────────────────

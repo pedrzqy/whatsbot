@@ -593,6 +593,43 @@ const OP = '5541999999999';
   await operador.executar('#teste'); // desliga
   t('depois de desligar, não passa mais', ponteMod.operadorEmTeste(OP) === false);
 
+  // ── Limpar a fila de atendimentos ──────────────────────────
+  // Bug real: com 3 clientes travados na fila, o #limpar respondia "não há
+  // nada esperando aprovação" (verdade, e inútil) e o #destravar respondia
+  // "nenhum envio preso. Veja o #fila" — mandando o operador para a tela que
+  // ele acabara de ver. Ninguém tinha saída para a fila em si.
+  bloco('#limpar fila desatola os atendimentos');
+  const filaMod = require('./src/ponte/fila');
+
+  // Estado limpo para este cenário.
+  estadoPonte.dados.atendimentos = [];
+  estadoPonte.dados.tarefas = [];
+  estadoPonte.dados.aprovacoes = [];
+
+  await filaMod.entrar('5511911110001', 'Cliente Um');
+  await filaMod.entrar('5511911110002', 'Cliente Dois');
+  await filaMod.entrar('5511911110003', 'Cliente Tres');
+
+  const semArgumento = await operador.executar('#limpar');
+  t('#limpar avisa que a fila tem gente', /3\D+cliente/i.test(semArgumento), semArgumento.split('\n')[2] || '');
+  t('e ensina o comando que resolve', /#limpar fila/.test(semArgumento));
+
+  const destravou = await operador.executar('#destravar');
+  t('#destravar aponta o atendimento parado', /atendimento/i.test(destravou), destravou.split('\n')[0]);
+  t('e não manda só "veja o #fila"', !/^Nenhum envio preso\. Veja/.test(destravou));
+
+  // Os clientes PRECISAM ser avisados: encerrar calado deixa gente esperando
+  // para sempre uma resposta que não vem mais.
+  const avisados = [];
+  const sendReal = require('./src/sender').send;
+  require('./src/sender').send = async (para) => { avisados.push(para); };
+  const limpou = await operador.executar('#limpar fila');
+  require('./src/sender').send = sendReal;
+
+  t('#limpar fila esvazia a fila', filaMod.situacao().aguardando.length === 0 && !filaMod.situacao().ativo);
+  t('e avisa TODOS os clientes', avisados.length === 3, `avisou ${avisados.length}`);
+  t('e diz quantos foram', /3 cliente/i.test(limpou), limpou.split('\n')[2] || '');
+
   // ── Interruptor do atendimento (#atender) ─────────────────
   // Precisa mudar NA HORA, sem deploy: é o que serve quando o bot começa a
   // responder errado com cliente na linha às 22h de sábado.
