@@ -159,11 +159,6 @@ const MOTIVOS = [
   [/timeout|exceeded|timed out|esgotou/i, 'o passo passou do tempo e eu parei no meio'],
   [/not visible|not stable|not enabled|not attached|waiting for element|elementhandle|locator/i,
     'o campo não apareceu onde eu esperava'],
-  // Antes de "seletor": a janela sobreposta é caso próprio e tem ação clara
-  // para o operador — abrir a tela remota e fechar. Cair no genérico "a tela
-  // mudou de lugar" mandaria ele procurar seletor quebrado, que não é o caso.
-  [/janela aberta|overlay|intercepts pointer/i,
-    'tem uma janela aberta na tela que eu não consegui fechar'],
   [/seletornaoencontrado|selector|não encontrei o seletor/i, 'a tela mudou de lugar'],
   [/bloqueiodetectado|verifica|安全验证|滑块/i, 'apareceu um pedido de verificação na tela'],
   [/net::|econnrefused|enotfound|etimedout|socket hang up|network|navigation/i,
