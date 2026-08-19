@@ -180,6 +180,65 @@ class Chat {
    * lentidão, é a tela em outro estado — e falhar rápido avisa o operador
    * enquanto o cliente ainda está na conversa.
    */
+  /**
+   * Tem janela sobreposta engolindo os cliques?
+   *
+   * O que bloqueia é o `next-overlay-backdrop`: uma camada transparente sobre
+   * a tela inteira. O alvo continua "visible, enabled and stable" — por isso
+   * nenhuma das defesas anteriores pegava isto. O clique simplesmente não
+   * chega, e o braço bate no vidro até o teto de tempo.
+   */
+  async _temOverlay() {
+    for (const raiz of [this.pagina, this.frame]) {
+      for (const sel of SEL.overlay.backdrop) {
+        const els = await raiz.$$(sel).catch(() => []);
+        for (const el of els) {
+          if (await el.isVisible().catch(() => false)) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Fecha a janela sobreposta. Devolve true se a tela ficou livre.
+   *
+   * Escape primeiro porque fecha a maioria dos modais do design system da
+   * Alibaba sem precisar acertar botão nenhum — e, ao contrário de clicar num
+   * X adivinhado, não corre o risco de confirmar alguma coisa.
+   */
+  async _fecharOverlay() {
+    if (!(await this._temOverlay())) return true;
+
+    console.warn('[chat] janela sobreposta na tela — engolindo os cliques, tentando fechar');
+
+    await this.pagina.keyboard.press('Escape').catch(() => {});
+    await this.pagina.waitForTimeout(600);
+    if (!(await this._temOverlay())) {
+      console.log('[chat] fechou com Escape');
+      return true;
+    }
+
+    for (const raiz of [this.pagina, this.frame]) {
+      for (const sel of SEL.overlay.fechar) {
+        const el = await raiz.$(sel).catch(() => null);
+        if (!el || !(await el.isVisible().catch(() => false))) continue;
+        await el.click({ timeout: 3000 }).catch(() => {});
+        await this.pagina.waitForTimeout(600);
+        if (!(await this._temOverlay())) {
+          console.log(`[chat] fechou pelo botão (${sel})`);
+          return true;
+        }
+      }
+    }
+
+    // Não insiste além disto: clicar às cegas numa janela desconhecida pode
+    // confirmar algo que ninguém leu. Melhor falhar e chamar humano — o VNC
+    // existe para isso.
+    console.error('[chat] NÃO consegui fechar a janela sobreposta');
+    return false;
+  }
+
   async _clicar(el, { timeout = 8000 } = {}) {
     // SEM scrollIntoViewIfNeeded.
     //
@@ -192,7 +251,27 @@ class Chat {
     // até a mensagem ANTIGA. Era a tela subindo sozinha uns segundos depois da
     // foto — o sintoma parecia rolagem descontrolada e era o clique mirando no
     // lugar errado.
-    await el.click({ delay: humaniza.msCurto(), timeout });
+    try {
+      await el.click({ delay: humaniza.msCurto(), timeout });
+    } catch (err) {
+      // "intercepts pointer events" = tem janela sobreposta por cima. O alvo
+      // está certo e visível; o clique é que não chega. Fecha e tenta UMA vez.
+      //
+      // Este caso derrubou um atendimento real: o log dizia "element is
+      // visible, enabled and stable" e mesmo assim o clique falhava, o que
+      // manda quem lê para o lado errado — parece problema de seletor e é
+      // janela aberta na frente.
+      if (!/intercepts pointer events|overlay/i.test(err.message || '')) throw err;
+
+      const livre = await this._fecharOverlay();
+      if (!livre) {
+        throw new SeletorNaoEncontrado(
+          'tem uma janela aberta na tela do chat que não consegui fechar — ' +
+            'resolva pela tela remota e mande #liberar',
+        );
+      }
+      await el.click({ delay: humaniza.msCurto(), timeout });
+    }
   }
 
   /**
@@ -309,6 +388,14 @@ class Chat {
   async abrirConversa(titulo) {
     await this.prender();
     await this.checarBloqueio();
+
+    // Limpa a tela ANTES de tentar clicar.
+    //
+    // A Taobao abre janela sozinha — aviso, promoção, pesquisa — e ela fica
+    // ali entre um atendimento e outro. Descobrir isso só no erro do clique
+    // custa o teto de tempo inteiro do passo, e foi o que derrubou um envio
+    // real: o cliente mandou foto e usuário, e o print teve de ir na mão.
+    await this._fecharOverlay();
 
     const primeiro = await this._achar('conversaNaLista', { timeout: 12000 });
     await this._clicar(primeiro.el, { timeout: 10000 });

@@ -64,6 +64,24 @@
     "candidatos": [".message-item", ".item"]
   },
 
+  "overlay": {
+    "_o_que_e": "Modal/janela sobreposta do design system Next (Alibaba). O que trava não é a janela em si: é o `next-overlay-backdrop`, uma camada transparente por cima da tela inteira que ENGOLE o clique. O log de produção mostrou exatamente isso — 'element is visible, enabled and stable' seguido de 'subtree intercepts pointer events'. O elemento estava lá, visível e parado; o clique é que não chegava nele. Não é o diálogo 发送图片 (esse tem tratamento próprio em _cancelarDialogoImagem): aqui entra qualquer coisa que a Taobao abra sozinha — aviso, promoção, pesquisa de satisfação, sessão.",
+    "backdrop": [
+      ".next-overlay-backdrop",
+      "[class*='overlay-backdrop']",
+      ".next-overlay-wrapper.opened"
+    ],
+    "fechar": [
+      ".next-overlay-wrapper.opened .next-dialog-close",
+      ".next-overlay-wrapper.opened [class*='close']",
+      ".next-dialog-close",
+      "[class*='overlay'] [aria-label='Close']",
+      "[class*='overlay'] button:has-text('取消')",
+      "[class*='overlay'] button:has-text('关闭')",
+      "[class*='overlay'] button:has-text('知道了')"
+    ]
+  },
+
   "voltarAoFundo": {
     "_o_que_e": "Botão 回到底部 ('voltar ao fundo'), que a Taobao mostra SOZINHA quando a lista não está no fim. É o caminho nativo para o fundo e o que um humano clicaria — melhor que mexer em scrollTop, que dependia de adivinhar qual container rola e acabou rolando a página inteira. A presença dele já responde 'estou no fim?': se não aparece, a lista já está no fim. Se o seletor falhar, o chat.js cai na rolagem manual — errar aqui não trava nada.",
     "candidatos": [
