@@ -199,7 +199,7 @@ async function despachar(atendimento) {
     tipo: 'pedir_codigo',
     usuario: atendimento.usuario,
     imagemPath: atendimento.imagemPendente || null,
-    estado: cfg.modo === 'copiloto' ? 'aguardando_aprovacao' : 'pendente',
+    estado: modoAtual() === 'copiloto' ? 'aguardando_aprovacao' : 'pendente',
     agendadaPara: janela.estado().proximaAbertura.getTime(),
     tentativas: 0,
     ultimoErro: null,
@@ -209,7 +209,7 @@ async function despachar(atendimento) {
   atendimento.imagemPendente = null;
   persistAgora();
 
-  if (cfg.modo === 'copiloto') {
+  if (modoAtual() === 'copiloto') {
     await alertar(
       `📋 *Ponte — liberar envio*\n\n` +
         `Cliente: *${atendimento.nome}*\n` +
@@ -563,6 +563,17 @@ function operadorEmTeste(from) {
  * ninguém tiver usado o comando, ele é undefined e vale o BOT_AUTOREPLY — sem
  * isso, um deploy novo desfaria silenciosamente um "#bot off" dado às 22h.
  */
+/**
+ * Modo em vigor: 'copiloto' (tudo espera #ok) ou 'autopiloto' (sai sozinho).
+ *
+ * `dados.modo` (comando #auto) VENCE a variável de ambiente, pela mesma razão
+ * do #atender: mudar isso no painel exige deploy, e a decisão de parar de
+ * aprovar um a um costuma ser tomada no meio de um atendimento.
+ */
+function modoAtual() {
+  return dados.modo === 'autopiloto' || dados.modo === 'copiloto' ? dados.modo : cfg.modo;
+}
+
 function atendimentoLigado() {
   if (dados.botLigado === true || dados.botLigado === false) return dados.botLigado;
   // config RAIZ, não o da ponte: `cfg` aqui é ./config (ponte/config.js), que
@@ -572,6 +583,7 @@ function atendimentoLigado() {
 }
 
 module.exports = {
+  modoAtual,
   operadorEmTeste,
   atendimentoLigado,
   pedirCodigo,

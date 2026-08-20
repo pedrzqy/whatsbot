@@ -36,6 +36,7 @@ const AJUDA = [
   '*#pular* — encerra o atendimento atual e chama o próximo',
   '*#teste* — vira cliente por 30 min, para testar o fluxo do seu número',
   '*#atender* — mostra se o atendimento está no ar · *#atender on* / *#atender off*',
+  '*#auto on* — envio sai sem #ok · *#auto off* volta a pedir aprovação',
 ].join('\n');
 
 /** Quanto tempo o operador fica valendo como cliente depois do #teste. */
@@ -47,7 +48,7 @@ const min = (ms) => Math.round(ms / 60000);
 function ehComando(from, texto) {
   if (!cfg.ativa || !cfg.operador.numero) return false;
   if (from !== cfg.operador.numero) return false;
-  return /^#(fila|liberar|ok|enviar|editar|nao|não|pular|ajuda|sms|taobao|teste|limpar|destravar|atender)\b/i.test(
+  return /^#(fila|liberar|ok|enviar|editar|nao|não|pular|ajuda|sms|taobao|teste|limpar|destravar|atender|auto)\b/i.test(
     String(texto || '').trim(),
   );
 }
@@ -113,6 +114,43 @@ async function executar(texto) {
       '_Os #comandos continuam funcionando e o limite de 5 códigos/hora não ' +
       'vale para você agora. Nada sai sem #ok. ' +
       'Mande #teste de novo para desligar antes da hora._'
+    );
+  }
+
+  // ── #auto [on|off] ─────────────────────────────────────
+  //
+  // Liga o autopiloto: o envio sai assim que o cliente manda foto e usuário,
+  // sem esperar #ok. Persistido e vence a variável de ambiente, igual ao
+  // #atender — trocar isso no painel exigiria deploy, e a decisão de parar (ou
+  // voltar) a aprovar um a um costuma ser tomada no meio de um atendimento.
+  if (cmd === 'auto') {
+    const arg = (id || '').toLowerCase();
+
+    if (/^(on|liga|ligar|sim)$/.test(arg)) {
+      dados.modo = 'autopiloto';
+      persistAgora();
+      return (
+        '⚡ *Autopiloto LIGADO.*\n\n' +
+        'O envio sai sozinho assim que o cliente manda a foto e o usuário. ' +
+        'Você não precisa mais dar *#ok*.\n\n' +
+        '_Para voltar a aprovar um a um: *#auto off*._'
+      );
+    }
+
+    if (/^(off|desliga|desligar|nao|não)$/.test(arg)) {
+      dados.modo = 'copiloto';
+      persistAgora();
+      return (
+        '🎛️ *Copiloto LIGADO.*\n\n' +
+        'Todo envio volta a esperar seu *#ok* antes de sair.\n\n' +
+        '_Para automatizar de novo: *#auto on*._'
+      );
+    }
+
+    const m = ponte.modoAtual();
+    return (
+      `${m === 'autopiloto' ? '⚡ *Autopiloto* — envio sai sozinho' : '🎛️ *Copiloto* — cada envio espera seu #ok'}\n\n` +
+      `Use *#auto on* ou *#auto off* para mudar agora, sem deploy.`
     );
   }
 
@@ -186,7 +224,7 @@ async function executar(texto) {
     const lim = limites.painel();
 
     const linhas = [
-      `*Códigos* — modo ${cfg.modo}`,
+      `*Códigos* — modo ${ponte.modoAtual()}`,
       // Motivo NEUTRO e o comando junto. O motivo cru é o erro inteiro com
       // Call log — o limparAlerta truncava na saída, então o operador via um
       // pedaço de log sem começo nem fim e sem dizer como sair. Congelado nada

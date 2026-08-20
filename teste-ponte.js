@@ -630,6 +630,36 @@ const OP = '5541999999999';
   t('e avisa TODOS os clientes', avisados.length === 3, `avisou ${avisados.length}`);
   t('e diz quantos foram', /3 cliente/i.test(limpou), limpou.split('\n')[2] || '');
 
+  // ── Autopiloto (#auto) ─────────────────────────────────────
+  bloco('#auto tira o #ok do caminho');
+  const modoAnterior = estadoPonte.dados.modo;
+
+  await operador.executar('#auto on');
+  t('#auto on liga o autopiloto', ponteMod.modoAtual() === 'autopiloto');
+
+  estadoPonte.dados.atendimentos = [];
+  estadoPonte.dados.tarefas = [];
+  const noAuto = await ponteMod.pedirCodigo('5511922223333', 'Cli', 'autotest1', '/tmp/f.jpg');
+  const tarefaAuto = estadoPonte.dados.tarefas.find((x) => x.usuario === 'autotest1');
+
+  // O ponto todo: a tarefa nasce PENDENTE, não aguardando_aprovacao.
+  t('a tarefa já nasce liberada', tarefaAuto?.estado === 'pendente', tarefaAuto?.estado);
+  t('e o cliente não vê pedido de confirmação',
+    !/#ok/.test(noAuto.mensagem), noAuto.mensagem);
+  t('a promessa sai na hora, porque agora é verdade',
+    /pegando seu código/i.test(noAuto.mensagem), noAuto.mensagem);
+
+  await operador.executar('#auto off');
+  t('#auto off volta ao copiloto', ponteMod.modoAtual() === 'copiloto');
+
+  estadoPonte.dados.atendimentos = [];
+  estadoPonte.dados.tarefas = [];
+  await ponteMod.pedirCodigo('5511922224444', 'Cli2', 'autotest2', '/tmp/f.jpg');
+  const tarefaCop = estadoPonte.dados.tarefas.find((x) => x.usuario === 'autotest2');
+  t('e a tarefa volta a esperar aprovação', tarefaCop?.estado === 'aguardando_aprovacao', tarefaCop?.estado);
+
+  estadoPonte.dados.modo = modoAnterior;
+
   // ── Interruptor do atendimento (#atender) ─────────────────
   // Precisa mudar NA HORA, sem deploy: é o que serve quando o bot começa a
   // responder errado com cliente na linha às 22h de sábado.

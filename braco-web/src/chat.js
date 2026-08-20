@@ -133,6 +133,16 @@ class Chat {
         }
         achadosOcultos += await this.frame.locator(sel).count().catch(() => 0);
       }
+
+      // Achou a reserva e mais nada limpo? USA AGORA, sem esperar o timeout.
+      //
+      // A espera existe para dar tempo de o elemento APARECER. A reserva já
+      // está na tela, então não há o que esperar — e esperar custava caro: no
+      // DOM deste chat o closest() recusa todos os candidatos SEMPRE, então
+      // toda busca de campo gastava os 8s inteiros. Somados ao convert (10s) e
+      // às pausas, estouravam o teto de 30s do Ctrl+V e a foto não saía.
+      if (reserva) break;
+
       await this.pagina.waitForTimeout(300);
     }
 
