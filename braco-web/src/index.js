@@ -91,6 +91,9 @@ let smsPedidoEm = 0;
 // Só loga quando MUDA. O laço agora gira a cada 6s enquanto alguém espera
 // resposta, e um "sessão ok" por volta afogaria os logs que interessam.
 let sessaoLogada = null;
+// A tela pareceu pedir código no ciclo anterior? Só pede o SMS ao operador
+// quando aparece DUAS vezes seguidas — ver garantirLogin().
+let smsVistoAntes = false;
 // Mesma ideia do sessaoLogada: o motivo do congelamento carrega o erro inteiro,
 // e o laço volta a cada 15s — logar sempre afogaria o painel.
 let motivoCongeladoLogado = null;
@@ -121,7 +124,24 @@ async function garantirLogin(pagina, chat) {
   // dono da conta; o operador recebe e devolve pelo WhatsApp. O braço só
   // transporta, porque ninguém consegue clicar num navegador dentro de um
   // container.
-  if (await chat.emVerificacaoSms()) {
+  // Duas leituras seguidas antes de pedir o código.
+  //
+  // Uma só não basta: enquanto a página recarrega — e ela recarrega sempre que
+  // o Chrome reabre — a tela passa por estados intermediários que casam com a
+  // detecção. Foi assim que o braço pediu código de verificação logo depois de
+  // a aba ser reaberta, com a sessão perfeitamente válida.
+  //
+  // O custo de esperar mais um ciclo é pequeno; o de pedir SMS à toa não é:
+  // pedido de SMS repetido é sinal de abuso somado à conta da Taobao.
+  const viuSms = await chat.emVerificacaoSms();
+  if (viuSms && !smsVistoAntes) {
+    smsVistoAntes = true;
+    console.warn('[braço] tela parece pedir código — confirmando no próximo ciclo antes de te chamar');
+    return false;
+  }
+  if (!viuSms) smsVistoAntes = false;
+
+  if (viuSms) {
     // Código que o operador já mandou?
     const { data: st } = await api.get('/estado').catch(() => ({ data: {} }));
     if (st.smsTaobao) {
@@ -375,9 +395,63 @@ async function main() {
 
   console.log('[braço] long-poll ligado (espera 25s ocioso · 6s com cliente aguardando)');
 
+  /**
+   * A página morreu? Reabre o Chrome e volta ao chat.
+   *
+   * A Taobao mata a aba sozinha depois de horas — ela para de receber mensagem
+   * e vira uma casca. Quando isso acontece (ou quando alguém fecha a aba pelo
+   * VNC para destravar), TODA chamada do Playwright passa a responder "Target
+   * page, context or browser has been closed".
+   *
+   * Sem isto o braço não percebia e girava para sempre no mesmo erro: o log
+   * enchia com a mesma linha, o print falhava, e a sessão parecia deslogada —
+   * daí o pedido de código de verificação que ninguém tinha pedido, porque
+   * `prender()` falhava e o fluxo caía na checagem de SMS.
+   *
+   * O custo real: em 20/08 o fornecedor respondeu o código 401316 e ninguém
+   * leu, porque o braço estava preso numa página que não existia mais.
+   */
+  async function reabrirSeMorreu(err) {
+    const morreu =
+      /target page, context or browser has been closed|browser has been closed|target closed/i.test(
+        err?.message || '',
+      ) || pagina.isClosed?.();
+    if (!morreu) return false;
+
+    console.warn('[braço] a página morreu — reabrindo o Chrome');
+    await evento('warn', 'pagina_morta', 'reabrindo o navegador').catch(() => {});
+
+    try {
+      await contexto.close().catch(() => {});
+      ({ contexto, pagina } = await abrir());
+      chat.pagina = pagina;
+      chat.frame = null; // o iframe antigo não existe mais
+      await pagina.goto(cfg.chatUrl, { waitUntil: 'domcontentloaded' });
+      conversaAberta = false;
+      sessaoLogada = null;
+      console.log('[braço] Chrome reaberto e chat carregado');
+      return true;
+    } catch (e) {
+      // Não deu para reabrir: sair é melhor que girar. O container reinicia e
+      // volta limpo — e o volume do perfil mantém a sessão da Taobao.
+      console.error(`[fatal] não consegui reabrir o Chrome: ${e.message}`);
+      process.exit(5);
+    }
+  }
+
   while (rodando) {
     const inicioCiclo = Date.now();
     try {
+      // Confere a página ANTES de agir, não só quando algo estoura.
+      //
+      // garantirLogin() e alertarComPrint() capturam o próprio erro e seguem —
+      // por isso o log repetia "falha ao mandar print" e "sessão NÃO ok" para
+      // sempre sem nunca chegar no catch lá embaixo. Checar aqui é o que faz o
+      // braço voltar sozinho depois que a Taobao mata a aba.
+      if (pagina.isClosed?.()) {
+        await reabrirSeMorreu(new Error('target page closed'));
+      }
+
       const { data: st } = await api.get('/estado');
 
       if (!st.podeAgir) {
@@ -499,6 +573,12 @@ async function main() {
       // Qualquer erro pode ter deixado a tela noutro estado — força reabrir
       // a conversa no próximo ciclo em vez de escrever achando que está lá.
       conversaAberta = false;
+
+      // PRIMEIRO: a página ainda existe? Se morreu, nenhuma das classificações
+      // abaixo faz sentido — todas iam tratar como bloqueio, seletor sumido ou
+      // erro inesperado, e mandar dormir para tentar de novo na mesma página
+      // morta. É assim que o laço nunca saía do lugar.
+      if (await reabrirSeMorreu(err)) continue;
 
       if (err instanceof BloqueioDetectado) {
         // NÃO tentamos resolver. Manda o print junto: sem ver a tela, o
