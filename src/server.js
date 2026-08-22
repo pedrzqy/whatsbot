@@ -6,6 +6,7 @@ const handlers = require('./handlers');
 const recovery = require('./recovery');
 const community = require('./community');
 const evolution = require('./evolution');
+const sender = require('./sender');
 const ponte = require('./ponte');
 const bracoRouter = require('./ponte/braco');
 
@@ -31,7 +32,23 @@ app.post('/webhooks/evolution', async (req, res) => {
     // A Evolution manda diferentes formatos; tratamos o messages.upsert.
     const data = body.data || body;
     const key = data.key || {};
-    if (key.fromMe) return; // ignora mensagens enviadas pelo próprio bot
+    // Mensagem saindo do NOSSO número: ou foi o bot, ou foi o operador
+    // digitando no celular. Só a segunda interessa — é quando o humano assume
+    // a conversa e o bot precisa sair da frente, em vez de continuar
+    // respondendo por cima dele.
+    if (key.fromMe) {
+      const jid = key.remoteJid || '';
+      const txt =
+        data.message?.conversation ||
+        data.message?.extendedTextMessage?.text ||
+        '';
+      if (txt && !/@g\.us$|@broadcast$|@newsletter$/i.test(jid) && !sender.foiDoBot(txt)) {
+        await handlers.onOperadorDigitou({ para: jid, texto: txt }).catch((err) => {
+          console.error('[webhooks/evolution] onOperadorDigitou:', err.message);
+        });
+      }
+      return;
+    }
 
     // Ignora status/transmissões e newsletters.
     const remoteJid = key.remoteJid || '';

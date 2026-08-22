@@ -551,6 +551,39 @@ function respostaDePedido(r, { codigo }) {
 }
 
 /**
+ * O operador digitou na conversa de um cliente — o humano assumiu.
+ *
+ * Pausa o bot e avisa o cliente UMA vez. Sem isto o bot continuava
+ * respondendo por cima do atendimento humano: o cliente escrevia, recebia o
+ * menu de 8 opções e a resposta do operador ao mesmo tempo, e não sabia com
+ * quem estava falando.
+ *
+ * O aviso sai só na PRIMEIRA mensagem da pausa. Repetir a cada linha que o
+ * operador digita seria pior que o problema — ele costuma mandar três, quatro
+ * mensagens seguidas.
+ */
+async function onOperadorDigitou({ para, texto }) {
+  const from = String(para || '').replace('@s.whatsapp.net', '');
+  if (!from) return;
+
+  // O operador falando com ele mesmo (os #comandos, os alertas) não é
+  // atendimento de ninguém.
+  if (from === require('./ponte/config').operador.numero) return;
+
+  const contato = store.getContact(from);
+  if (contato?.paused) return; // já assumido: não avisa de novo
+
+  store.saveContact(from, { paused: true, menuNode: null, modoIA: false, aguardandoJogo: false });
+  console.log(`[handoff] ${from} -> operador assumiu (digitou na conversa)`);
+
+  await sender.send(
+    from,
+    '👤 Nosso *suporte* entrou no chat e vai continuar com você por aqui.\n\n' +
+      '_Quando quiser voltar ao menu, é só digitar *#inicio*._',
+  );
+}
+
+/**
  * @param {object} event  Payload da Nerix { event, created_at, data }
  */
 async function onNerixEvent(event) {
@@ -575,4 +608,4 @@ async function onNerixEvent(event) {
 // extrairPedido e respostaDePedido exportados para teste: são eles que
 // substituíram a IA no caminho de consulta, e um erro ali entrega dado de
 // pedido errado ou deixa o cliente sem resposta.
-module.exports = { onIncomingMessage, onNerixEvent, extrairPedido, respostaDePedido };
+module.exports = { onIncomingMessage, onNerixEvent, onOperadorDigitou, extrairPedido, respostaDePedido };

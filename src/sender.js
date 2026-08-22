@@ -49,10 +49,50 @@ function typingDurationMs(text) {
  * @returns {Promise<boolean>} resolve quando a mensagem realmente sai
  */
 function send(number, text, opts = {}) {
+  const normalizado = normalizeWhatsApp(text);
+  // Registra ANTES de enfileirar: o webhook do próprio envio pode voltar antes
+  // de a promessa resolver, e aí o bot leria a própria mensagem como se fosse
+  // o operador digitando.
+  registrarEnvioDoBot(normalizado);
   return new Promise((resolve, reject) => {
-    queue.push({ number, text: normalizeWhatsApp(text), opts, resolve, reject });
+    queue.push({ number, text: normalizado, opts, resolve, reject });
     if (!running) run();
   });
+}
+
+// ── Quem digitou: o bot ou uma pessoa? ──────────────────────────────
+//
+// Toda mensagem que sai do nosso número volta no webhook com fromMe=true, e
+// pelo evento não dá para saber se foi o bot ou o operador digitando no
+// celular. A diferença importa: quando é gente, o bot precisa sair da frente.
+//
+// Guardamos o TEXTO do que o bot manda, por pouco tempo. Comparar texto basta
+// aqui — a chance de o operador digitar, no mesmo minuto, exatamente a frase
+// que o bot acabou de enviar é nula, e o pior caso desse erro seria não pausar
+// uma vez.
+//
+// Guardar o id da mensagem seria mais exato, mas send() devolve boolean e o id
+// só existe dentro do cliente da Evolution: mudança bem maior para o mesmo
+// resultado prático.
+const JANELA_ECO_MS = 120_000;
+const enviadosPeloBot = new Map();
+
+const chaveEco = (texto) => String(texto || '').trim().slice(0, 160);
+
+function registrarEnvioDoBot(texto) {
+  const agora = Date.now();
+  enviadosPeloBot.set(chaveEco(texto), agora);
+  // Limpa o que envelheceu: sem isto o Map cresce para sempre num processo que
+  // fica semanas no ar.
+  for (const [k, t] of enviadosPeloBot) {
+    if (agora - t > JANELA_ECO_MS) enviadosPeloBot.delete(k);
+  }
+}
+
+/** Este texto foi o próprio bot que mandou agora há pouco? */
+function foiDoBot(texto) {
+  const t = enviadosPeloBot.get(chaveEco(texto));
+  return Boolean(t && Date.now() - t <= JANELA_ECO_MS);
 }
 
 async function run() {
@@ -121,4 +161,4 @@ async function processJob(job) {
   lastContactSendAt.set(number, t);
 }
 
-module.exports = { send, typingDurationMs };
+module.exports = { send, typingDurationMs, registrarEnvioDoBot, foiDoBot };

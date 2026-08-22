@@ -328,6 +328,43 @@ nerix.checkPayment = async (codigo) => {
 
   senderMod.send = sendOriginal;
 
+  // ── Operador assume a conversa ──────────────────────────────
+  bloco('operador digitando pausa o bot');
+
+  const CLI_HO = '5511988887777';
+  const enviadasHO = [];
+  const sendAntes = senderMod.send;
+  senderMod.send = async (para, texto) => {
+    senderMod.registrarEnvioDoBot(texto);
+    enviadasHO.push(String(texto));
+  };
+
+  storeMod.saveContact(CLI_HO, { greetedAt: Date.now(), lastSeen: Date.now(), paused: false });
+  await handlers.onOperadorDigitou({ para: `${CLI_HO}@s.whatsapp.net`, texto: 'oi, aqui é o Pedro' });
+
+  t('pausa o contato', storeMod.getContact(CLI_HO)?.paused === true);
+  t('e avisa o cliente uma vez', /suporte/i.test(enviadasHO.join('')), enviadasHO[0]?.slice(0, 40));
+  t('dizendo como voltar', /#inicio/.test(enviadasHO.join('')));
+
+  // O operador manda três, quatro mensagens seguidas. Avisar em cada uma seria
+  // pior que o problema.
+  enviadasHO.length = 0;
+  await handlers.onOperadorDigitou({ para: `${CLI_HO}@s.whatsapp.net`, texto: 'segunda mensagem' });
+  t('não repete o aviso nas seguintes', enviadasHO.length === 0, enviadasHO.join(''));
+
+  // O operador falando consigo mesmo (os #comandos) não é atendimento.
+  enviadasHO.length = 0;
+  await handlers.onOperadorDigitou({ para: '5541999999999@s.whatsapp.net', texto: '#fila' });
+  t('ignora o próprio número do operador', enviadasHO.length === 0);
+
+  // O ECO: o que o bot manda volta no webhook como fromMe. Se isso contasse
+  // como "operador digitou", toda resposta do bot pausaria o próprio bot.
+  senderMod.registrarEnvioDoBot('Foto recebida ✅');
+  t('reconhece o eco do próprio bot', senderMod.foiDoBot('Foto recebida ✅') === true);
+  t('e não confunde com texto de gente', senderMod.foiDoBot('oi, tudo bem?') === false);
+
+  senderMod.send = sendAntes;
+
   // ── Pedir jogo ──────────────────────────────────────────────
   bloco('pedir jogo');
   const nerixMod = require('./src/nerix');
