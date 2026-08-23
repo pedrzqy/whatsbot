@@ -37,6 +37,7 @@ const AJUDA = [
   '*#teste* — vira cliente por 30 min, para testar o fluxo do seu número',
   '*#atender* — mostra se o atendimento está no ar · *#atender on* / *#atender off*',
   '*#auto on* — envio sai sem #ok · *#auto off* volta a pedir aprovação',
+  '*#recarregar* — recarrega a tela e reabre a conversa (para teste)',
 ].join('\n');
 
 /** Quanto tempo o operador fica valendo como cliente depois do #teste. */
@@ -48,7 +49,7 @@ const min = (ms) => Math.round(ms / 60000);
 function ehComando(from, texto) {
   if (!cfg.ativa || !cfg.operador.numero) return false;
   if (from !== cfg.operador.numero) return false;
-  return /^#(fila|liberar|ok|enviar|editar|nao|não|pular|ajuda|sms|taobao|teste|limpar|destravar|atender|auto)\b/i.test(
+  return /^#(fila|liberar|ok|enviar|editar|nao|não|pular|ajuda|sms|taobao|teste|limpar|destravar|atender|auto|recarregar)\b/i.test(
     String(texto || '').trim(),
   );
 }
@@ -114,6 +115,29 @@ async function executar(texto) {
       '_Os #comandos continuam funcionando e o limite de 5 códigos/hora não ' +
       'vale para você agora. Nada sai sem #ok. ' +
       'Mande #teste de novo para desligar antes da hora._'
+    );
+  }
+
+  // ── #recarregar ────────────────────────────────────────
+  //
+  // Força a recarga da tela agora, em vez de esperar a periódica. Existe para
+  // teste: sem isso, conferir se a recarga funciona significaria esperar até
+  // 24h ou mexer no código.
+  //
+  // Não recarrega na hora nem aqui nem lá: só marca o pedido. Quem executa é o
+  // outro serviço, no ciclo dele, e SÓ quando não há ninguém esperando
+  // resposta — recarregar no meio de um envio perderia a marca d'água e o
+  // cliente ficaria sem o código.
+  if (cmd === 'recarregar') {
+    dados.recarregarPedido = true;
+    persistAgora();
+    const s = fila.situacao();
+    return (
+      '🔄 *Recarga pedida.*\n\n' +
+      (s.ativo
+        ? `Tem um atendimento em curso (*${s.ativo.cliente}*), então a recarga acontece assim que ele terminar.`
+        : 'A tela recarrega no próximo ciclo, em até ~30s.') +
+      '\n\n_Ela abre o site, entra no chat e reabre a conversa._'
     );
   }
 

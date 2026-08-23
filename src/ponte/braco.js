@@ -67,7 +67,16 @@ router.get('/estado', (_req, res) => {
     temAtendimentoAtivo: Boolean(fila.ativo()),
     // Código SMS que o operador mandou com #taobao, aguardando o braço usar.
     smsTaobao: dados.smsTaobao?.codigo || null,
+    // O operador pediu para recarregar a tela agora (#recarregar).
+    recarregarPedido: Boolean(dados.recarregarPedido),
   });
+});
+
+/** O braço avisa que recarregou — limpa o pedido para não repetir em laço. */
+router.post('/recarga-feita', (_req, res) => {
+  dados.recarregarPedido = false;
+  persist();
+  res.json({ ok: true });
 });
 
 /** O braço avisa que consumiu o código — evita reusar um já gasto. */

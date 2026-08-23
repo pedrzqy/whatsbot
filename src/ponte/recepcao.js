@@ -232,7 +232,14 @@ function avaliar(from, texto, imagem) {
     // Fornecedor offline: avisa ANTES de o cliente juntar print e login, em vez
     // de deixá-lo cumprir as duas etapas para só então descobrir que vai esperar.
     const j = janela.estado();
-    const msg = j.aberta ? MSG_PEDE_FOTO : `${MSG_PEDE_FOTO}\n\n_${j.avisoCliente}_`;
+    // Com a janela ABERTA vai o horário da pausa junto: o cliente que pede
+    // 14h50 tem 10 minutos para mandar foto e usuário, e saber disso antes é
+    // melhor que descobrir quando o envio já não sai. Com a janela FECHADA o
+    // avisoCliente já diz a hora de voltar, então repetir seria redundância.
+    const pausa = janela.avisoDaPausa();
+    const msg = j.aberta
+      ? MSG_PEDE_FOTO + (pausa ? `\n\n_${pausa}_` : '')
+      : `${MSG_PEDE_FOTO}\n\n_${j.avisoCliente}_`;
     return responder('foto', msg, { usuario: null, imagem: null, etapa: 'foto' });
   }
 

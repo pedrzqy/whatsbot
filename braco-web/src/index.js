@@ -94,6 +94,19 @@ let sessaoLogada = null;
 // A tela pareceu pedir código no ciclo anterior? Só pede o SMS ao operador
 // quando aparece DUAS vezes seguidas — ver garantirLogin().
 let smsVistoAntes = false;
+
+/**
+ * Quando recarregar a tela de novo — entre 12h e 24h a partir de agora.
+ *
+ * A faixa é larga de propósito. Recarregar sempre no mesmo horário é padrão
+ * de máquina: uma conta que atualiza a página às 03:00 em ponto, todo dia,
+ * se distingue de gente com facilidade. Sorteando dentro de 12 horas, cada
+ * recarga cai numa hora diferente e a sequência não forma desenho.
+ */
+const sortearProximaRecarga = () =>
+  Date.now() + 12 * 3600_000 + Math.floor(Math.random() * 12 * 3600_000);
+
+let proximaRecarga = sortearProximaRecarga();
 // Mesma ideia do sessaoLogada: o motivo do congelamento carrega o erro inteiro,
 // e o laço volta a cada 15s — logar sempre afogaria o painel.
 let motivoCongeladoLogado = null;
@@ -493,6 +506,38 @@ async function main() {
         await dormir(180_000);
         await pagina.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
         continue;
+      }
+
+      // ── Recarga da tela ──────────────────────────────────────
+      //
+      // A aba fica dias aberta e a Taobao acaba deixando ela "morta": para de
+      // receber mensagem sem fechar nem dar erro. Recarregar de tempos em
+      // tempos é o que evita chegar nesse estado — e é o que uma pessoa faz
+      // naturalmente ao voltar ao computador.
+      //
+      // SÓ quando ninguém está esperando resposta. Recarregar no meio de um
+      // atendimento jogaria fora a marca d'água, e sem ela o braço não sabe
+      // mais o que é resposta nova — o cliente ficaria sem o código.
+      const pedida = Boolean(st.recarregarPedido);
+      const naHora = Date.now() >= proximaRecarga;
+      if ((pedida || naHora) && !marcaAtual) {
+        console.log(`[braço] recarregando a tela (${pedida ? 'pedido pelo operador' : 'periódica'})`);
+        try {
+          await pagina.goto(cfg.chatUrl, { waitUntil: 'domcontentloaded' });
+          await dormir(humaniza.ms(2500, 5000)); // deixa o app montar
+          chat.frame = null;
+          conversaAberta = false;
+          await chat.abrirConversa(titulo);
+          conversaAberta = true;
+          console.log('[braço] tela recarregada e conversa reaberta');
+          await evento('info', 'recarga', pedida ? 'a pedido do operador' : 'periódica');
+        } catch (err) {
+          console.warn(`[braço] recarga falhou: ${err.message}`);
+          conversaAberta = false;
+        }
+
+        if (pedida) await api.post('/recarga-feita', {}).catch(() => {});
+        proximaRecarga = sortearProximaRecarga();
       }
 
       // Mantém a conversa do fornecedor ABERTA, mesmo sem tarefa.

@@ -117,4 +117,26 @@ function resumo(agora = new Date()) {
   return `🌙 offline — volta em ${h ? h + 'h' : ''}${m ? doisDigitos(m) : ''}`.trim();
 }
 
-module.exports = { estado, resumo, intervalos };
+/**
+ * A pausa do dia, em texto, para avisar o cliente ANTES de ele pedir.
+ *
+ * Sai do próprio horário configurado, não de string fixa: com dois lugares
+ * dizendo a mesma coisa, um deles fica velho quando a janela muda — e aí o
+ * cliente lê um horário e o sistema opera em outro.
+ *
+ * Devolve null quando não há pausa no meio do dia (janela contínua), para o
+ * chamador simplesmente não mostrar nada.
+ */
+function avisoDaPausa() {
+  const lista = intervalos();
+  if (lista.length < 2) return null;
+
+  // O buraco é entre o fim de um intervalo e o começo do seguinte.
+  const fim = lista[0].ate;
+  const volta = lista[1].de;
+  // `fim` é inclusive (15:00 ainda está dentro), mas dizer "para às 15h01"
+  // para o cliente é ruído. O minuto de diferença não muda nada para ele.
+  return `⏰ O sistema de código para às *${comoHora(fim)}* e volta às *${comoHora(volta)}*.`;
+}
+
+module.exports = { estado, resumo, intervalos, avisoDaPausa };

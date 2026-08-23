@@ -31,7 +31,10 @@ module.exports = {
       // Compatibilidade com a config antiga de intervalo único.
       (process.env.PONTE_SELLER_INICIO && process.env.PONTE_SELLER_FIM
         ? `${process.env.PONTE_SELLER_INICIO}-${process.env.PONTE_SELLER_FIM}`
-        : '00:00-15:30,17:15-23:59'),
+        // Para às 15:00 e volta às 17:30 (horário observado do fornecedor).
+        // ATENÇÃO: se PONTE_SELLER_JANELAS estiver definida no Environment do
+        // serviço, ela VENCE isto — mudar aqui não basta.
+        : '00:00-15:00,17:30-23:59'),
   },
 
   fila: {
