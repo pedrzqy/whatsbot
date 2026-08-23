@@ -267,6 +267,32 @@ async function handleMessage(msg) {
   // conversa normal de vendas não cai aqui. ATENÇÃO: neste caminho o bot
   // RESPONDE ao cliente mesmo com autoreply desligado — é o único jeito de
   // pedir a metade que falta e de entregar o código depois.
+  // Em atendimento humano, a ponte NÃO toma a conversa de volta.
+  //
+  // Este bloco roda antes do check de `paused` lá embaixo — de propósito, para
+  // furar o autoreply desligado. Só que ele furava a PAUSA também: o cliente
+  // estava falando com o operador, escrevia "preciso do código", e o bot
+  // atravessava a conversa pedindo foto e usuário.
+  //
+  // Quem decide é o humano que já está lá: o pedido vira alerta com o número
+  // do cliente, e o operador toca do jeito que fizer sentido.
+  // `#inicio` e as outras palavras de recomeço passam direto: é a ÚNICA saída
+  // que o cliente tem da pausa, e está escrita no aviso que ele recebe.
+  // Interceptar aqui prenderia ele em silêncio para sempre.
+  const pausadoAgora = store.getContact(from)?.paused && !RESUME.has(lower);
+  if (pausadoAgora && ponte.ativa()) {
+    const r = recepcao.avaliar(from, trimmed, imagem);
+    if (r.acao === 'responder' || r.acao === 'pedir') {
+      const nome = store.getContact(from)?.name || pushName || 'cliente';
+      await ponte.alertar(
+        `Cliente: *${nome}* · ${from.replace(/@.*/, '')}\n🔑 Pediu código, mas você está no chat com ele.`,
+      );
+      console.log(`[ponte] ${from} pediu código durante atendimento humano — só avisei`);
+    }
+    store.saveContact(from, { lastSeen: Date.now(), name: pushName || store.getContact(from)?.name });
+    return;
+  }
+
   if (ponte.ativa()) {
     const r = recepcao.avaliar(from, trimmed, imagem);
 
@@ -319,7 +345,18 @@ async function handleMessage(msg) {
   const nameFields = { lastSeen: now, name: pushName || contact?.name };
 
   // ─── 1) Boas-vindas / primeiro contato (convida a perguntar, sem menu) ───
-  if (welcome.shouldWelcome(contact)) {
+  //
+  // NÃO sauda quem está em atendimento humano.
+  //
+  // O shouldWelcome dispara quando o cliente fica quieto mais que a janela de
+  // sessão e volta — e o bloco abaixo zerava `paused`. Era isso que fazia o bot
+  // "voltar sozinho depois de um tempo" no meio de um atendimento do operador:
+  // o cliente demorava para responder, voltava, e levava boas-vindas + menu de
+  // um bot que devia estar calado.
+  //
+  // Quem tira da pausa é o cliente com #inicio (está escrito no aviso que ele
+  // recebe) ou o operador. Silêncio não expira sozinho.
+  if (welcome.shouldWelcome(contact) && !contact?.paused) {
     ai.clearHistory(from);
     store.saveContact(from, {
       firstSeen: contact?.firstSeen || now,

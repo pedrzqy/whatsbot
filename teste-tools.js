@@ -363,6 +363,48 @@ nerix.checkPayment = async (codigo) => {
   t('reconhece o eco do próprio bot', senderMod.foiDoBot('Foto recebida ✅') === true);
   t('e não confunde com texto de gente', senderMod.foiDoBot('oi, tudo bem?') === false);
 
+  // ── A pausa não pode vazar ──────────────────────────────────
+  // Dois furos reais: o bot "voltava sozinho depois de um tempo" (as
+  // boas-vindas zeravam o paused quando o cliente sumia e voltava) e
+  // "preciso do código" atravessava o atendimento humano (a recepção da ponte
+  // roda antes do check de pausa, para furar o autoreply desligado — e furava
+  // a pausa junto).
+  bloco('pausa não vaza');
+
+  const CLI_P = '5511900002222';
+  const recebidas = [];
+  senderMod.send = async (para, texto) => {
+    senderMod.registrarEnvioDoBot(texto);
+    recebidas.push({ para, texto: String(texto) });
+  };
+  const doCliente = () => recebidas.filter((r) => r.para === CLI_P);
+
+  // Pausado e sumido há 3 dias: passa da janela de sessão do welcome.
+  storeMod.saveContact(CLI_P, {
+    greetedAt: Date.now() - 3 * 864e5,
+    lastSeen: Date.now() - 3 * 864e5,
+    paused: true,
+  });
+
+  recebidas.length = 0;
+  await handlers.onIncomingMessage({ from: CLI_P, text: 'oi', pushName: 'C' });
+  t('cliente que volta depois de dias segue em silêncio', doCliente().length === 0,
+    doCliente().map((r) => r.texto.slice(0, 30)).join(' | '));
+  t('e continua pausado', storeMod.getContact(CLI_P)?.paused === true);
+
+  recebidas.length = 0;
+  await handlers.onIncomingMessage({ from: CLI_P, text: 'preciso do codigo', pushName: 'C' });
+  t('"preciso do código" não atravessa o atendimento', doCliente().length === 0,
+    doCliente().map((r) => r.texto.slice(0, 30)).join(' | '));
+  t('mas o operador é avisado', recebidas.some((r) => r.para !== CLI_P));
+
+  // #inicio é a ÚNICA saída, e está escrita no aviso que o cliente recebe.
+  // Sem esta exceção o bloco acima o prenderia em silêncio para sempre.
+  recebidas.length = 0;
+  await handlers.onIncomingMessage({ from: CLI_P, text: '#inicio', pushName: 'C' });
+  t('#inicio ainda tira da pausa', storeMod.getContact(CLI_P)?.paused === false);
+  t('e responde ao cliente', doCliente().length > 0);
+
   senderMod.send = sendAntes;
 
   // ── Pedir jogo ──────────────────────────────────────────────
