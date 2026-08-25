@@ -106,6 +106,32 @@ else
   echo "[entry] VNC desligado (defina VNC_PASSWORD para habilitar)"
 fi
 
+# ── Lock do perfil do Chrome ────────────────────────────────────────
+#
+# Container morto sem SIGTERM (OOM, kill pelo painel, VPS reiniciando) deixa o
+# Chrome sem fechar, e o perfil fica com SingletonLock apontando para um PID
+# que não existe mais. Na volta o Playwright não consegue abrir o navegador, o
+# braço sai com erro, o container reinicia e falha de novo — EM LAÇO, para
+# sempre, até alguém entrar no container na mão. É a única falha aqui que não
+# se cura sozinha com o tempo.
+#
+# Apagar é seguro: são arquivos de controle de instância única, recriados a
+# cada abertura. Cookies, localStorage e os tokens de device da Taobao moram
+# noutros arquivos e não são tocados.
+PERFIL=/app/perfil-chrome
+if [ -d "${PERFIL}" ]; then
+  for lock in SingletonLock SingletonCookie SingletonSocket; do
+    alvo="${PERFIL}/${lock}"
+    # -e E -L: SingletonLock e SingletonSocket são LINKS SIMBÓLICOS para um
+    # alvo que já não existe, e para link quebrado o -e sozinho responde
+    # "não existe" — o teste passaria batido justamente no caso que importa.
+    if [ -e "${alvo}" ] || [ -L "${alvo}" ]; then
+      echo "[entry] removendo ${lock} (sobra de encerramento sujo)"
+      rm -f "${alvo}"
+    fi
+  done
+fi
+
 # exec para o Node virar o PID 1: assim SIGTERM do Easypanel chega nele e o
 # encerramento limpo do index.js funciona.
 echo "[entry] entregando para o node"

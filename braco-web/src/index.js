@@ -527,8 +527,35 @@ async function main() {
   console.log('[braço] página carregada — entrando no laço');
   console.log('[braço] long-poll ligado (espera 25s ocioso · 6s com cliente aguardando)');
 
+  // ── Vigia do laço ────────────────────────────────────────
+  //
+  // Processo VIVO com o laço parado é o pior estado possível: o container
+  // continua saudável para o painel, o bot só vê a coleta sumir, e nada
+  // reinicia sozinho. Acontece quando um await não volta — página que morre no
+  // meio de uma espera, socket pendurado, Chrome que parou de responder.
+  //
+  // O teto é generoso de propósito. A volta normal chega a dormir 10 min com o
+  // disjuntor aberto esperando #liberar, e 5 min fora da janela do fornecedor:
+  // matar antes disso reiniciaria o container à toa justamente quando ele está
+  // certo em não fazer nada. Por isso o carimbo fica no INÍCIO da volta —
+  // quem trava dentro dela não renova nada.
+  //
+  // Sair é a cura, não a doença: o container volta limpo e o volume do perfil
+  // mantém a sessão da Taobao.
+  let ultimoCicloEm = Date.now();
+  const CICLO_TETO_MS = 20 * 60 * 1000;
+  const vigia = setInterval(() => {
+    const parado = Date.now() - ultimoCicloEm;
+    if (parado < CICLO_TETO_MS) return;
+    console.error(
+      `[fatal] laço parado há ${Math.round(parado / 60000)} min — saindo para o container reiniciar`,
+    );
+    process.exit(6);
+  }, 60_000);
+
   while (rodando) {
     const inicioCiclo = Date.now();
+    ultimoCicloEm = inicioCiclo;
     try {
       // Confere a página ANTES de agir, não só quando algo estoura.
       //
@@ -728,6 +755,9 @@ async function main() {
     }
   }
 
+  // Sem isto o SIGTERM não encerraria: o timer segura o event loop vivo depois
+  // que o laço termina, e o container só sairia no kill forçado.
+  clearInterval(vigia);
   await contexto.close();
   console.log('[braço] encerrado.');
 }

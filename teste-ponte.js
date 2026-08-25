@@ -722,6 +722,76 @@ const OP = '5541999999999';
   );
   t('URL do VNC sobrevive à limpeza', comVnc.texto.includes('89.116.186.155:6080/vnc.html'), comVnc.texto);
 
+  // ── Vigia da coleta ────────────────────────────────────────
+  //
+  // O outro serviço pode morrer às 3 da manhã. Antes disto, ninguém era
+  // avisado: a informação existia (coletaVistaEm) mas só aparecia para quem
+  // digitasse #fila — e o sintoma chegava pelo cliente reclamando.
+  bloco('o bot avisa quando a coleta some');
+
+  const alertasVigia = [];
+  const sendVigia = require('./src/sender').send;
+  require('./src/sender').send = async (para, texto) => { alertasVigia.push({ para, texto }); };
+
+  // Nunca conectou não pode alertar: bot recém-subido ainda não viu ninguém, e
+  // alarme em todo deploy treina o operador a ignorar alarme.
+  delete estadoPonte.dados.coletaVistaEm;
+  await ponteMod.tick();
+  t('não alerta quando nunca conectou', alertasVigia.length === 0, JSON.stringify(alertasVigia));
+
+  // Sinal fresco: silêncio.
+  estadoPonte.dados.coletaVistaEm = Date.now();
+  await ponteMod.tick();
+  t('não alerta com a coleta ativa', alertasVigia.length === 0, JSON.stringify(alertasVigia));
+
+  // Sumiu.
+  estadoPonte.dados.coletaVistaEm = Date.now() - 5 * 60 * 1000;
+  await ponteMod.tick();
+  const caiu = alertasVigia.find((a) => /sem sinal/i.test(a.texto));
+  t('alerta quando a coleta some', Boolean(caiu), JSON.stringify(alertasVigia.map((a) => a.texto)));
+  t('e o alerta vai para o operador', caiu?.para === '5541999999999', caiu?.para);
+  // O mesmo alerta a cada 60s vira ruído e some no meio das mensagens do dia.
+  await ponteMod.tick();
+  t(
+    'e não repete a cada volta',
+    alertasVigia.filter((a) => /sem sinal/i.test(a.texto)).length === 1,
+    `${alertasVigia.length} alerta(s)`,
+  );
+
+  // Ainda mudo, mas SEM ninguém esperando. O teto sobe de 2 para 6 min, e o
+  // mesmo silêncio de 5 min passa a caber dentro dele. Não pode virar "de
+  // volta": a coleta não voltou, quem mudou foi a régua.
+  estadoPonte.dados.atendimentos = [];
+  await ponteMod.tick();
+  t(
+    'fila esvaziar não conta como coleta de volta',
+    !alertasVigia.some((a) => /de volta/i.test(a.texto)),
+    JSON.stringify(alertasVigia.map((a) => a.texto.slice(0, 30))),
+  );
+
+  // Voltar importa tanto quanto cair: sem o aviso de volta, o operador fica
+  // olhando o painel sem saber se já pode parar. A prova é uma batida NOVA.
+  estadoPonte.dados.coletaVistaEm = Date.now();
+  await ponteMod.tick();
+  t('avisa quando a coleta volta', alertasVigia.some((a) => /de volta/i.test(a.texto)));
+  // E uma vez só: o "de volta" repetido a cada 60s seria pior que o silêncio.
+  await ponteMod.tick();
+  t(
+    'e o aviso de volta não repete',
+    alertasVigia.filter((a) => /de volta/i.test(a.texto)).length === 1,
+  );
+
+  // Regra 1: isto sai pelo MESMO número comercial que fala com o cliente.
+  for (const a of alertasVigia) {
+    t(
+      `alerta do vigia não vaza termo proibido (${a.texto.slice(0, 22)}…)`,
+      !REPASSE.test(a.texto) && !politica.temCJK(a.texto),
+      a.texto,
+    );
+  }
+
+  require('./src/sender').send = sendVigia;
+
   console.log('\n' + (falhas ? falhas + ' FALHA(S)' : 'todos os testes passaram'));
   process.exit(falhas ? 1 : 0);
 })();

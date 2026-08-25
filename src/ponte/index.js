@@ -509,8 +509,77 @@ async function bloqueioDetectado(motivo, printPath) {
 // Manutenção
 // ============================================================
 
+// ── Vigia da coleta ───────────────────────────────────────────
+//
+// O bot já sabia quando o outro serviço falou pela última vez, mas essa
+// informação só aparecia se alguém digitasse #fila. Quem some às 3 da manhã
+// só era descoberto pelo cliente reclamando — e "trabalhando", "caído" e
+// "travado" ficavam idênticos até alguém perguntar.
+//
+// Estado em memória de propósito: depois de um deploy do bot, o certo é
+// esperar o outro serviço aparecer, não herdar um alerta velho de disco.
+let coletaMuda = false;
+
+// Qual era o último sinal quando o alerta saiu.
+//
+// A volta é provada por um carimbo NOVO, não por um limiar de tempo. Com dois
+// tetos, comparar idade contra teto fazia o "de volta" sair sem nada ter
+// voltado: bastava a fila esvaziar, o teto subir de 2 para 6 min, e a mesma
+// idade de 5 min que tinha disparado o alarme passava a contar como saudável.
+let coletaMudaEm = 0;
+
+// Dois tetos, e a diferença é o cliente.
+//
+// Com alguém esperando código, cada minuto parado é um minuto de cliente no
+// vácuo: 2 min. Sem ninguém na fila, o silêncio quase sempre é deploy do
+// outro serviço — build da imagem mais o Chrome abrindo passa fácil de 3 min,
+// e alarme em todo deploy treina o operador a ignorar alarme. Aí 6 min.
+//
+// O ciclo lá fora bate aqui a cada 25s no ocioso e a cada 6s com cliente
+// esperando, então mesmo o teto curto tem folga de sobra.
+const SEM_SINAL_OCIOSO_MS = 6 * 60 * 1000;
+const SEM_SINAL_COM_FILA_MS = 2 * 60 * 1000;
+
+async function vigiarColeta() {
+  const visto = dados.coletaVistaEm || 0;
+
+  // Nunca conectou não é o mesmo que sumiu. Bot recém-subido ainda não viu
+  // ninguém, e alertar aqui seria alarme em todo deploy. Quem cobre esse caso
+  // é o #fila, que sabe distinguir "nunca conectou" de "chave recusada".
+  if (!visto) return;
+
+  const idade = Date.now() - visto;
+  const esperando = Boolean(fila.ativo());
+  const teto = esperando ? SEM_SINAL_COM_FILA_MS : SEM_SINAL_OCIOSO_MS;
+
+  if (idade > teto && !coletaMuda) {
+    coletaMuda = true;
+    coletaMudaEm = visto;
+    const min = Math.round(idade / 60000);
+    const s = fila.situacao();
+    await alertar(
+      `🔌 *Coleta sem sinal há ${min} min.*\n\n` +
+        (s.ativo
+          ? `Tem *${s.ativo.cliente}* esperando código agora.`
+          : 'Ninguém esperando no momento.') +
+        `\n\nConfere o serviço no painel. Enquanto ela não voltar, código não sai.`,
+    );
+    return;
+  }
+
+  // Avisar que VOLTOU importa tanto quanto avisar que caiu: sem isso você fica
+  // olhando o painel sem saber se já pode parar. Uma batida nova é a prova —
+  // relógio passando não é.
+  if (coletaMuda && visto > coletaMudaEm) {
+    coletaMuda = false;
+    await alertar('🔌 *Coleta de volta.* Os envios seguem normalmente.');
+  }
+}
+
 async function tick() {
   try {
+    await vigiarColeta();
+
     const vencidos = await fila.expirarVencidos();
     for (const v of vencidos) {
       await sender.send(
