@@ -523,6 +523,12 @@ async function onEvento(evento) {
 
   console.log(`[vendas] ${nome} — pedido ${pedido.codigo} (${pedido.itens.length} item(ns))`);
 
+  // Carimba a chegada. É a única prova de que o webhook da loja está mesmo
+  // cadastrado e chegando aqui — sem ela, "nunca vendeu nada hoje" e "o
+  // webhook não está configurado" ficam idênticos para quem olha de fora.
+  dados.ultimoEventoEm = Date.now();
+  persist();
+
   switch (nome) {
     case 'order.paid':
     case 'order.approved':
@@ -595,6 +601,8 @@ module.exports = {
   // chave e mandar para o número errado são as duas falhas caras deste
   // arquivo, e as duas moram nestas funções.
   paraWhatsApp,
+  /** Quando chegou o último evento da loja. 0 = nunca chegou nenhum. */
+  ultimoEventoEm: () => dados.ultimoEventoEm || 0,
   carregar,
   avisarOperador,
   jaFeito,

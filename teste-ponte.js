@@ -833,6 +833,72 @@ const OP = '5541999999999';
   cfgPonte.operador.ehOperador = ehAntes;
 
 
+  // ── #status ────────────────────────────────────────────────
+  //
+  // O sintoma que chega é sempre "o bot parou", e a causa quase nunca é o bot.
+  // Este comando existe para separar as causas — então o que ele NÃO pode
+  // fazer é morrer junto com a peça que caiu: é exatamente aí que se usa ele.
+  bloco('#status separa as causas');
+
+  const evolutionMod = require('./src/evolution');
+  const nerixMod = require('./src/nerix');
+  const estadoReal = evolutionMod.estadoInstancia;
+  const lojaReal = nerixMod.getStore;
+
+  evolutionMod.estadoInstancia = async () => 'open';
+  nerixMod.getStore = async () => ({ data: { name: 'Phaze' } });
+
+  const tudoOk = await operador.executar('#status', OP);
+  t('diz que o WhatsApp está conectado', /WhatsApp conectado/.test(tudoOk), tudoOk.split('\n')[2]);
+  t('e que a loja responde', /Loja responde/.test(tudoOk));
+  t('e conta os operadores', /número de operador|números de operador/.test(tudoOk));
+
+  // WhatsApp caído: a mensagem some em silêncio, e o operador precisa saber
+  // que o problema é esse e não o bot.
+  evolutionMod.estadoInstancia = async () => 'close';
+  const semZap = await operador.executar('#status', OP);
+  t('avisa quando o WhatsApp caiu', /WhatsApp \*close\*/.test(semZap), semZap.split('\n')[2]);
+  t('e diz o que fazer', /QR de novo/i.test(semZap));
+
+  // Evolution fora do ar: a checagem LANÇA. Não pode derrubar o resto.
+  evolutionMod.estadoInstancia = async () => { throw new Error('ECONNREFUSED'); };
+  const semEvolution = await operador.executar('#status', OP);
+  t('sobrevive à Evolution fora do ar', /não consegui conferir/i.test(semEvolution));
+  t('e ainda checa a loja', /Loja responde/.test(semEvolution));
+
+  // 401 da loja é a NOSSA chave, não um problema do cliente — e a orientação
+  // tem que ser diferente de "tenta de novo".
+  evolutionMod.estadoInstancia = async () => 'open';
+  nerixMod.getStore = async () => {
+    const e = new Error('unauthorized');
+    e.response = { status: 401 };
+    throw e;
+  };
+  const chaveRuim = await operador.executar('#status', OP);
+  t('separa chave recusada de instabilidade', /gerar outra/i.test(chaveRuim), chaveRuim.split('\n').pop());
+
+  nerixMod.getStore = async () => { throw new Error('timeout'); };
+  const lojaFora = await operador.executar('#status', OP);
+  t('e instabilidade manda esperar', /tenta de novo/i.test(lojaFora));
+
+  // Nunca chegou evento da loja = o aviso de venda não está ligado no painel.
+  // É o defeito mais silencioso do sistema: nada quebra, só nada acontece.
+  nerixMod.getStore = async () => ({ data: {} });
+  const semWebhook = await operador.executar('#status', OP);
+  t('aponta o aviso de venda não configurado', /não está ligado no painel/i.test(semWebhook));
+
+  // Regra 1: isto sai pelo número comercial.
+  for (const saida of [tudoOk, semZap, semEvolution, chaveRuim, lojaFora, semWebhook]) {
+    t(
+      `#status sem vocabulário proibido (${saida.split('\n')[2]?.slice(0, 24)}…)`,
+      !AUTOMACAO.test(saida) && !politica.temCJK(saida),
+      (saida.match(AUTOMACAO) || [''])[0] || 'limpo',
+    );
+  }
+
+  evolutionMod.estadoInstancia = estadoReal;
+  nerixMod.getStore = lojaReal;
+
   console.log('\n' + (falhas ? falhas + ' FALHA(S)' : 'todos os testes passaram'));
   process.exit(falhas ? 1 : 0);
 })();

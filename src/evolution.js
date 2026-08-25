@@ -53,6 +53,19 @@ async function sendPresence(number, presence = 'composing', opts = {}) {
 }
 
 /**
+ * O WhatsApp está conectado?
+ *
+ * Devolve o estado cru da instância ('open' = conectado). Serve ao #status: se
+ * o aparelho caiu, TODA mensagem some em silêncio — e o sintoma que chega é
+ * "o bot parou", que aponta para o lugar errado.
+ */
+async function estadoInstancia(opts = {}) {
+  const instance = opts.instance || config.evolution.instance;
+  const { data } = await http.get(`/instance/connectionState/${instance}`);
+  return data?.instance?.state || data?.state || '';
+}
+
+/**
  * Envia um menu como LISTA nativa do WhatsApp.
  *
  * Lista e não botão: o WhatsApp aceita no máximo 3 botões de resposta, e o
@@ -122,5 +135,6 @@ module.exports = {
   sendPresence,
   sendMedia,
   sendList,
+  estadoInstancia,
   getBase64FromMediaMessage,
 };

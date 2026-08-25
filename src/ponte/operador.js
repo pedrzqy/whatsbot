@@ -24,12 +24,15 @@ const ponte = require('./index');
 const politica = require('./politica');
 const sender = require('../sender');
 const nerix = require('../nerix');
+const evolution = require('../evolution');
+const vendas = require('../vendas');
 const tools = require('../tools');
 const { dados, persistAgora, emTeste, marcarTeste } = require('./estado');
 
 const AJUDA = [
   '*Comandos*',
   '',
+  '*#status* — testa tudo e diz o que está errado',
   '*#fila* — quem está sendo atendido e quem espera',
   '*#vendas* — vendas de hoje, faturamento e o que falta entregar',
   '*#liberar* — destrava depois de resolver a verificação',
@@ -57,7 +60,7 @@ const min = (ms) => Math.round(ms / 60000);
 function ehComando(from, texto) {
   if (!cfg.ativa || !cfg.operador.numeros.length) return false;
   if (!cfg.operador.ehOperador(from)) return false;
-  return /^#(fila|vendas|liberar|ok|enviar|editar|nao|não|pular|ajuda|sms|taobao|teste|limpar|destravar|atender|auto|recarregar)\b/i.test(
+  return /^#(fila|status|vendas|liberar|ok|enviar|editar|nao|não|pular|ajuda|sms|taobao|teste|limpar|destravar|atender|auto|recarregar)\b/i.test(
     String(texto || '').trim(),
   );
 }
@@ -255,6 +258,137 @@ async function executar(texto, de = '') {
     dados.smsTaobao = { codigo, em: Date.now() };
     persistAgora();
     return '✅ Código guardado. Vai ser usado em até 1 min.';
+  }
+
+  // ── #status ────────────────────────────────────────────
+  //
+  // Confere TODAS as peças de uma vez e diz o que fazer no que estiver errado.
+  //
+  // Existe porque o sintoma que chega é sempre o mesmo — "o bot parou" — e a
+  // causa quase nunca é o bot: o WhatsApp desconectou, a loja está fora do ar,
+  // o webhook nunca foi cadastrado. Sem este comando, descobrir qual das
+  // quatro coisas era exigia abrir três painéis diferentes.
+  //
+  // Cada checagem tem o próprio try: uma peça fora do ar não pode impedir o
+  // diagnóstico das outras — é justamente quando algo caiu que se usa isto.
+  if (cmd === 'status') {
+    const linhas = ['🔎 *Teste do sistema*', ''];
+    const problemas = [];
+
+    // 1) WhatsApp. Se caiu, nada mais importa: toda mensagem some em silêncio.
+    try {
+      const estado = await evolution.estadoInstancia();
+      if (estado === 'open') {
+        linhas.push('✅ WhatsApp conectado');
+      } else {
+        linhas.push(`🛑 WhatsApp *${estado || 'sem resposta'}*`);
+        problemas.push('O WhatsApp desconectou. Leia o QR de novo no painel da Evolution.');
+      }
+    } catch {
+      linhas.push('⚠️ WhatsApp — não consegui conferir');
+      problemas.push('Não falei com a Evolution. Confere se o serviço dela está no ar.');
+    }
+
+    // 2) Loja. Sem ela não há consulta de pedido, nem busca de jogo, nem venda.
+    try {
+      await nerix.getStore();
+      linhas.push('✅ Loja responde');
+    } catch (err) {
+      const s = err.response?.status;
+      linhas.push(`🛑 Loja *não responde*${s ? ` (${s})` : ''}`);
+      problemas.push(
+        s === 401
+          ? 'A chave da loja foi recusada. Precisa gerar outra e trocar no painel.'
+          : 'A loja não respondeu. Pode ser instabilidade — tenta de novo em um minuto.',
+      );
+    }
+
+    // 3) Avisos de venda. A pergunta real é "o webhook está cadastrado?", e a
+    //    única prova disso é ter chegado algum evento algum dia.
+    const ultimoEvento = vendas.ultimoEventoEm();
+    if (!ultimoEvento) {
+      linhas.push('⚠️ Avisos de venda — nenhum recebido ainda');
+      problemas.push(
+        'Se você já vendeu depois da última atualização, o aviso de venda não ' +
+          'está ligado no painel da loja.',
+      );
+    } else {
+      // Em horas depois de 90 min: "último há 2880 min" é um número que
+      // ninguém converte de cabeça no meio do atendimento.
+      const idadeEvento = Date.now() - ultimoEvento;
+      const quando =
+        idadeEvento < 90 * 60000
+          ? `${min(idadeEvento)} min`
+          : idadeEvento < 48 * 3600_000
+            ? `${Math.round(idadeEvento / 3600_000)}h`
+            : `${Math.round(idadeEvento / (24 * 3600_000))} dias`;
+      linhas.push(`✅ Avisos de venda — último há ${quando}`);
+    }
+
+    // 4) Coleta (o navegador). O #fila detalha; aqui é só o sim ou não.
+    const visto = dados.coletaVistaEm || 0;
+    const idade = visto ? Date.now() - visto : Infinity;
+    if (!visto) {
+      linhas.push('🛑 Coleta — nunca conectou');
+      problemas.push('O outro serviço não subiu. Confere ele no painel.');
+    } else if (idade > 3 * 60 * 1000) {
+      linhas.push(`🛑 Coleta — sem sinal há ${min(idade)} min`);
+      problemas.push('A coleta parou. Enquanto isso, código de segurança não sai.');
+    } else {
+      linhas.push(`✅ Coleta ativa (há ${Math.round(idade / 1000)}s)`);
+    }
+
+    // 5) Estado de operação: o que está ligado agora.
+    const d = limites.disjuntor();
+    if (d.estado === 'aberto') {
+      linhas.push('🛑 Envios *congelados*');
+      problemas.push('Apareceu verificação na tela. Resolve e responde *#liberar*.');
+    } else {
+      linhas.push('✅ Envios operando');
+    }
+
+    // "Horário" e não "Coleta": a linha de cima já usa essa palavra para o
+    // serviço do navegador, e duas linhas dizendo "Coleta" com significados
+    // diferentes é pior que não ter nenhuma.
+    //
+    // E não diz de QUEM é o horário: isto sai pelo mesmo número que fala com o
+    // cliente. Escrever "fornecedor" aqui foi o que o teste barrou.
+    const j = janela.estado();
+    if (j.aberta) {
+      linhas.push('✅ Dentro do horário');
+    } else {
+      const h = Math.floor(j.esperaMinutos / 60);
+      const m = j.esperaMinutos % 60;
+      linhas.push(`🕒 Fora do horário — volta em ${h ? `${h}h` : ''}${m ? `${m}min` : ''}`.trim());
+    }
+
+    linhas.push(
+      ponte.atendimentoLigado() ? '✅ Atendimento ligado' : '🔕 Atendimento *desligado* (#atender on)',
+    );
+    linhas.push(
+      ponte.modoAtual() === 'autopiloto'
+        ? '⚡ Envio automático ligado (#auto off desliga)'
+        : '✅ Envio pede sua aprovação',
+    );
+
+    // 6) Configuração. Erro aqui é silencioso: nada quebra, só deixa de
+    //    acontecer — e é o pior tipo de defeito para descobrir.
+    const quantos = cfg.operador.numeros.length;
+    linhas.push(`✅ ${quantos} ${quantos === 1 ? 'número de operador' : 'números de operador'}`);
+
+    if (!cfg.vendedor.chatTitulo) {
+      linhas.push('⚠️ Origem da coleta não configurada');
+      problemas.push('Falta preencher a origem da coleta no painel — sem isso o código não sai.');
+    }
+
+    if (problemas.length) {
+      linhas.push('', '*O que fazer:*');
+      for (const p of problemas) linhas.push(`• ${p}`);
+    } else {
+      linhas.push('', '_Está tudo funcionando._');
+    }
+
+    return linhas.join('\n');
   }
 
   // ── #vendas ────────────────────────────────────────────
