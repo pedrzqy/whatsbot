@@ -39,6 +39,76 @@ function esperarEnter(msg) {
   console.log('=================================================\n');
   await esperarEnter('Pronto? ENTER para inspecionar... ');
 
+  // ── Atalho do chat na home ────────────────────────────────────
+  //
+  // É por onde o reinício da tela passa: taobao.com → clique → chat (ver
+  // Chat.entrarPelaHome). O seletor mora em "entradaDoChat" no seletores.json
+  // e é o ÚNICO que não vive dentro do iframe.
+  //
+  // Numa ABA NOVA de propósito: a aba do chat fica como está, para o resto da
+  // inspeção continuar valendo. E só DEPOIS do ENTER, porque deslogado a home
+  // não mostra atalho nenhum.
+  const abaHome = await contexto.newPage();
+  let links = [];
+  try {
+    await abaHome.goto(cfg.homeUrl, { waitUntil: 'domcontentloaded' });
+    await abaHome.waitForTimeout(3000);
+    links = await abaHome.evaluate(() => {
+      // NÃO filtra por <a>. O ícone de mensagens da barra lateral é um <div>
+      // com handler de JS — procurar só por link foi o que fez a primeira
+      // versão não achar nada e cair no reload seco.
+      const alvos = [
+        ...document.querySelectorAll(
+          '#tb-toolkit-new *, [class*="toolkit-item"], [data-name], [data-label], a',
+        ),
+      ];
+      const vistos = new Set();
+      return alvos
+        .filter((el) => {
+          const marca = `${el.getAttribute('data-name') || ''} ${el.getAttribute('data-label') || ''} ${el.href || ''} ${el.className}`;
+          return /im\/chat|chat\/index|wangwang|amos|webww|im-entry|消息|旺旺/.test(marca);
+        })
+        .map((el) => {
+          const r = el.getBoundingClientRect();
+          return {
+            tag: el.tagName.toLowerCase(),
+            href: el.href || null,
+            nome: el.getAttribute('data-name') || null,
+            rotulo: el.getAttribute('data-label') || null,
+            classes: (el.className || '').toString().trim().split(/\s+/).slice(0, 4),
+            novaAba: el.target === '_blank',
+            // Visível é o que importa: o braço só clica no que aparece, e o
+            // link do menu do topo vive num dropdown com display:none.
+            visivel: r.width > 0 && r.height > 0,
+            y: Math.round(r.y),
+          };
+        })
+        .filter((c) => {
+          const chave = `${c.tag}|${c.nome}|${c.rotulo}|${c.href}|${c.classes.join('.')}`;
+          if (vistos.has(chave)) return false;
+          vistos.add(chave);
+          return true;
+        })
+        .sort((a, b) => a.y - b.y);
+    });
+  } catch (e) {
+    console.warn(`\nnão consegui ler a home: ${e.message}`);
+  }
+  await abaHome.close().catch(() => {});
+  console.log(`\nAtalhos do chat na home: ${links.length}`);
+  for (const l of links.slice(0, 12)) {
+    const seletor = l.nome
+      ? `[data-name='${l.nome}']`
+      : l.classes[0]
+        ? `.${l.classes[0]}`
+        : l.tag;
+    console.log(
+      `  ${l.visivel ? 'visível' : ' oculto'} ${String(l.rotulo || '').padEnd(6)} ${seletor}` +
+        (l.href ? ` -> ${l.href}` : ' (sem href: clique via JS)'),
+    );
+  }
+  console.log('  ^ o "oculto" NÃO serve: o braço só clica no que está visível.');
+
   // O chat vive num iframe (chat-core). Inspecionar a página externa só
   // devolve a barra de navegação da Taobao — foi o que aconteceu na 1ª versão.
   console.log('\nFrames na página:');
@@ -115,6 +185,9 @@ function esperarEnter(msg) {
   });
 
   relatorio.frameUrl = frame.url();
+  // Vai junto no candidatos.json: sem isto, o seletor da home ficava só no
+  // terminal e se perdia com a rolagem.
+  relatorio.atalhosDaHome = links;
 
   fs.writeFileSync(path.join(SAIDA, 'candidatos.json'), JSON.stringify(relatorio, null, 2), 'utf8');
   // HTML do FRAME, não da casca externa — é onde estão os seletores que importam.

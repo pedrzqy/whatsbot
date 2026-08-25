@@ -22,7 +22,7 @@ const https = require('https');
 const axios = require('axios');
 const cfg = require('./config');
 const { abrir } = require('./navegador');
-const { Chat, BloqueioDetectado, SeletorNaoEncontrado } = require('./chat');
+const { Chat, BloqueioDetectado, SeletorNaoEncontrado, NO_CHAT } = require('./chat');
 const humaniza = require('./humaniza');
 
 /**
@@ -396,17 +396,12 @@ async function main() {
   }
 
   const chat = new Chat(pagina);
-  console.log(`[braço] carregando ${cfg.chatUrl}`);
-  await pagina.goto(cfg.chatUrl, { waitUntil: 'domcontentloaded' });
-  console.log('[braço] página carregada — entrando no laço');
 
   // Marca do atendimento em curso. null = ninguém esperando resposta.
   let marcaAtual = null;
   // Conversa do fornecedor está aberta na tela? Volta a false quando algo dá
   // errado, para o próximo ciclo reabrir em vez de escrever no vazio.
   let conversaAberta = false;
-
-  console.log('[braço] long-poll ligado (espera 25s ocioso · 6s com cliente aguardando)');
 
   /**
    * A página morreu? Reabre o Chrome e volta ao chat.
@@ -439,8 +434,7 @@ async function main() {
       ({ contexto, pagina } = await abrir());
       chat.pagina = pagina;
       chat.frame = null; // o iframe antigo não existe mais
-      await pagina.goto(cfg.chatUrl, { waitUntil: 'domcontentloaded' });
-      conversaAberta = false;
+      await irAoChat('depois de reabrir o Chrome');
       sessaoLogada = null;
       console.log('[braço] Chrome reaberto e chat carregado');
       return true;
@@ -451,6 +445,87 @@ async function main() {
       process.exit(5);
     }
   }
+
+  /**
+   * Leva a tela até o chat, do jeito completo: taobao.com → clique no atalho
+   * de mensagens → chat. Quem abre a CONVERSA é o chamador.
+   *
+   * Dois motivos para não ir direto na url — os dois já custaram caro:
+   *
+   *  1. goto() para a url do chat, estando nela, é navegação de mesmo
+   *     documento (só o fragmento muda). A SPA trocava de rota e a página NÃO
+   *     recarregava: a recarga rodava, logava, e a aba continuava a mesma aba
+   *     morta de antes.
+   *  2. O clique na home costuma abrir ABA NOVA. Sem adotar a aba, o braço
+   *     seguiria operando a antiga — que vira casca — enquanto o chat de
+   *     verdade fica noutra janela, invisível para ele e visível no VNC. É
+   *     exatamente o "cliquei e nada aconteceu".
+   *
+   * Por isso `pagina` é reatribuída aqui: ela pode ter virado outra aba.
+   */
+  async function irAoChat(motivo) {
+    console.log(`[braço] entrando no chat (${motivo})`);
+
+    let pelaHome = false;
+    try {
+      pelaHome = await chat.entrarPelaHome(contexto, { homeUrl: cfg.homeUrl });
+    } catch (err) {
+      // Rede piscando, home fora do ar, timeout: nada disso pode impedir o
+      // braço de chegar no chat. A entrada direta abaixo continua valendo.
+      console.warn(`[braço] entrada pela home falhou: ${err.message}`);
+    }
+
+    pagina = chat.pagina; // pode ter virado outra aba
+
+    if (!pelaHome) {
+      // Avisa no painel, não só no console.
+      //
+      // Este é o caminho que faz o reinício PARECER que só recarrega a página:
+      // a Taobao mexe na barra lateral, o seletor do ícone de mensagens para
+      // de casar e a entrada silenciosamente vira reload. Sem uma linha aqui,
+      // a única pista seria o comportamento — e foi assim que a gente demorou
+      // a achar da primeira vez.
+      await evento('warn', 'entrada', 'ícone de mensagens não abriu o chat — entrei pela url');
+
+      // Entrada direta. Estando JÁ no chat, goto() só mexeria no fragmento —
+      // quem recarrega de verdade é o reload().
+      const jaNoChat = NO_CHAT.test(pagina.url());
+      if (jaNoChat) await pagina.reload({ waitUntil: 'domcontentloaded' });
+      else await pagina.goto(cfg.chatUrl, { waitUntil: 'domcontentloaded' });
+    }
+
+    chat.frame = null; // o iframe antigo morreu na navegação
+    conversaAberta = false;
+    await dormir(humaniza.ms(2500, 5000)); // deixa o app montar
+  }
+
+  /**
+   * Recarga completa da tela: reinicia a navegação e deixa a conversa do
+   * fornecedor aberta na ÚLTIMA mensagem (abrirConversa já desce até o fim).
+   *
+   * Deixa o erro subir. O catch do laço é quem sabe separar verificação na
+   * tela (congela e chama humano) de seletor sumido (só espera) — repetir essa
+   * classificação aqui daria dois lugares para manter e um deles ficaria para
+   * trás.
+   */
+  async function recarregarTela(titulo, { pedida, motivo }) {
+    // Baixa o pedido ANTES de tentar, de propósito. Recarga que falha não pode
+    // virar laço: repetir a cada ciclo é atividade regular na tela — o padrão
+    // que separa script de gente — e não conserta nada, porque quem reabre a
+    // conversa é o caminho normal, no ciclo seguinte.
+    proximaRecarga = sortearProximaRecarga();
+    if (pedida) await api.post('/recarga-feita', {}).catch(() => {});
+
+    await irAoChat(motivo);
+    await chat.abrirConversa(titulo);
+    conversaAberta = true;
+    console.log('[braço] tela recarregada — conversa aberta na última mensagem');
+    await evento('info', 'recarga', motivo);
+  }
+
+  await irAoChat('subida');
+  console.log('[braço] página carregada — entrando no laço');
+  console.log('[braço] long-poll ligado (espera 25s ocioso · 6s com cliente aguardando)');
 
   while (rodando) {
     const inicioCiclo = Date.now();
@@ -483,6 +558,21 @@ async function main() {
           // no navegador nem no chat: não conta como atividade na conta.
           await dormir(15_000);
           continue;
+        }
+
+        // #recarregar do operador vale FORA DA JANELA também.
+        //
+        // Recarregar não fala com o fornecedor: é a NOSSA sessão que se mantém
+        // de pé. Preso à janela, o comando dado à noite não fazia nada e
+        // parecia quebrado — e é justamente fora do horário que dá para mexer
+        // na tela sem atravessar atendimento nenhum. O disjuntor continua
+        // valendo: ele fica ACIMA deste ponto, e com ele aberto ninguém toca
+        // no navegador.
+        if (st.recarregarPedido && !marcaAtual && st.chatTitulo) {
+          await recarregarTela(st.chatTitulo, {
+            pedida: true,
+            motivo: 'pedido do operador (fora da janela)',
+          });
         }
 
         // Fora da janela do fornecedor: aí sim esperar muito é o certo, porque
@@ -521,23 +611,10 @@ async function main() {
       const pedida = Boolean(st.recarregarPedido);
       const naHora = Date.now() >= proximaRecarga;
       if ((pedida || naHora) && !marcaAtual) {
-        console.log(`[braço] recarregando a tela (${pedida ? 'pedido pelo operador' : 'periódica'})`);
-        try {
-          await pagina.goto(cfg.chatUrl, { waitUntil: 'domcontentloaded' });
-          await dormir(humaniza.ms(2500, 5000)); // deixa o app montar
-          chat.frame = null;
-          conversaAberta = false;
-          await chat.abrirConversa(titulo);
-          conversaAberta = true;
-          console.log('[braço] tela recarregada e conversa reaberta');
-          await evento('info', 'recarga', pedida ? 'a pedido do operador' : 'periódica');
-        } catch (err) {
-          console.warn(`[braço] recarga falhou: ${err.message}`);
-          conversaAberta = false;
-        }
-
-        if (pedida) await api.post('/recarga-feita', {}).catch(() => {});
-        proximaRecarga = sortearProximaRecarga();
+        await recarregarTela(titulo, {
+          pedida,
+          motivo: pedida ? 'pedido do operador' : 'periódica',
+        });
       }
 
       // Mantém a conversa do fornecedor ABERTA, mesmo sem tarefa.

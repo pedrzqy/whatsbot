@@ -13,6 +13,19 @@
     "Para redescobrir: npm run inspecionar"
   ],
 
+  "entradaDoChat": {
+    "_o_que_e": "Ícone 消息 da barra lateral direita da taobao.com — o SEGUNDO de cima para baixo, dentro de #tb-toolkit-new. ÚNICA entrada deste arquivo que não mora no iframe chat-core: é a página externa, resolvida com page.$$.",
+    "_cuidado": "Ele é um <div>, NÃO um <a>: não tem href e o clique dispara JS. Foi isso que derrubou a 1ª versão — todos os candidatos eram a[href*=...] e o único link de verdade (消息中心, no menu do topo) fica num dropdown com display:none, que nunca conta como visível. Resultado: nada casava e a recarga virava um reload seco, sem sair do lugar.",
+    "_ordem": "data-name primeiro: sobrevive a mudança de classe e de posição. A barra ganha e perde itens conforme a campanha da Taobao — e logado ela pode ter um item a mais no topo, então NUNCA volte a mirar por posição (nth-child). O a[href] do fim é rede: só serve se um dia a Taobao expuser o link fora do dropdown.",
+    "candidatos": [
+      "#tb-toolkit-new [data-name='webww2']",
+      ".toolkit-item-im-entry",
+      "#tb-toolkit-new [data-label='消息']",
+      "[class*='toolkit-item'][data-label='消息']",
+      "a[href*='im/chat']"
+    ]
+  },
+
   "conversaNaLista": {
     "_o_que_e": "PRIMEIRO item da lista lateral. O fornecedor fica sempre no topo por ser a conversa mais recente. Clicar por posição não depende de casar texto chinês. O título é conferido DEPOIS de abrir, no chat.js — se outra loja tiver subido para o topo, o braço para em vez de escrever no lugar errado.",
     "candidatos": [

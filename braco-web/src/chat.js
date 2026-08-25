@@ -49,6 +49,15 @@ const SEL = JSON.parse(
   fs.readFileSync(path.join(__dirname, '..', 'seletores.json'), 'utf8'),
 );
 
+/**
+ * Como se reconhece "esta aba é a do chat" pela url. Usada no clique vindo da
+ * home e na hora de escolher entre goto() e reload().
+ *
+ * SEM a flag /g, de propósito: `.test()` com /g guarda lastIndex e passa a
+ * alternar true/false entre chamadas com a mesma string.
+ */
+const NO_CHAT = /im\/chat|chat\/index\.html/;
+
 class BloqueioDetectado extends Error {}
 class SeletorNaoEncontrado extends Error {}
 
@@ -340,7 +349,122 @@ class Chat {
       }
     }
 
+    // Termina VENDO A ÚLTIMA MENSAGEM, sempre.
+    //
+    // "Conversa aberta" e "conversa no fim" não são a mesma coisa. Numa tela
+    // recém-carregada a lista monta rolada para onde a Taobao quiser — em
+    // geral no meio do histórico — e daí para a frente tudo trabalha errado: a
+    // marca d'água retrata mensagens de meses atrás, clique mira fora da área
+    // visível ("element is not visible"), e pelo VNC o chat parece parado num
+    // dia qualquer.
+    //
+    // Aqui e não só no chamador: quem abre a conversa espera vê-la inteira, e
+    // esquecer a descida num dos caminhos de abertura é o tipo de furo que só
+    // aparece no atendimento seguinte.
+    await this._irParaOFim();
+
     await this.checarBloqueio();
+  }
+
+  /**
+   * Entra no chat pelo caminho de gente: taobao.com → clique no atalho de
+   * mensagens → chat. Devolve false quando não achou por onde clicar.
+   *
+   * Por que não ir direto na url do chat:
+   *
+   *  1. `goto()` para uma url que só difere no FRAGMENTO é navegação de mesmo
+   *     documento. A url do chat termina em `#/` e a SPA reescreve o hash ao
+   *     abrir a conversa — então o goto(chatUrl) da recarga só trocava a rota
+   *     do React. A página nunca recarregava, e a aba morta que a recarga
+   *     existe para curar continuava morta.
+   *  2. Sair do domínio e voltar é o que uma pessoa faz, e é a única forma de
+   *     garantir que a casca inteira (nav da Taobao + iframe chat-core) seja
+   *     montada de novo.
+   *
+   * Falhar aqui não pode travar nada: quem chama entra pela url direta e o
+   * fluxo segue igual. Por isso devolve false em vez de lançar.
+   */
+  async entrarPelaHome(contexto, { homeUrl, timeoutAtalho = 8000 } = {}) {
+    await this.pagina.goto(homeUrl, { waitUntil: 'domcontentloaded' });
+    await this.pagina.waitForTimeout(humaniza.ms(1500, 3200));
+
+    // Só os SELETORES de bloqueio, nunca os textos.
+    //
+    // A home tem catálogo inteiro na tela e "请登录" aparece nela por escrito
+    // mesmo com a sessão boa. Casar por texto aqui congelaria o braço por 10
+    // minutos a cada recarga. Widget de verificação montado é outra história:
+    // se .nc_wrapper ou o baxia estão na home, ninguém deve clicar em nada.
+    //
+    // E não lança: quem congela é o checarBloqueio() da conversa, um passo
+    // adiante, que roda de qualquer jeito. Lançar daqui só mudaria o freio de
+    // lugar — e faria o caminho de reabrir o Chrome morrer com a mensagem
+    // errada ("não consegui reabrir o Chrome").
+    for (const sel of SEL.bloqueios.seletores) {
+      if (await this.pagina.$(sel)) {
+        console.warn(`[chat] verificação na home (${sel}) — entrando pela url`);
+        return false;
+      }
+    }
+
+    const entrada = await this._acharNaPagina(SEL.entradaDoChat.candidatos, timeoutAtalho);
+    if (!entrada) {
+      console.warn('[chat] não achei o atalho do chat na home — entrando pela url');
+      return false;
+    }
+
+    // A espera pela aba nova é armada ANTES do clique. Depois seria tarde: a
+    // aba que abre rápido já teria disparado o evento, e ficaríamos pendurados
+    // 15s esperando uma segunda que nunca vem.
+    const abaNova = contexto.waitForEvent('page', { timeout: 15_000 }).catch(() => null);
+    await this._clicar(entrada, { timeout: 10_000 });
+
+    const antiga = this.pagina;
+
+    // Corrida entre os dois desfechos possíveis do clique: aba nova ou
+    // navegação na MESMA aba. Sem a corrida, o segundo caso pagava os 15s
+    // inteiros do timeout da aba-que-nunca-vem — em toda recarga e em toda
+    // subida do container, parado numa tela já pronta.
+    const nova = await Promise.race([
+      abaNova,
+      this.pagina
+        .waitForURL(NO_CHAT, { timeout: 15_000 })
+        .then(() => null)
+        .catch(() => null),
+    ]);
+
+    if (nova && nova !== antiga) {
+      await nova.waitForLoadState('domcontentloaded').catch(() => {});
+      this.pagina = nova;
+      this.frame = null;
+      // Fecha a home. Sem isto cada recarga deixa uma aba para trás; em uma
+      // semana são dezenas de abas vivas no mesmo container de sempre.
+      await antiga.close().catch(() => {});
+    } else {
+      await this.pagina.waitForURL(NO_CHAT, { timeout: 15_000 }).catch(() => {});
+    }
+
+    // A url não é a única prova de que chegamos.
+    //
+    // O ícone é um <div> com JS, não um link: além de abrir aba e de navegar,
+    // ele pode montar o chat DENTRO da própria página. Nesse caso a url fica
+    // sendo a da home e só o iframe chat-core denuncia que deu certo. Sem esta
+    // segunda prova, o desfecho bom seria tratado como falha e o braço jogaria
+    // fora um chat já aberto para carregar tudo de novo pela url.
+    //
+    // frames() só é consultado quando a url não basta — é a ordem barata.
+    const chegou =
+      NO_CHAT.test(this.pagina.url()) ||
+      this.pagina.frames().some((f) => f.url().includes(frameHelper.MARCA));
+
+    if (!chegou) {
+      console.warn(
+        `[chat] o clique na home não levou ao chat (parei em ${this.pagina.url()}) — entrando pela url`,
+      );
+      return false;
+    }
+
+    console.log('[chat] entrei no chat pela home da Taobao');
+    return true;
   }
 
   /**
@@ -1333,4 +1457,4 @@ class Chat {
   }
 }
 
-module.exports = { Chat, BloqueioDetectado, SeletorNaoEncontrado };
+module.exports = { Chat, BloqueioDetectado, SeletorNaoEncontrado, NO_CHAT };

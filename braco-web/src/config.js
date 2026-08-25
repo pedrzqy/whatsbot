@@ -14,6 +14,15 @@ module.exports = {
   // (criada pelo app/PC) — este endereço abre a lista, não cria conversa nova.
   chatUrl: process.env.TAOBAO_CHAT_URL || 'https://market.m.taobao.com/app/im/chat/index.html?#/',
 
+  // Porta de entrada do reinício da tela. O braço vai PARA CÁ primeiro e só
+  // então clica no atalho do chat — ver Chat.entrarPelaHome().
+  //
+  // Não é enfeite: a url do chat termina em `#/`, e goto() para uma url que só
+  // difere no fragmento é navegação de MESMO DOCUMENTO. A SPA trocava de rota
+  // e a página nunca recarregava, então a recarga não curava a aba morta que
+  // ela existe para curar.
+  homeUrl: process.env.TAOBAO_HOME_URL || 'https://www.taobao.com/',
+
   // UA do SEU Chrome real. Rode no console do seu navegador:
   //   navigator.userAgent
   // e cole aqui. Quanto mais perto do que a conta já viu, melhor.

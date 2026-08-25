@@ -136,8 +136,11 @@ async function executar(texto) {
       '🔄 *Recarga pedida.*\n\n' +
       (s.ativo
         ? `Tem um atendimento em curso (*${s.ativo.cliente}*), então a recarga acontece assim que ele terminar.`
-        : 'A tela recarrega no próximo ciclo, em até ~30s.') +
-      '\n\n_Ela abre o site, entra no chat e reabre a conversa._'
+        : // Fora do horário do fornecedor o ciclo dorme 5 min entre voltas, e a
+          // recarga agora acontece lá também. Prometer ~30s de madrugada fazia
+          // o comando parecer quebrado justamente na hora de testar.
+          'A tela recarrega no próximo ciclo: até ~30s dentro do horário, até ~5 min fora dele.') +
+      '\n\n_Ela abre o site, entra no chat, reabre a conversa e desce até a última mensagem._'
     );
   }
 
