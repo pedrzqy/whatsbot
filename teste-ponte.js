@@ -367,20 +367,20 @@ const OP = '5541999999999';
   t('operador ignorado antes',
     recepcao.avaliar(OP, 'preciso do codigo', null).acao === 'ignorar');
 
-  let saida = await operador.executar('#teste');
+  let saida = await operador.executar('#teste', OP);
   t('confirma que ligou', /teste ligado/i.test(saida), saida.split('\n')[0]);
 
   let r3 = recepcao.avaliar(OP, 'preciso do codigo', null);
   t('agora o operador é atendido', r3.acao === 'responder', r3.acao);
   t('e recebe o tutorial', /foto da tela do console/i.test(r3.mensagem || ''));
 
-  saida = await operador.executar('#teste');
+  saida = await operador.executar('#teste', OP);
   t('segundo #teste desliga', /desligado/i.test(saida), saida);
   t('volta a ser ignorado',
     recepcao.avaliar(OP, 'preciso do codigo', null).acao === 'ignorar');
 
   // Rede de segurança: se o prazo vencer, volta a ser só operador sozinho.
-  await operador.executar('#teste');
+  await operador.executar('#teste', OP);
   require('./src/ponte/estado').dados.testeOperador = { ate: Date.now() - 1 };
   t('prazo vencido desliga sozinho',
     recepcao.avaliar(OP, 'preciso do codigo', null).acao === 'ignorar');
@@ -394,11 +394,11 @@ const OP = '5541999999999';
   // existia, e reforçar uma não reforçava a outra.
 
   for (const cmd of ['#ajuda', '#fila', '#limpar', '#destravar', '#teste']) {
-    const saida = String(await operador.executar(cmd));
+    const saida = String(await operador.executar(cmd, OP));
     t(`${cmd} sem vocabulário de robô`, !AUTOMACAO.test(saida),
       (saida.match(AUTOMACAO) || [''])[0] || 'limpo');
   }
-  await operador.executar('#teste'); // desliga o que o laço acima ligou
+  await operador.executar('#teste', OP); // desliga o que o laço acima ligou
 
   // ── Marca da Phaze: onde deve, e só onde deve ──────────────
   bloco('marca da Phaze');
@@ -418,7 +418,7 @@ const OP = '5541999999999';
   // Operador lê no meio do atendimento: quer o dado, não a moldura. E cada
   // linha a mais é uma linha a mais para conferir no mesmo número comercial.
   for (const cmd of ['#fila', '#ajuda', '#limpar']) {
-    const saida = String(await operador.executar(cmd));
+    const saida = String(await operador.executar(cmd, OP));
     t(`${cmd} sem marca`,
       !saida.includes(marca.CABECALHO) && !saida.includes(marca.ASSINATURA));
   }
@@ -555,7 +555,7 @@ const OP = '5541999999999';
     const enviadas = [];
     sender.send = async (para, texto) => { enviadas.push({ para, texto }); };
     try {
-      await operador.executar(`#ok ${tarefaCriada.id}`);
+      await operador.executar(`#ok ${tarefaCriada.id}`, OP);
     } finally {
       sender.send = original;
     }
@@ -586,11 +586,11 @@ const OP = '5541999999999';
   // número e por 30 min. Se valesse para qualquer um, desligar o autoreply
   // deixaria de significar alguma coisa.
   bloco('só o operador em teste fura o autoreply');
-  await operador.executar('#teste'); // liga
+  await operador.executar('#teste', OP); // liga
   t('operador em teste passa', ponteMod.operadorEmTeste(OP) === true);
   t('cliente qualquer NÃO passa', ponteMod.operadorEmTeste('5511900000000') === false);
   t('número vazio não passa', ponteMod.operadorEmTeste('') === false);
-  await operador.executar('#teste'); // desliga
+  await operador.executar('#teste', OP); // desliga
   t('depois de desligar, não passa mais', ponteMod.operadorEmTeste(OP) === false);
 
   // ── Limpar a fila de atendimentos ──────────────────────────
@@ -610,11 +610,11 @@ const OP = '5541999999999';
   await filaMod.entrar('5511911110002', 'Cliente Dois');
   await filaMod.entrar('5511911110003', 'Cliente Tres');
 
-  const semArgumento = await operador.executar('#limpar');
+  const semArgumento = await operador.executar('#limpar', OP);
   t('#limpar avisa que a fila tem gente', /3\D+cliente/i.test(semArgumento), semArgumento.split('\n')[2] || '');
   t('e ensina o comando que resolve', /#limpar fila/.test(semArgumento));
 
-  const destravou = await operador.executar('#destravar');
+  const destravou = await operador.executar('#destravar', OP);
   t('#destravar aponta o atendimento parado', /atendimento/i.test(destravou), destravou.split('\n')[0]);
   t('e não manda só "veja o #fila"', !/^Nenhum envio preso\. Veja/.test(destravou));
 
@@ -623,7 +623,7 @@ const OP = '5541999999999';
   const avisados = [];
   const sendReal = require('./src/sender').send;
   require('./src/sender').send = async (para) => { avisados.push(para); };
-  const limpou = await operador.executar('#limpar fila');
+  const limpou = await operador.executar('#limpar fila', OP);
   require('./src/sender').send = sendReal;
 
   t('#limpar fila esvazia a fila', filaMod.situacao().aguardando.length === 0 && !filaMod.situacao().ativo);
@@ -634,7 +634,7 @@ const OP = '5541999999999';
   bloco('#auto tira o #ok do caminho');
   const modoAnterior = estadoPonte.dados.modo;
 
-  await operador.executar('#auto on');
+  await operador.executar('#auto on', OP);
   t('#auto on liga o autopiloto', ponteMod.modoAtual() === 'autopiloto');
 
   estadoPonte.dados.atendimentos = [];
@@ -649,7 +649,7 @@ const OP = '5541999999999';
   t('a promessa sai na hora, porque agora é verdade',
     /pegando seu código/i.test(noAuto.mensagem), noAuto.mensagem);
 
-  await operador.executar('#auto off');
+  await operador.executar('#auto off', OP);
   t('#auto off volta ao copiloto', ponteMod.modoAtual() === 'copiloto');
 
   estadoPonte.dados.atendimentos = [];
@@ -666,9 +666,9 @@ const OP = '5541999999999';
   bloco("#atender liga e desliga o atendimento");
   const estadoAnterior = estadoPonte.dados.botLigado;
 
-  await operador.executar('#atender on');
+  await operador.executar('#atender on', OP);
   t('#atender on liga', ponteMod.atendimentoLigado() === true);
-  await operador.executar('#atender off');
+  await operador.executar('#atender off', OP);
   t('#atender off desliga', ponteMod.atendimentoLigado() === false);
 
   // O comando tem que VENCER a variável de ambiente — senão um "#atender off"
@@ -676,7 +676,7 @@ const OP = '5541999999999';
   t('e vence a configuração do serviço',
     ponteMod.atendimentoLigado() === false && require('./src/config').autoReply === true);
 
-  const semArg = await operador.executar('#atender');
+  const semArg = await operador.executar('#atender', OP);
   t('#atender sozinho informa o estado', /DESLIGADO/i.test(semArg), semArg.split('\n')[0]);
   // Sem escapar, o `*` do negrito do WhatsApp virava quantificador e o teste
   // passava por acidente, casando "por" seguido de nada.
@@ -691,17 +691,17 @@ const OP = '5541999999999';
   bloco('#teste despausa o número do operador');
   const storeMod = require('./src/store');
   storeMod.saveContact(OP, { paused: true });
-  const respTeste = await operador.executar('#teste');
+  const respTeste = await operador.executar('#teste', OP);
   t('o #teste tira o número da pausa', storeMod.getContact(OP)?.paused === false);
   t('e avisa que fez isso', /atendimento humano/i.test(respTeste), respTeste.slice(0, 60));
-  await operador.executar('#teste'); // desliga
+  await operador.executar('#teste', OP); // desliga
 
   // Fila limpa antes: o cenário acima deixou um atendimento na vez, e com
   // alguém sendo atendido o pedido novo entra na fila em vez de virar tarefa.
   estadoPonte.dados.atendimentos.length = 0;
   estadoPonte.dados.tarefas.length = 0;
 
-  await operador.executar('#teste'); // liga
+  await operador.executar('#teste', OP); // liga
   const noTeste = await ponteMod.pedirCodigo(OP, 'Pedro', 'testeok1', null);
   const tarefaTeste = estadoPonte.dados.tarefas.find((x) => x.usuario === 'testeok1');
   if (tarefaTeste && tarefaTeste.estado === 'aguardando_aprovacao') {
@@ -715,7 +715,7 @@ const OP = '5541999999999';
     t('cenário do modo teste montado', false,
       `tarefa ficou como ${tarefaTeste ? tarefaTeste.estado : 'inexistente'}`);
   }
-  await operador.executar('#teste'); // desliga
+  await operador.executar('#teste', OP); // desliga
 
   const comVnc = politica.limparAlerta(
     '🛑 *Verificação na tela*\n\n1. Abre a tela: http://89.116.186.155:6080/vnc.html\n3. Responde *#liberar*',
@@ -791,6 +791,47 @@ const OP = '5541999999999';
   }
 
   require('./src/sender').send = sendVigia;
+
+  // ── Mais de um operador ────────────────────────────────────
+  //
+  // A mesma PONTE_OPERADOR_NUMERO aceita vários separados por vírgula. Dois
+  // pontos precisavam de cuidado e são os que este bloco cobre: o alerta tem
+  // que chegar aos DOIS, e o #teste NÃO pode ser compartilhado — um operador
+  // ligando o teste transformaria as mensagens do outro em mensagens de
+  // cliente, e ele perderia os alertas achando que o bot enlouqueceu.
+  bloco('mais de um operador');
+
+  const OP2 = '5511988887777';
+  const cfgPonte = require('./src/ponte/config');
+  const numerosAntes = cfgPonte.operador.numeros;
+  const ehAntes = cfgPonte.operador.ehOperador;
+  cfgPonte.operador.numeros = [OP, OP2];
+  cfgPonte.operador.ehOperador = (f) => [OP, OP2].includes(String(f));
+
+  t('os dois mandam no bot', operador.ehComando(OP2, '#fila') === true);
+  t('e um terceiro não', operador.ehComando('5511900001111', '#fila') === false);
+
+  const doisAlertas = [];
+  const sendDois = require('./src/sender').send;
+  require('./src/sender').send = async (para, texto) => { doisAlertas.push({ para, texto }); };
+  await ponteMod.alertar('🔔 teste de alerta para dois');
+  require('./src/sender').send = sendDois;
+
+  t('o alerta chega nos dois', doisAlertas.length === 2, JSON.stringify(doisAlertas.map((a) => a.para)));
+  t('e em números diferentes', doisAlertas[0]?.para !== doisAlertas[1]?.para);
+
+  // O #teste é POR NÚMERO.
+  await operador.executar('#teste', OP2);
+  t('quem pediu vira cliente', ponteMod.operadorEmTeste(OP2) === true);
+  t('o outro operador NÃO vira', ponteMod.operadorEmTeste(OP) === false);
+  t('e continua ignorado pela recepção',
+    recepcao.avaliar(OP, 'preciso do codigo', null).acao === 'ignorar');
+  await operador.executar('#teste', OP2); // desliga
+  t('desligar o de um não mexe no outro', ponteMod.operadorEmTeste(OP2) === false);
+
+  cfgPonte.operador.numeros = numerosAntes;
+  cfgPonte.operador.ehOperador = ehAntes;
+
 
   console.log('\n' + (falhas ? falhas + ' FALHA(S)' : 'todos os testes passaram'));
   process.exit(falhas ? 1 : 0);

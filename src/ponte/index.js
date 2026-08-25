@@ -32,11 +32,11 @@ const janela = require('./janela');
 const midia = require('./midia');
 const politica = require('./politica');
 const marca = require('./marca');
-const { dados, persist, persistAgora, proximoId } = require('./estado');
+const { dados, persist, persistAgora, proximoId, emTeste } = require('./estado');
 const sender = require('../sender');
 
 async function alertar(texto, imagem, nomeArquivo) {
-  if (!cfg.operador.numero) {
+  if (!cfg.operador.numeros.length) {
     console.warn('[ponte] alerta sem destino (defina PONTE_OPERADOR_NUMERO):', texto);
     return;
   }
@@ -47,14 +47,26 @@ async function alertar(texto, imagem, nomeArquivo) {
   const { texto: limpo, limpou } = politica.limparAlerta(texto);
   if (limpou) console.warn('[ponte] alerta continha texto técnico — limpo antes de enviar');
 
-  try {
-    await sender.send(
-      cfg.operador.numero,
-      limpo,
-      imagem ? { image: imagem, fileName: nomeArquivo || 'ponte.png' } : {},
-    );
-  } catch (err) {
-    console.error('[ponte] falha ao alertar operador:', err.message);
+  // Um por vez, e cada um com seu próprio try.
+  //
+  // Em série porque o sender é humanizado: disparar em paralelo entregaria as
+  // duas mensagens no mesmo instante, o que é justamente o padrão que ele
+  // existe para não fazer.
+  //
+  // E o try é por destino, não em volta do laço: com um só, o primeiro número
+  // fora do ar (aparelho desconectado, número errado no Environment) engoliria
+  // o alerta dos outros. Captcha na tela avisado para ninguém é o pior desfecho
+  // possível aqui.
+  for (const numero of cfg.operador.numeros) {
+    try {
+      await sender.send(
+        numero,
+        limpo,
+        imagem ? { image: imagem, fileName: nomeArquivo || 'ponte.png' } : {},
+      );
+    } catch (err) {
+      console.error(`[ponte] falha ao alertar ${numero}:`, err.message);
+    }
   }
 }
 
@@ -123,8 +135,7 @@ async function pedirCodigo(from, nome, usuarioBruto, imagemPath = null) {
   // exatamente repetir o fluxo, então ele travava justo quem precisa repetir.
   // Os limites do FORNECEDOR (10/h, 60/dia) continuam valendo normalmente:
   // são esses que protegem a conta da Taobao, e nenhum teste passa por cima.
-  const testando =
-    from === cfg.operador.numero && dados.testeOperador?.ate > Date.now();
+  const testando = cfg.operador.ehOperador(from) && emTeste(from);
 
   const lim = testando ? { permitido: true } : limites.checarCliente(from);
   if (!lim.permitido) {
@@ -620,9 +631,7 @@ const salvarImagem = (base64, mimetype) => midia.salvar(base64, mimetype);
  * automática para a loja INTEIRA.
  */
 function operadorEmTeste(from) {
-  return Boolean(
-    from && from === cfg.operador.numero && dados.testeOperador?.ate > Date.now(),
-  );
+  return Boolean(from && cfg.operador.ehOperador(from) && emTeste(from));
 }
 
 /**

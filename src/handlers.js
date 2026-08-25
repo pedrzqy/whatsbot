@@ -249,7 +249,7 @@ async function handleMessage(msg) {
   // destravar em segundos, e não pode esbarrar em boas-vindas ou pausa.
   if (operador.ehComando(from, trimmed)) {
     try {
-      await sender.send(from, await operador.executar(trimmed), { typing: false });
+      await sender.send(from, await operador.executar(trimmed, from), { typing: false });
     } catch (err) {
       console.error('[ponte/operador] erro:', err.message);
       await sender.send(from, `Falhou: ${err.message}`, { typing: false });
@@ -605,7 +605,7 @@ async function onOperadorDigitou({ para, texto }) {
 
   // O operador falando com ele mesmo (os #comandos, os alertas) não é
   // atendimento de ninguém.
-  if (from === require('./ponte/config').operador.numero) return;
+  if (require('./ponte/config').operador.ehOperador(from)) return;
 
   const contato = store.getContact(from);
   if (contato?.paused) return; // já assumido: não avisa de novo

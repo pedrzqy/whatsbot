@@ -64,11 +64,36 @@ module.exports = {
   // trajetória do arraste), então o operador precisa arrastar ele mesmo.
   vncUrl: process.env.PONTE_VNC_URL || '',
 
-  operador: {
-    // Número (só dígitos) que recebe alertas de captcha e fila travada.
-    // Sem isto, o disjuntor abre e ninguém fica sabendo.
-    numero: (process.env.PONTE_OPERADOR_NUMERO || '').replace(/\D/g, ''),
-  },
+  operador: (() => {
+    // Números (só dígitos) que recebem alertas de captcha e fila travada e
+    // podem dar comandos. Sem nenhum, o disjuntor abre e ninguém fica sabendo.
+    //
+    // A MESMA variável aceita vários, separados por vírgula:
+    //   PONTE_OPERADOR_NUMERO=5541999999999,5511988887777
+    //
+    // Reaproveitar a variável em vez de criar outra não é preguiça: quem tem um
+    // número só não precisa mexer em nada, e duas variáveis com o mesmo papel
+    // acabam divergindo entre os dois serviços — que é a origem de metade dos
+    // bugs deste projeto.
+    const numeros = (process.env.PONTE_OPERADOR_NUMERO || '')
+      .split(',')
+      .map((n) => n.replace(/\D/g, ''))
+      .filter(Boolean);
+
+    // Sem duplicata: o mesmo número listado duas vezes receberia cada alerta
+    // duas vezes.
+    const unicos = [...new Set(numeros)];
+
+    return {
+      numeros: unicos,
+      // O PRIMEIRO da lista. Existe para quando é preciso escolher um só —
+      // hoje ninguém depende disso, mas some código antigo esperando `numero`
+      // e um undefined silencioso aqui vira alerta sem destino.
+      numero: unicos[0] || '',
+      /** Este número manda no bot? */
+      ehOperador: (from) => Boolean(from) && unicos.includes(String(from)),
+    };
+  })(),
 
   comercial: {
     // Multiplicador aplicado a preço em CNY antes de mostrar ao cliente.

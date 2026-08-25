@@ -128,6 +128,46 @@ function proximoId() {
   return String(dados.seq);
 }
 
+// ── Modo teste, POR NÚMERO ──────────────────────────────────
+//
+// Era um objeto só (`{ate}`) porque só existia um operador. Com dois, o global
+// vazava: o operador A ligava o #teste e as mensagens normais do operador B
+// passavam a entrar como se fossem de cliente — ele perderia os alertas
+// achando que o bot enlouqueceu.
+//
+// Agora é um mapa `{ [numero]: {ate} }`. As três funções abaixo são o único
+// caminho de leitura e escrita, para o formato não voltar a ser interpretado
+// em quatro arquivos diferentes.
+
+/** Aceita o formato ANTIGO ({ate} solto) sem perder o teste em andamento. */
+function testes() {
+  const t = dados.testeOperador;
+  if (!t) return {};
+  // Formato antigo: um {ate} sem número. Some depois de vencer, e vencer leva
+  // no máximo 30 min — não vale código de migração, só não estourar aqui.
+  if (typeof t.ate === 'number') return { __legado: t };
+  return t;
+}
+
+/** O modo teste está valendo para ESTE número agora? */
+function emTeste(numero) {
+  const t = testes();
+  const meu = t[String(numero)] || t.__legado;
+  return Boolean(meu && meu.ate > Date.now());
+}
+
+/** Liga (ms > 0) ou desliga (ms = 0) o modo teste de um número. */
+function marcarTeste(numero, ms) {
+  const t = { ...testes() };
+  delete t.__legado; // qualquer escrita já migra o formato
+
+  if (ms > 0) t[String(numero)] = { ate: Date.now() + ms };
+  else delete t[String(numero)];
+
+  dados.testeOperador = Object.keys(t).length ? t : null;
+  persistAgora();
+}
+
 load();
 
-module.exports = { dados, persist, persistAgora, proximoId };
+module.exports = { dados, persist, persistAgora, proximoId, emTeste, marcarTeste };

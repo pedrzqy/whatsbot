@@ -7,8 +7,13 @@
  * inteiro, e quando o disjuntor abre por captcha ele precisa agir em segundos,
  * do celular. Abrir um painel para isso seria fricção onde não pode haver.
  *
- * Só o número em PONTE_OPERADOR_NUMERO é obedecido — qualquer outro cai no
- * fluxo normal de atendimento e nem descobre que estes comandos existem.
+ * Só os números em PONTE_OPERADOR_NUMERO são obedecidos — qualquer outro cai
+ * no fluxo normal de atendimento e nem descobre que estes comandos existem.
+ *
+ * A variável aceita vários separados por vírgula, e todos mandam igual: os
+ * mesmos comandos, os mesmos alertas. O que NÃO é compartilhado é o #teste —
+ * ele vale por número, senão um operador ligando o teste transformaria as
+ * mensagens do outro em mensagens de cliente.
  */
 
 const cfg = require('./config');
@@ -18,7 +23,7 @@ const janela = require('./janela');
 const ponte = require('./index');
 const politica = require('./politica');
 const sender = require('../sender');
-const { dados, persistAgora } = require('./estado');
+const { dados, persistAgora, emTeste, marcarTeste } = require('./estado');
 
 const AJUDA = [
   '*Comandos*',
@@ -47,8 +52,8 @@ const min = (ms) => Math.round(ms / 60000);
 
 /** É comando de operador? */
 function ehComando(from, texto) {
-  if (!cfg.ativa || !cfg.operador.numero) return false;
-  if (from !== cfg.operador.numero) return false;
+  if (!cfg.ativa || !cfg.operador.numeros.length) return false;
+  if (!cfg.operador.ehOperador(from)) return false;
   return /^#(fila|liberar|ok|enviar|editar|nao|não|pular|ajuda|sms|taobao|teste|limpar|destravar|atender|auto|recarregar)\b/i.test(
     String(texto || '').trim(),
   );
@@ -56,9 +61,17 @@ function ehComando(from, texto) {
 
 /**
  * Executa o comando.
- * @returns {Promise<string>} resposta a mandar de volta ao operador
+ *
+ * `de` é QUEM mandou. Antes não existia: com um operador só, dava para assumir
+ * cfg.operador.numero lá dentro. Com dois, essa suposição faz o #teste de um
+ * despausar o número do outro — e o operador que digitou o comando continua
+ * pausado, sem entender por que o bot não responde.
+ *
+ * @param {string} texto comando cru, com o #
+ * @param {string} de    número de quem mandou
+ * @returns {Promise<string>} resposta a mandar de volta a quem mandou
  */
-async function executar(texto) {
+async function executar(texto, de = '') {
   const bruto = String(texto || '').trim();
   const [, cmdRaw, resto = ''] = bruto.match(/^#(\S+)\s*([\s\S]*)$/) || [];
   const cmd = (cmdRaw || '').toLowerCase();
@@ -77,14 +90,12 @@ async function executar(texto) {
   // para o fornecedor sem #ok, os #comandos continuam sendo lidos primeiro
   // (handlers.js), e o prazo vence sozinho para ninguém esquecer ligado.
   if (cmd === 'teste') {
-    const ligado = dados.testeOperador?.ate > Date.now();
+    const ligado = emTeste(de);
     if (ligado || /^(off|fim|parar|nao|não)$/i.test(id || '')) {
-      dados.testeOperador = null;
-      persistAgora();
+      marcarTeste(de, 0);
       return '🔕 Modo teste desligado. Seu número voltou a ser só operador.';
     }
-    dados.testeOperador = { ate: Date.now() + TESTE_MS };
-    persistAgora();
+    marcarTeste(de, TESTE_MS);
 
     // DESPAUSA o próprio número antes de prometer que ele vira cliente.
     //
@@ -95,9 +106,9 @@ async function executar(texto) {
     // "oi", nada. Parece bot quebrado e é só o estado anterior sobrevivendo.
     let estavaPausado = false;
     try {
-      // O operador é sempre este número — executar() nem recebe o remetente,
-      // porque ehComando() já garantiu que só ele chega aqui.
-      const numero = cfg.operador.numero;
+      // O número de QUEM mandou, não o primeiro da lista: quem pediu o teste é
+      // quem vira cliente, e despausar o outro deixaria os dois errados.
+      const numero = de;
       const store = require('../store');
       estavaPausado = Boolean(store.getContact(numero)?.paused);
       if (estavaPausado) store.saveContact(numero, { paused: false, followupCount: 0 });

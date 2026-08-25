@@ -35,7 +35,7 @@ const codigo = require('./codigo');
 const cfg = require('./config');
 const janela = require('./janela');
 const marca = require('./marca');
-const { dados, persist } = require('./estado');
+const { dados, persist, emTeste } = require('./estado');
 
 /** Quanto tempo uma metade do pedido espera pela outra. */
 const VALIDADE_MS = 10 * 60 * 1000;
@@ -152,7 +152,7 @@ function avaliar(from, texto, imagem) {
   // O operador tem os comandos dele; não entra pelo fluxo de cliente — a não
   // ser que tenha ligado o modo teste com #teste, para conferir o passo a passo
   // do próprio celular. O prazo vence sozinho (ver operador.js).
-  if (from === cfg.operador.numero && !(dados.testeOperador?.ate > Date.now())) {
+  if (cfg.operador.ehOperador(from) && !emTeste(from)) {
     return { acao: 'ignorar' };
   }
 
