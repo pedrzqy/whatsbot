@@ -23,12 +23,15 @@ const janela = require('./janela');
 const ponte = require('./index');
 const politica = require('./politica');
 const sender = require('../sender');
+const nerix = require('../nerix');
+const tools = require('../tools');
 const { dados, persistAgora, emTeste, marcarTeste } = require('./estado');
 
 const AJUDA = [
   '*Comandos*',
   '',
   '*#fila* — quem está sendo atendido e quem espera',
+  '*#vendas* — vendas de hoje, faturamento e o que falta entregar',
   '*#liberar* — destrava depois de resolver a verificação',
   '*#sms 123456* — repassa o código SMS que chegou no seu celular',
   '*#ok <id>* — libera um envio',
@@ -54,7 +57,7 @@ const min = (ms) => Math.round(ms / 60000);
 function ehComando(from, texto) {
   if (!cfg.ativa || !cfg.operador.numeros.length) return false;
   if (!cfg.operador.ehOperador(from)) return false;
-  return /^#(fila|liberar|ok|enviar|editar|nao|não|pular|ajuda|sms|taobao|teste|limpar|destravar|atender|auto|recarregar)\b/i.test(
+  return /^#(fila|vendas|liberar|ok|enviar|editar|nao|não|pular|ajuda|sms|taobao|teste|limpar|destravar|atender|auto|recarregar)\b/i.test(
     String(texto || '').trim(),
   );
 }
@@ -252,6 +255,85 @@ async function executar(texto, de = '') {
     dados.smsTaobao = { codigo, em: Date.now() };
     persistAgora();
     return '✅ Código guardado. Vai ser usado em até 1 min.';
+  }
+
+  // ── #vendas ────────────────────────────────────────────
+  //
+  // O dia da loja numa mensagem. Existe porque a resposta para "vendi quanto
+  // hoje?" morava só no painel do site — e no meio do atendimento, pelo
+  // celular, abrir o painel é o suficiente para não olhar.
+  //
+  // Conta o que PRECISA DE AÇÃO separado do resto: pedido pago sem chave é
+  // trabalho parado esperando alguém lembrar, e é o único número aqui que
+  // pede uma atitude.
+  if (cmd === 'vendas') {
+    let lista = [];
+    try {
+      const resp = await nerix.listOrders({ limit: 100 });
+      lista = resp?.data || resp || [];
+    } catch (err) {
+      console.warn('[operador] #vendas falhou:', err.response?.status || err.message);
+      return '📊 Não consegui falar com a loja agora. Tenta de novo em um minuto.';
+    }
+    if (!Array.isArray(lista)) lista = [];
+
+    // Meia-noite de hoje em Brasília. Comparar com o fuso do servidor daria o
+    // dia errado por 3 horas toda madrugada — e é justamente de madrugada que
+    // o operador confere o fechamento.
+    const hojeBRT = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date());
+
+    const doDia = lista.filter((p) => {
+      const criado = p.created_at || p.createdAt;
+      if (!criado) return false;
+      return new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Sao_Paulo',
+        year: 'numeric', month: '2-digit', day: '2-digit',
+      }).format(new Date(criado)) === hojeBRT;
+    });
+
+    let pagos = 0;
+    let total = 0;
+    let aguardando = 0;
+    const semChave = [];
+
+    for (const cru of doDia) {
+      const f = tools.formatOrder(cru);
+      if (f.pago) {
+        pagos++;
+        total += Number(cru.total ?? cru.amount ?? 0) || 0;
+        // Item sem chave num pedido pago = entrega manual pendente.
+        if ((f.itens || []).some((i) => !i.chave)) semChave.push(f.codigo);
+      } else {
+        aguardando++;
+      }
+    }
+
+    const brl = (n) => `R$ ${n.toFixed(2).replace('.', ',')}`;
+    const linhas = [
+      '📊 *Hoje*',
+      '',
+      `Vendas pagas: *${pagos}*`,
+      `Faturado: *${brl(total)}*`,
+      `Aguardando pagamento: ${aguardando}`,
+    ];
+
+    if (semChave.length) {
+      linhas.push(
+        '',
+        `⚠️ *${semChave.length} pedido(s) pago(s) sem chave* — entrega na mão:`,
+        ...semChave.slice(0, 8).map((c) => `• ${c}`),
+      );
+      if (semChave.length > 8) linhas.push(`_e mais ${semChave.length - 8}._`);
+    }
+
+    if (!doDia.length) {
+      linhas.push('', '_Nenhum pedido hoje ainda._');
+    }
+
+    return linhas.join('\n');
   }
 
   // ── #fila ──────────────────────────────────────────────

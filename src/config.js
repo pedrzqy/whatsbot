@@ -147,7 +147,22 @@ const config = {
       // Promoção de jogo Nintendo aleatório — 2x/dia (horários em COMMUNITY_PROMO_HOURS).
       ...parseHours(process.env.COMMUNITY_PROMO_HOURS, '13,18').map((h) => ({ key: 'promo', everyDays: 1, hour: h })),
       { key: 'coupon', everyDays: Number(process.env.COMMUNITY_COUPON_EVERY_DAYS ?? 0), hour: Number(process.env.COMMUNITY_COUPON_HOUR ?? 17) },
+      // Pedido de avaliação. A cada 3 dias por padrão: reputação é o que faz um
+      // desconhecido comprar jogo digital de loja pequena, mas pedir toda hora
+      // vira a mensagem que o grupo aprende a ignorar.
+      { key: 'avaliacao', everyDays: Number(process.env.COMMUNITY_AVALIACAO_EVERY_DAYS ?? 3), hour: Number(process.env.COMMUNITY_AVALIACAO_HOUR ?? 15) },
     ].filter((s) => s.everyDays > 0 && s.hour >= 0 && s.hour < 24),
+
+    // AVALIACAO nao e REVIEWS. `reviews` sao analises de JOGOS (o gerador que
+    // busca noticia); `avaliacao` e o pedido de opiniao sobre a LOJA. Os nomes
+    // ficaram deliberadamente diferentes: COMMUNITY_REVIEW_HOUR e
+    // COMMUNITY_REVIEWS_HOUR seriam duas variaveis separadas por um S, e uma
+    // hora alguem preencheria a errada sem entender por que nada mudou.
+    // Para onde mandar quem quiser avaliar. Vazio = o pedido convida a
+    // responder no próprio grupo, que não depende de link nenhum.
+    avaliacaoUrl: process.env.COMMUNITY_AVALIACAO_URL || '',
+    // Imagem fixa do post de avaliação. Vazio = usa a capa de um jogo da loja.
+    avaliacaoImagem: process.env.COMMUNITY_AVALIACAO_IMAGEM || '',
 
     // ── FASE 2 (interativo): responder no grupo quando marcarem o bot (@) ou usarem gatilho ──
     // Default OFF. Além disto, a Evolution só entrega msgs de grupo se groupsIgnore=false.

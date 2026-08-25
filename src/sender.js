@@ -134,7 +134,27 @@ async function processJob(job) {
     try { await evolution.sendPresence(number, 'paused', evoOpts); } catch { /* idem */ }
   }
 
-  // 4) Envio. Com imagem → card de mídia. Se opts.imageOnly, NÃO cai pra texto (lança).
+  // 4) Envio.
+  //
+  // LISTA primeiro, quando pedida. Ela passa pelo Baileys, que reimplementa um
+  // formato não documentado do WhatsApp — o suporte muda entre versões da
+  // Evolution e some sem aviso. Por isso a falha aqui NUNCA propaga: cai no
+  // texto numerado, que é o menu que sempre funcionou, e o cliente nem percebe
+  // que existiam duas formas. Quebrar o menu quebra a porta de entrada
+  // inteira, e nenhum ganho de conversão paga isso.
+  if (opts.list) {
+    try {
+      await evolution.sendList(number, opts.list, evoOpts);
+      const tl = Date.now();
+      lastGlobalSendAt = tl;
+      lastContactSendAt.set(number, tl);
+      return;
+    } catch (err) {
+      console.warn(`[sender] lista falhou (${err.response?.status || '?'}) — mandando o menu em texto`);
+    }
+  }
+
+  // Com imagem → card de mídia. Se opts.imageOnly, NÃO cai pra texto (lança).
   if (opts.image) {
     try {
       await evolution.sendMedia(

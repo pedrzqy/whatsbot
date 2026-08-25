@@ -52,6 +52,36 @@ async function sendPresence(number, presence = 'composing', opts = {}) {
   return data;
 }
 
+/**
+ * Envia um menu como LISTA nativa do WhatsApp.
+ *
+ * Lista e não botão: o WhatsApp aceita no máximo 3 botões de resposta, e o
+ * menu principal da loja tem 8 opções. Cortar para 3 seria esconder metade do
+ * atendimento atrás de um "ver mais".
+ *
+ * Quem chama precisa estar pronto para isto FALHAR. Lista e botão passam pelo
+ * Baileys, que reimplementa um formato não documentado do WhatsApp: o suporte
+ * muda entre versões da Evolution e some sem aviso. Por isso nada aqui tem
+ * fallback interno — o sender.js decide, e ele cai no menu de texto numerado,
+ * que sempre funcionou.
+ *
+ * `rowId` de cada linha é o NÚMERO da opção. Assim, venha a resposta do
+ * WhatsApp como id da linha ou como texto do título, o menu resolve pelo mesmo
+ * caminho de quem digitou "3" na mão.
+ */
+async function sendList(number, { title, description, buttonText, footer, rows }, opts = {}) {
+  const instance = opts.instance || config.evolution.instance;
+  const { data } = await http.post(`/message/sendList/${instance}`, {
+    number: toNumber(number),
+    title,
+    description,
+    buttonText,
+    footerText: footer,
+    sections: [{ title: buttonText || 'Opções', rows }],
+  });
+  return data;
+}
+
 /** Envia mídia (imagem/documento) por URL. `opts.instance` permite outra instância. */
 async function sendMedia(number, { mediatype, media, caption, fileName }, opts = {}) {
   const instance = opts.instance || config.evolution.instance;
@@ -91,5 +121,6 @@ module.exports = {
   sendText,
   sendPresence,
   sendMedia,
+  sendList,
   getBase64FromMediaMessage,
 };

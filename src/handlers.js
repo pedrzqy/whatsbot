@@ -18,6 +18,7 @@ const ai = require('./ai');
 const sender = require('./sender');
 const variator = require('./variator');
 const operador = require('./ponte/operador');
+const vendas = require('./vendas');
 const recepcao = require('./ponte/recepcao');
 const ponte = require('./ponte');
 const menu = require('./menu');
@@ -51,6 +52,24 @@ function extrairPedido(texto) {
   if (!codigo) return null;
 
   return { codigo, email };
+}
+
+/**
+ * Manda o menu de um nó, nas DUAS formas de uma vez.
+ *
+ * O corpo é o menu numerado de sempre; a lista nativa vai em `opts.list`. Quem
+ * decide é o sender: se a lista falhar — e ela passa pelo Baileys, que muda o
+ * formato sem aviso — o texto sai e o cliente nem percebe que existiam duas.
+ * Quebrar o menu quebra a porta de entrada inteira, e nenhum ganho de toque
+ * paga isso.
+ *
+ * `antes` é a frase que abre o menu ("não achei essa opção"). Vai nas duas,
+ * senão quem recebe a lista perde o contexto que quem recebe o texto tem.
+ */
+async function enviarMenu(from, nodeId, antes = '') {
+  const corpo = menu.render(nodeId);
+  const texto = antes ? `${antes}\n\n${corpo}` : corpo;
+  await sender.send(from, texto, { list: menu.lista(nodeId, antes) });
 }
 
 /**
@@ -148,16 +167,46 @@ async function acaoDoMenu(acao, { from, pushName }) {
   }
 
   if (acao === 'pedido') {
-    // Pede os dois dados de uma vez: sem os dois a consulta nem sai, então
-    // perguntar separado seria ida e volta à toa.
-    //
     // NÃO marca modoIA: quem lê a resposta é a regex de extrairPedido(), que
     // roda antes do fallback e independe disso. Marcar aqui era o que prendia
     // o cliente no laço do menu quando ele mandava outra coisa.
     store.saveContact(from, { menuNode: 'main', modoIA: false });
+
+    // Tenta pelo TELEFONE antes de pedir qualquer coisa.
+    //
+    // O cliente está falando pelo número que cadastrou no checkout — o dado
+    // que a consulta precisa já está na mão. Exigir um UUID e o e-mail antes
+    // de olhar era pedir ao cliente que provasse o que a conversa já provava,
+    // e é onde a maioria desistia e chamava atendente.
+    //
+    // O caminho por código + e-mail continua logo abaixo, para quem comprou de
+    // outro número ou digitou o telefone errado no checkout.
+    try {
+      const meus = await vendas.pedidosDoTelefone(from);
+      if (meus.length) {
+        const r = tools.formatOrder(meus[0]);
+        await sender.send(from, respostaDePedido(r, { codigo: r.codigo }));
+        if (meus.length > 1) {
+          await sender.send(
+            from,
+            `_Você tem ${meus.length} pedidos neste número. Esse é o mais recente — ` +
+              `para ver outro, manda o *código* e o *e-mail* da compra._`,
+          );
+        }
+        console.log(`[pedido] ${from} consultado pelo telefone — ${meus.length} pedido(s)`);
+        return true;
+      }
+    } catch (err) {
+      // Busca fora do ar cai no caminho manual, que sempre funcionou.
+      console.warn('[pedido] busca por telefone falhou:', err.message);
+    }
+
+    // Pede os dois dados de uma vez: sem os dois a consulta nem sai, então
+    // perguntar separado seria ida e volta à toa.
     await sender.send(
       from,
-      '📦 Para consultar seu pedido eu preciso de *2 coisas*:\n\n' +
+      '📦 Não achei pedido feito com este número.\n\n' +
+        'Para consultar eu preciso de *2 coisas*:\n\n' +
         '1️⃣ O *código do pedido*\n' +
         '2️⃣ O *e-mail* usado na compra\n\n' +
         'Pode mandar os dois na mesma mensagem 👍',
@@ -370,7 +419,7 @@ async function handleMessage(msg) {
     // depois)" e isso nunca acontecia: menu.js não era importado por ninguém.
     // Sem ele, toda pergunta caía na IA, inclusive as de resposta fixa.
     store.saveContact(from, { menuNode: 'main', modoIA: false });
-    await sender.send(from, menu.render('main'));
+    await enviarMenu(from, 'main');
     return;
   }
 
@@ -383,7 +432,7 @@ async function handleMessage(msg) {
       modoIA: false, // volta ao menu = sai da conversa livre
       ...nameFields,
     });
-    await sender.send(from, `${variator.resumed()}\n\n${menu.render('main')}`);
+    await enviarMenu(from, 'main', variator.resumed());
     return;
   }
 
@@ -439,21 +488,26 @@ async function handleMessage(msg) {
   // Só entra enquanto o cliente está navegando o menu (menuNode) e ainda não
   // pediu conversa livre (modoIA). Depois que ele escolhe "problema com a
   // compra", tudo passa direto para a IA.
-  if (contact?.menuNode && !contact?.modoIA && /^\d{1,2}$/.test(trimmed)) {
-    const escolha = menu.resolve(contact.menuNode, trimmed);
+  //
+  // Aceita também o TOQUE numa linha do menu em lista. O que volta do WhatsApp
+  // é o número da opção (o rowId) ou o título exato da linha — nunca uma frase
+  // do cliente, porque menu.resolve() casa título por igualdade e não por
+  // prefixo. Sem isto, quem tocasse no menu receberia o menu de novo, e o
+  // caminho novo pareceria quebrado justamente para quem o usou.
+  const porToque = contact?.menuNode && !contact?.modoIA ? menu.resolve(contact.menuNode, trimmed) : null;
+
+  if (contact?.menuNode && !contact?.modoIA && (/^\d{1,2}$/.test(trimmed) || porToque)) {
+    const escolha = porToque || menu.resolve(contact.menuNode, trimmed);
 
     if (!escolha) {
-      await sender.send(
-        from,
-        `Não achei essa opção 🤔\n\n${menu.render(contact.menuNode)}`,
-      );
+      await enviarMenu(from, contact.menuNode, 'Não achei essa opção 🤔');
       return;
     }
 
     // Submenu: só troca de nó e mostra as opções de lá.
     if (escolha.goto) {
       store.saveContact(from, { menuNode: escolha.goto });
-      await sender.send(from, menu.render(escolha.goto));
+      await enviarMenu(from, escolha.goto);
       return;
     }
 
@@ -511,10 +565,7 @@ async function handleMessage(msg) {
     // Pior: como a escolha nunca era executada, "falar com um atendente"
     // também não rodava, e o cliente que pediu humano continuava no laço.
     store.saveContact(from, { menuNode: 'main', modoIA: false });
-    await sender.send(
-      from,
-      `${variator.pick(NAO_ENTENDI)}\n\n${menu.render('main')}`,
-    );
+    await enviarMenu(from, 'main', variator.pick(NAO_ENTENDI));
     return;
   }
 
@@ -627,19 +678,10 @@ async function onNerixEvent(event) {
   const { event: name, data } = event;
   console.log(`[nerix] evento ${name} — pedido ${data?.order_number}`);
 
-  switch (name) {
-    case 'order.paid':
-      // TODO: notificar cliente no WhatsApp que o pagamento foi confirmado
-      break;
-    case 'order.delivered':
-      // TODO: enviar a(s) product_key(s) para o cliente
-      break;
-    case 'order.cancelled':
-      // TODO: avisar cancelamento/expiração
-      break;
-    default:
-      break;
-  }
+  // O que fazer com cada evento mora no vendas.js. Aqui só a ponte entre o
+  // webhook e ele: entrega de chave tem trava de idempotência e estado em
+  // disco, e isso não cabia no meio dos handlers de mensagem.
+  await vendas.onEvento(event);
 }
 
 // extrairPedido e respostaDePedido exportados para teste: são eles que

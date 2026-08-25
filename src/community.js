@@ -245,6 +245,61 @@ async function genReviews() {
   return null; // nada com imagem agora
 }
 
+/**
+ * AVALIAÇÃO: convida quem já comprou a contar a experiência.
+ *
+ * Reputação é o que faz um desconhecido comprar jogo digital de uma loja
+ * pequena, e ela não aparece sozinha — cliente satisfeito some, cliente
+ * insatisfeito escreve. Pedir é o que equilibra.
+ *
+ * NADA de dado de compra aqui. O post é o mesmo para todo mundo e não cita
+ * nome, telefone, pedido nem produto comprado: isso é grupo, e o que sai aqui
+ * é público para todos os membros. Prova social se faz com quem responde
+ * porque quis, não expondo quem comprou.
+ *
+ * Com imagem porque post com card para de rolar o polegar; sem imagem que
+ * funcione, não posta — mesma regra dos outros geradores, e pelo mesmo motivo
+ * (imagem quebrada no grupo parece loja abandonada).
+ */
+const PEDIDOS_AVALIACAO = [
+  'Quem já comprou aqui, conta pra gente como foi? 👀',
+  'Fala, pessoal! Quem já pegou jogo com a gente, deixa o feedback aí 👇',
+  'Comprou com a gente e deu tudo certo? Conta aqui pro pessoal 😄',
+  'A opinião de vocês ajuda demais quem tá chegando agora 🙌',
+];
+
+async function genAvaliacao() {
+  let image = cfg.avaliacaoImagem || null;
+
+  if (!image) {
+    // Capa de um jogo da loja: imagem que já sabemos que carrega, e que fala
+    // do assunto do grupo. Sorteia entre os primeiros para o post não sair
+    // sempre com a mesma capa.
+    try {
+      const data = await nerix.listProducts({ limit: 20 });
+      const list = (data.data || data || []).filter((p) => Array.isArray(p.images) && p.images[0]);
+      for (const p of list.sort(() => Math.random() - 0.5).slice(0, 5)) {
+        const url = storeImage(p.images);
+        if (await news.imageOk(url)) { image = url; break; }
+      }
+    } catch (err) {
+      console.warn('[community] avaliação: não achei capa:', err.response?.status || err.message);
+    }
+  }
+
+  if (!image) return null; // sem imagem boa, não posta
+
+  const linhas = [variator.pick(PEDIDOS_AVALIACAO), ''];
+  if (cfg.avaliacaoUrl) {
+    linhas.push(`Deixa sua avaliação aqui: ${cfg.avaliacaoUrl}`);
+  } else {
+    linhas.push('É só responder aqui no grupo — leva 10 segundos e ajuda muita gente 💚');
+  }
+  linhas.push('', `Ainda não comprou? ${STORE_URL}`);
+
+  return { text: linhas.join('\n'), image };
+}
+
 // Geradores por chave (usados pela AGENDA de cadência em config.community.schedule).
 const GENERATORS = {
   news: genNews,
@@ -252,6 +307,7 @@ const GENERATORS = {
   promo: genPromo,
   coupon: genCoupon,
   bestsellers: genBestSellers,
+  avaliacao: genAvaliacao,
 };
 
 // ─── Envio ───────────────────────────────────────────────────────────
@@ -388,4 +444,4 @@ function start() {
 
 function stop() { if (timer) { clearInterval(timer); timer = null; } }
 
-module.exports = { start, stop, tick, handleGroupMessage, genBestSellers, genPromo, genCoupon, genNews, genReviews };
+module.exports = { start, stop, tick, handleGroupMessage, genBestSellers, genPromo, genCoupon, genNews, genReviews, genAvaliacao };

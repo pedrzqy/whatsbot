@@ -8,6 +8,7 @@ const community = require('./community');
 const evolution = require('./evolution');
 const sender = require('./sender');
 const ponte = require('./ponte');
+const vendas = require('./vendas');
 const bracoRouter = require('./ponte/braco');
 
 const app = express();
@@ -60,6 +61,18 @@ app.post('/webhooks/evolution', async (req, res) => {
       message.extendedTextMessage?.text ||
       // Foto com legenda: o texto do cliente vem no caption, não em conversation.
       message.imageMessage?.caption ||
+      // Toque numa opção do MENU EM LISTA. Não vem em conversation: o WhatsApp
+      // manda uma mensagem de resposta própria, e sem estas linhas o texto
+      // chegava vazio — o cliente tocava no menu e o bot não reagia a nada.
+      //
+      // O rowId vem primeiro porque é o número da opção (ver menu.js), que
+      // resolve pelo mesmo caminho de quem digitou. O título é reserva para as
+      // versões que não mandam o id.
+      message.listResponseMessage?.singleSelectReply?.selectedRowId ||
+      message.listResponseMessage?.title ||
+      message.buttonsResponseMessage?.selectedButtonId ||
+      message.buttonsResponseMessage?.selectedDisplayText ||
+      message.templateButtonReplyMessage?.selectedId ||
       '';
 
     // GRUPOS: o agente de comunidade (Fase 2) decide se responde. Ele só age se as
@@ -145,6 +158,7 @@ const server = app.listen(config.port, () => {
   recovery.start(); // recuperação de venda: cutuca quem sumiu no meio da conversa
   community.start(); // agente de comunidade: posta conteúdo no grupo (Fase 1: só saída)
   ponte.iniciar(); // ponte com o fornecedor da Taobao (fila serial + braço robô)
+  vendas.iniciar(); // ciclo de venda: cutuca quem gerou pagamento e não pagou
 });
 
 // Socket ocioso vive 65s, não os 5s do padrão.

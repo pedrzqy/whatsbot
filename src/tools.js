@@ -344,4 +344,8 @@ async function execute(name, args = {}, ctx = {}) {
   }
 }
 
-module.exports = { definitions, execute };
+// formatOrder sai daqui para o vendas.js reusar o mapeamento de campos da
+// Nerix. Ele foi descoberto na marra (product_key vem null em produto de
+// conta, o Pix mora em payment.pix_qr_code) e ter duas leituras do mesmo
+// payload seria garantir que uma delas ficaria para trás.
+module.exports = { definitions, execute, formatOrder };
