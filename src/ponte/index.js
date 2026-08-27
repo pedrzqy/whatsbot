@@ -1089,7 +1089,13 @@ function iniciar() {
   setInterval(tick, 60 * 1000).unref();
 }
 
-const ativa = () => cfg.ativa;
+// Pelo painel, e nao direto do Environment.
+//
+// O #admin mostrava "Codigos de seguranca" com um interruptor que NAO era
+// lido por ninguem: o dono desligava, via o visto sumir na tela, e o sistema
+// continuava buscando codigo igual. Interruptor decorativo e pior que
+// interruptor nenhum -- ele faz a pessoa acreditar que desligou.
+const ativa = () => require('../chaves').ligada('codigos');
 const salvarImagem = (base64, mimetype) => midia.salvar(base64, mimetype);
 
 /**

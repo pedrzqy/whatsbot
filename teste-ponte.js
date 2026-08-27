@@ -2048,6 +2048,62 @@ const OP = '5541999999999';
   // dar Deploy. O dono não é técnico: na prática ele não mexia, e as travas que
   // nasceram desligadas ficavam desligadas para sempre porque ligá-las dava
   // trabalho demais.
+  // ── O comando chega mesmo? ─────────────────────────────────
+  //
+  // Os testes de comando chamavam `operador.executar` DIRETO, e com isso
+  // pulavam o `ehComando` — que é quem decide se aquilo é comando ou é uma
+  // mensagem de cliente. Um comando podia estar perfeito e nunca ser
+  // alcançado, e nenhum teste veria.
+  //
+  // Foi assim que o #admin chegou ao WhatsApp e a IA respondeu ao dono
+  // "Como posso te ajudar, Pedro?" em vez de abrir o painel.
+  bloco('o comando é reconhecido como comando');
+
+  const cfgP = require('./src/ponte/config');
+
+  // Todo comando anunciado no #ajuda tem que ser reconhecido. Sem esta trava, o
+  // próximo comando novo nasce anunciado e inalcançável.
+  const ajudaTexto = await operador.executar('#ajuda', OP);
+  const anunciados = [...new Set((ajudaTexto.match(/\*#(\w+)/g) || []).map((x) => x.slice(2)))];
+  t('o #ajuda anuncia comandos', anunciados.length >= 15, String(anunciados.length));
+  for (const c of anunciados) {
+    t(`#${c} é reconhecido`, operador.ehComando(OP, `#${c}`) === true);
+  }
+
+  // ── A ponte desligada NÃO pode calar o operador ──
+  //
+  // Com PONTE_ATIVA=false, nenhum comando era reconhecido — nem #admin, nem
+  // #status, nem #casos, que não têm nada a ver com a ponte. O comando caía
+  // como mensagem normal e a IA respondia ao dono como se ele fosse cliente.
+  const ativaAntes = cfgP.ativa;
+  cfgP.ativa = false;
+  for (const c of ['#admin', '#status', '#casos', '#ajuda', '#vendas']) {
+    t(`${c} funciona com a ponte desligada`, operador.ehComando(OP, c) === true);
+  }
+  cfgP.ativa = ativaAntes;
+
+  // ── E o painel não pode se trancar do lado de fora ──
+  //
+  // Desligar os códigos pelo #admin 4 off desligaria o próprio #admin, e a
+  // única saída seria o Easypanel — exatamente o que o painel existe para
+  // evitar.
+  const estadoTranca = require('./src/ponte/estado');
+  estadoTranca.dados.chaves = {};
+  await operador.executar('#admin 4 off', OP);
+  t('desligar os códigos NÃO tranca o painel',
+    operador.ehComando(OP, '#admin') === true);
+  // E o interruptor tem que fazer alguma coisa: um que não é lido por ninguém
+  // é pior que nenhum, porque faz a pessoa acreditar que desligou.
+  t('  e o interruptor realmente desliga a ponte',
+    require('./src/ponte').ativa() === false, String(require('./src/ponte').ativa()));
+  await operador.executar('#admin 4 on', OP);
+  t('  e liga de volta', require('./src/ponte').ativa() === true);
+  estadoTranca.dados.chaves = {};
+
+  // Quem não é operador continua sem ver nada disso.
+  t('cliente não alcança comando nenhum',
+    operador.ehComando('5511900001234', '#admin') === false);
+
   bloco('#admin — o painel');
 
   const chavesMod = require('./src/chaves');

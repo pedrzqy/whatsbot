@@ -66,7 +66,18 @@ const min = (ms) => Math.round(ms / 60000);
 
 /** É comando de operador? */
 function ehComando(from, texto) {
-  if (!cfg.ativa || !cfg.operador.numeros.length) return false;
+  // NAO depende mais da ponte estar ativa.
+  //
+  // Antes, com PONTE_ATIVA=false, NENHUM comando de operador era reconhecido --
+  // nem #admin, nem #status, nem #casos, que nao tem nada a ver com a ponte. O
+  // comando caia como mensagem normal e a IA respondia ao dono como se ele
+  // fosse cliente ("Como posso te ajudar, Pedro?").
+  //
+  // E com o painel isso virou uma armadilha fechada: desligar os codigos pelo
+  // #admin 4 off desligaria o proprio #admin, e a unica saida seria o Easypanel
+  // -- exatamente o que o painel existe para evitar. Comando de operador so
+  // depende de quem mandou.
+  if (!cfg.operador.numeros.length) return false;
   if (!cfg.operador.ehOperador(from)) return false;
   return /^#(fila|status|vendas|historico|liberar|ok|enviar|editar|responder|casos|analisar|admin|nao|não|pular|ajuda|sms|taobao|teste|limpar|destravar|atender|auto|recarregar)\b/i.test(
     String(texto || '').trim(),
