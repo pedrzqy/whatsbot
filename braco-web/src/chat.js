@@ -1671,6 +1671,61 @@ class Chat {
   }
 
   /**
+   * Loga o que existe de rolável e onde as mensagens estão.
+   *
+   * Existe por causa de um número que não fechava: a caixa escolhida reportou
+   * 10 balões e a exportação devolveu 20 mensagens. As duas contagens vêm de
+   * lugares diferentes — uma de dentro do container, outra do documento
+   * inteiro — e nunca eram comparadas, então a diferença passou despercebida
+   * por duas rodadas.
+   *
+   * Só lê. Não clica, não rola, não muda nada.
+   */
+  async _retratoDaLista() {
+    const r = await this.frame
+      .evaluate((msgs) => {
+        const sel = msgs[0];
+        const total = document.querySelectorAll(sel).length;
+
+        const caixas = [...document.querySelectorAll('div,ul,section,main')]
+          .filter((e) => e.scrollHeight > e.clientHeight + 10)
+          .map((e) => ({
+            classe: (e.className || '').toString().trim().slice(0, 40) || e.tagName,
+            dentro: e.querySelectorAll(sel).length,
+            altura: e.scrollHeight,
+            tela: e.clientHeight,
+          }))
+          .filter((c) => c.dentro > 0 || c.altura > 200)
+          .slice(0, 8);
+
+        // Onde mora o ancestral comum das mensagens: se ele NÃO é uma das
+        // caixas roláveis acima, a rolagem está mexendo no lugar errado.
+        const primeira = document.querySelector(sel);
+        const cadeia = [];
+        let el = primeira ? primeira.parentElement : null;
+        for (let i = 0; el && i < 6 && el !== document.body; i++) {
+          const estilo = getComputedStyle(el);
+          cadeia.push(
+            `${(el.className || '').toString().trim().slice(0, 28) || el.tagName}` +
+              `[${estilo.overflowY}${el.scrollHeight > el.clientHeight ? ',rola' : ''}]`,
+          );
+          el = el.parentElement;
+        }
+
+        return { total, caixas, cadeia };
+      }, SEL.mensagem.candidatos)
+      .catch(() => null);
+
+    if (!r) return;
+
+    console.log(`[chat] retrato — ${r.total} balão(ões) no documento inteiro`);
+    for (const c of r.caixas) {
+      console.log(`[chat] retrato — rolável "${c.classe}": ${c.dentro} balões, ${c.altura}/${c.tela}px`);
+    }
+    console.log(`[chat] retrato — acima da 1ª mensagem: ${r.cadeia.join(' → ')}`);
+  }
+
+  /**
    * A conversa inteira, rolando para trás.
    *
    * A LISTA É VIRTUALIZADA — foi o que derrubou a primeira versão. O chat
@@ -1699,7 +1754,18 @@ class Chat {
     guardar(await this._coletarVisiveis()); // o que já está na tela
     const naTela = vistas.size;
 
+    // Retrato do DOM antes de rolar.
+    //
+    // A rodada anterior reportou "10 balões" na caixa escolhida e devolveu 20
+    // mensagens: metade estava FORA do container que a rolagem move. Isso não
+    // aparece em nenhum número do laço — as duas contagens vêm de lugares
+    // diferentes e nunca são comparadas. Aqui elas ficam lado a lado.
+    await this._retratoDaLista();
+
     let secas = 0;
+    // Quantas vezes já insisti com a roda estando no topo. Limitado porque a
+    // alternativa é rolar contra um topo que não tem mais nada, para sempre.
+    let noTopo = 0;
     let rolagens = 0;
     let diagnostico = '';
 
@@ -1735,19 +1801,43 @@ class Chat {
       await this.pagina.waitForTimeout(humaniza.ms(1400, 2800));
       guardar(await this._coletarVisiveis());
 
-      const novas = vistas.size - antes;
+      let novas = vistas.size - antes;
       console.log(`[chat] histórico — rolagem ${rolagens}: +${novas} (total ${vistas.size})`);
+
+      // NO TOPO E SEM NOVIDADE: insiste com o GESTO, não com scrollTop.
+      //
+      // Este é o ponto onde a exportação estava morrendo. A área rolável tem
+      // ~900px: em três rolagens o scrollTop chega a zero, e daí em diante
+      // escrever scrollTop=0 de novo não é evento nenhum para o componente —
+      // ele já está lá. O que dispara o "carregar mais" é a pessoa continuar
+      // rolando contra o topo, e isso é a roda do mouse.
+      //
+      // A roda antes só era tentada quando o scrollTop não mexia. Aqui ele
+      // mexe (vai até zero direitinho), então o gesto nunca era usado
+      // justamente no lugar em que ele é o único que funciona.
+      //
+      // E a espera aqui é longa: carregar um bloco antigo vai ao servidor da
+      // Taobao, e o custo de esperar 5s é nada perto de desistir do mês.
+      if (novas === 0 && rel.depois === 0 && noTopo < 3) {
+        noTopo++;
+        console.log(`[chat] histórico — no topo, insistindo com a roda (${noTopo}/3)`);
+        await this._rolarComRoda(rel.altura);
+        await this.pagina.waitForTimeout(humaniza.ms(3500, 6000));
+        guardar(await this._coletarVisiveis());
+        novas = vistas.size - antes;
+        if (novas > 0) {
+          console.log(`[chat] histórico — a roda destravou: +${novas}`);
+          noTopo = 0;
+        }
+      }
 
       if (novas === 0) {
         // Três seguidas sem novidade, e não duas: a primeira pode ser só o
         // carregamento demorando mais que a pausa.
-        if (++secas >= 3) { diagnostico += ' · parou por 3 rolagens sem novidade'; break; }
+        if (++secas >= 3) { diagnostico += ` · sem novidade após ${noTopo} tentativa(s) no topo`; break; }
       } else {
         secas = 0;
       }
-
-      // No topo E sem novidade: acabou o histórico que o chat entrega.
-      if (rel.depois === 0 && secas >= 1) { diagnostico += ' · chegou ao topo'; break; }
     }
 
     const mensagens = [...vistas.values()];

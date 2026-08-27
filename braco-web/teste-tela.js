@@ -287,6 +287,8 @@ t('nenhum candidato mira por posição', !CAND.some((c) => /nth-child|nth-of-typ
     const c = chatFalso(paginaFalsa(CHAT_URL));
     c.prender = async () => {};
     c.checarBloqueio = async () => {};
+    c._retratoDaLista = async () => {};
+    c._rolarComRoda = async () => false;
 
     // Posição em "mensagens a partir do fim". 0 = fundo da lista.
     let offset = 0;
@@ -330,6 +332,69 @@ t('nenhum candidato mira por posição', !CAND.some((c) => /nth-child|nth-of-typ
     `${datas[0]} … ${datas[datas.length - 1]}`,
   );
 
+  // ── No topo, quem destrava é o GESTO ───────────────────────
+  //
+  // O caso real: a área rolável tem ~900px e a tela 360px, então em três
+  // rolagens o scrollTop chega a zero. Daí em diante escrever scrollTop=0 de
+  // novo não é evento nenhum para o componente — ele já está lá — e o "carregar
+  // mais" nunca dispara. Quem dispara é a pessoa continuar rolando contra o
+  // topo, e isso é a roda do mouse.
+  //
+  // A roda antes só era tentada quando o scrollTop NÃO mexia. Aqui ele mexe
+  // (vai a zero direitinho), então o gesto nunca era usado justamente onde é o
+  // único que funciona. Foi assim que a exportação morreu em 20 mensagens,
+  // três rodadas seguidas.
+  console.log('\n--- no topo, a roda carrega o bloco anterior ---');
+
+  const BLOCO = 10;
+  let carregados = BLOCO; // o chat começa com um bloco na tela
+  let rodadas = 0;
+
+  const chatTopo = chatFalso(paginaFalsa(CHAT_URL));
+  chatTopo.prender = async () => {};
+  chatTopo.checarBloqueio = async () => {};
+  chatTopo._retratoDaLista = async () => {};
+
+  // scrollTop sempre chega a zero: a área rolável é curta, como no chat real.
+  chatTopo._rolarUmaTela = async () => ({
+    ok: true, antes: 360, depois: 0, altura: 360, total: 896,
+    baloes: BLOCO, candidatas: 1, classe: 'rc-scrollbars-view',
+  });
+
+  // O bloco anterior só chega quando a RODA é usada — é o gesto que o
+  // componente escuta.
+  chatTopo._rolarComRoda = async () => {
+    rodadas++;
+    if (carregados < TOTAL) carregados = Math.min(TOTAL, carregados + BLOCO);
+    return true;
+  };
+  chatTopo._coletarVisiveis = async () => todas.slice(0, carregados);
+
+  const { mensagens: comRoda } = await chatTopo.lerHistorico({ maxRolagens: 40 });
+
+  t('a roda foi usada no topo', rodadas > 0, `${rodadas} vez(es)`);
+  t('e trouxe o histórico inteiro', comRoda.length === TOTAL, `${comRoda.length} de ${TOTAL}`);
+  t('não parou no primeiro bloco', comRoda.length > BLOCO * 2, `${comRoda.length}`);
+
+  console.log('\n--- topo de verdade: para de insistir ---');
+
+  let rodadasVazias = 0;
+  const chatFim = chatFalso(paginaFalsa(CHAT_URL));
+  chatFim.prender = async () => {};
+  chatFim.checarBloqueio = async () => {};
+  chatFim._retratoDaLista = async () => {};
+  chatFim._rolarUmaTela = async () => ({
+    ok: true, antes: 0, depois: 0, altura: 360, total: 400,
+    baloes: BLOCO, candidatas: 1, classe: 'rc-scrollbars-view',
+  });
+  chatFim._rolarComRoda = async () => { rodadasVazias++; return true; };
+  chatFim._coletarVisiveis = async () => todas.slice(0, BLOCO); // nunca cresce
+
+  await chatFim.lerHistorico({ maxRolagens: 40 });
+
+  // Insistir para sempre contra um topo que acabou seria rolagem repetida no
+  // chat de outra pessoa — o oposto da cadência que a pausa existe para manter.
+  t('desiste depois de poucas tentativas', rodadasVazias <= 3, `${rodadasVazias} tentativa(s)`);
   console.log('\n--- histórico quando o chat não rola ---');
 
   const chatSemRolagem = chatVirtualizado();
