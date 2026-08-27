@@ -155,7 +155,13 @@ router.post('/historico', async (req, res) => {
       // de "veio curto de novo" custava uma ida ao painel de logs para
       // descobrir o porquê — e o porquê cabe numa linha.
       (diagnostico ? `\n_${diagnostico}_\n` : '') +
-      `\n_Está salvo no servidor, em data/historico-coleta.json._`,
+      // Diz QUAL serviço, e o comando inteiro.
+      //
+      // "Está salvo no servidor" mandou o operador procurar no console do
+      // serviço errado — quem rola a tela é um, quem grava o arquivo é o
+      // outro, e de fora não há como saber qual. Sem o `cat` na frente, o
+      // caminho sozinho vira "command not found".
+      `\n_Console do *whatsbot*:_\n\`cat data/historico-coleta.json\``,
   );
 
   res.json({ ok: true, gravadas: mensagens.length });
