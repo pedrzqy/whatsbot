@@ -475,6 +475,18 @@ async function handleMessage(msg) {
   // O cliente acabou de contar o que houve. Sem IA não há quem leia, então vai
   // para o operador — e o cliente é PAUSADO, senão continuaria conversando com
   // o menu enquanto espera atendimento humano.
+  //
+  // ISTO NÃO É CÓDIGO MORTO COM A IA LIGADA, e a condição não é acidental.
+  // Quem MARCA o `aguardandoProblema` é a opção 7 do menu, e essa sim só marca
+  // com a IA desligada. O tratamento aqui não é condicionado por dois motivos:
+  //
+  //  1. Quem já estava com o flag marcado no instante em que BOT_IA virou true
+  //     continua com ele em disco. Sem esta drenagem, esse cliente contaria o
+  //     problema e cairia na IA sem ninguém ser avisado — depois de ter lido
+  //     "me conta o que aconteceu" e esperar uma pessoa.
+  //  2. BOT_IA=false é o caminho de volta documentado, e é uma variável no
+  //     painel, sem deploy. Apagar este bloco faria o rollback deixar de ser
+  //     rollback: a opção 7 voltaria a marcar o flag e ninguém o leria.
   if (contact?.aguardandoProblema && trimmed) {
     const nome = store.getContact(from)?.name || pushName || 'cliente';
     store.saveContact(from, { aguardandoProblema: false, paused: true, menuNode: null });

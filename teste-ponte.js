@@ -1181,11 +1181,123 @@ const OP = '5541999999999';
   estadoPonte.dados.atendimentos = [];
   estadoPonte.dados.aprovacoes = [];
 
+  // ── Com a IA ligada: o que muda e o que NÃO pode mudar ─────
+  //
+  // Este bloco existe porque BOT_IA=true troca o caminho principal do
+  // atendimento inteiro, e as coisas que ele pode quebrar são silenciosas: o
+  // pedido de código deixando de ser determinístico, e a queda da IA virando
+  // uma mensagem de desculpa em vez de uma saída.
+  bloco('com a IA ligada');
+
+  const handlers = require('./src/handlers');
+  const cfgBot = require('./src/config');
+  const aiMod = require('./src/ai');
+  const storeBot = require('./src/store');
+
+  const iaAntes = cfgBot.iaLigada;
+  const autoAntes = cfgBot.autoReply;
+  const replyAntes = aiMod.reply;
+  cfgBot.iaLigada = true;
+  cfgBot.autoReply = true;
+
+  const senderBot = require('./src/sender');
+  const sendBotAntes = senderBot.send;
+
+  /** Manda uma mensagem como cliente e devolve o que ele recebeu de volta. */
+  async function comoCliente(from, texto) {
+    const recebido = [];
+    senderBot.send = async (para, t) => { recebido.push({ para, texto: String(t) }); };
+    try {
+      await handlers.onIncomingMessage({ from, text: texto, pushName: 'Carla' });
+    } finally {
+      senderBot.send = sendBotAntes;
+    }
+    return recebido.filter((r) => r.para === from).map((r) => r.texto).join('\n---\n');
+  }
+
+  // 1) A recepção da ponte continua ANTES da IA, e determinística.
+  //
+  // Pedido de código é estereotipado: regra fixa não custa token, não alucina,
+  // não muda de ideia e roda com a IA fora do ar. Se a IA passar a comer este
+  // caminho, o cliente conversa sobre o código em vez de receber o passo a passo.
+  let chamouIA = false;
+  aiMod.reply = async () => { chamouIA = true; return 'resposta da IA'; };
+
+  estadoPonte.dados.atendimentos = [];
+  estadoPonte.dados.tarefas = [];
+  // greetedAt/lastSeen: sem isto a BOAS-VINDAS entra na frente e o cenario
+  // passa a medir o primeiro contato, nao o caminho que esta sendo testado.
+  const jaSaudado = { paused: false, greetedAt: Date.now(), lastSeen: Date.now() };
+  storeBot.saveContact('5541933330001', { ...jaSaudado, menuNode: null, modoIA: false });
+  const pedeCodigo = await comoCliente('5541933330001', 'preciso do codigo');
+
+  t('pedido de código NÃO passa pela IA', chamouIA === false, chamouIA ? 'passou' : 'seguiu a regra fixa');
+  t('  e o cliente recebe o passo a passo', /foto|print|usu[áa]rio/i.test(pedeCodigo),
+    pedeCodigo.split('\n')[0]);
+
+  // 2) Assunto qualquer vai para a IA.
+  chamouIA = false;
+  storeBot.saveContact('5541933330002', { ...jaSaudado, menuNode: null, modoIA: false });
+  const conversa = await comoCliente('5541933330002', 'vocês têm mario kart pra switch 2?');
+  t('assunto solto vai para a IA', chamouIA === true);
+  t('  e a resposta dela chega ao cliente', /resposta da IA/.test(conversa), conversa);
+
+  // 3) A REDE: IA caída manda o MENU, não uma desculpa.
+  //
+  // `variator.error()` deixava o cliente sem saída — ele lia "tive um
+  // probleminha", mandava a mesma coisa de novo e caía no mesmo erro. O menu
+  // tem oito caminhos que funcionam sem LLM nenhuma, e é justamente quando ela
+  // cai que ele mais precisa deles.
+  aiMod.reply = async () => { throw new Error('todas as camadas caíram'); };
+  storeBot.saveContact('5541933330003', { ...jaSaudado, menuNode: null, modoIA: false });
+  const semIA = await comoCliente('5541933330003', 'quanto custa zelda?');
+
+  t('IA caída devolve o menu', /1[\)\.\-–]|Escolhe|escolhe/.test(semIA), semIA.split('\n')[0]);
+  t('  e não uma desculpa sem saída', !/probleminha|deu erro|tente novamente/i.test(semIA), semIA);
+  // Regra 1 e 2: nada de origem, nada de robô, nada de admitir defeito.
+  t('  sem entregar a origem nem admitir defeito',
+    !PROIBIDO.test(semIA) && !AUTOMACAO.test(semIA) && !REPASSE.test(semIA) && !politica.temCJK(semIA),
+    (semIA.match(AUTOMACAO) || semIA.match(PROIBIDO) || [''])[0] || 'limpo');
+
+  // E o menu tem que continuar RESPONDENDO depois da queda, senão a rede não é
+  // rede: o modoIA precisa ter sido limpo junto.
+  const depoisDaQueda = storeBot.getContact('5541933330003');
+  t('  e o menu volta a valer para a próxima mensagem',
+    depoisDaQueda?.modoIA === false && depoisDaQueda?.menuNode === 'main',
+    `modoIA=${depoisDaQueda?.modoIA} menuNode=${depoisDaQueda?.menuNode}`);
+
+  // 4) O flag antigo continua sendo drenado com a IA ligada.
+  //
+  // `aguardandoProblema` é marcado só com a IA DESLIGADA, mas quem já estava
+  // com ele marcado quando a chave virou continua no estado antigo — e o
+  // tratamento não é condicionado à IA justamente por isso. Sem esta drenagem,
+  // esse cliente contaria o problema e cairia na IA sem ninguém ser avisado.
+  aiMod.reply = async () => 'resposta da IA';
+  const alertasFlag = [];
+  senderBot.send = async (para, t2) => { alertasFlag.push({ para, texto: String(t2) }); };
+  storeBot.saveContact('5541933330004', { ...jaSaudado, aguardandoProblema: true, menuNode: null });
+  await handlers.onIncomingMessage({
+    from: '5541933330004',
+    text: 'comprei e nao recebi a chave',
+    pushName: 'Carla',
+  });
+  senderBot.send = sendBotAntes;
+
+  t('quem já estava contando o problema é atendido',
+    alertasFlag.some((a) => a.para === OP && /nao recebi a chave/i.test(a.texto)),
+    JSON.stringify(alertasFlag.map((a) => a.para)));
+  t('  e o operador é avisado, não a IA',
+    storeBot.getContact('5541933330004')?.paused === true);
+
+  aiMod.reply = replyAntes;
+  cfgBot.iaLigada = iaAntes;
+  cfgBot.autoReply = autoAntes;
+
   // ── #status ────────────────────────────────────────────────
   //
   // O sintoma que chega é sempre "o bot parou", e a causa quase nunca é o bot.
   // Este comando existe para separar as causas — então o que ele NÃO pode
-  // fazer é morrer junto com a peça que caiu: é exatamente aí que se usa ele.
+  // fazer é morrer junto com a peça que semIA: é exatamente aí que se usa ele.
   bloco('#status separa as causas');
 
   const evolutionMod = require('./src/evolution');
