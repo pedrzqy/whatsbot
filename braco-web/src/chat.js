@@ -1456,36 +1456,116 @@ class Chat {
     return novas;
   }
   /**
-   * Sobe UMA tela na conversa. Devolve o scrollTop resultante, ou null quando
-   * não achou container rolável.
+   * Acha a caixa que rola e a empurra UMA tela para cima.
    *
-   * Uma tela por vez, e não scrollTop=0: pular direto para o topo não dispara
-   * o carregamento do bloco anterior de forma confiável.
+   * Devolve um relatório, não um booleano. Quando a exportação volta com o dia
+   * de hoje só, a pergunta é "rolou e não carregou" ou "nem rolou?" — e sem
+   * scrollTop antes/depois no log as duas ficam idênticas. Foi exatamente onde
+   * a primeira investigação empacou.
+   *
+   * DOIS caminhos, porque um só não basta:
+   *
+   *  1. scrollTop no container. Funciona quando a lista é um scroll de
+   *     verdade.
+   *  2. Roda do mouse sobre a lista. Este chat é React com rc-scrollbars, e
+   *     componente de scroll customizado costuma ignorar scrollTop escrito de
+   *     fora — ele controla a posição e a devolve no próximo render. A roda
+   *     passa pelo handler do componente, que é o caminho que uma pessoa usa.
    */
   async _rolarUmaTela() {
-    return this.frame
-      .evaluate((cands) => {
-        let ultima = null;
-        for (const s of cands) {
-          const els = document.querySelectorAll(s);
-          if (els.length) { ultima = els[els.length - 1]; break; }
-        }
-        if (!ultima) return null;
+    const rel = await this.frame
+      .evaluate(
+        (args) => {
+          const { cands, msgs } = args;
 
-        // Sobe até o primeiro ancestral que rola, parando no body — sem esse
-        // limite a rolagem escapa para a página inteira e a tela salta.
-        let el = ultima.parentElement;
-        while (el && el !== document.body && el !== document.documentElement) {
-          const estilo = getComputedStyle(el);
-          if (/auto|scroll|overlay/.test(estilo.overflowY) && el.scrollHeight > el.clientHeight) {
-            el.scrollTop = Math.max(0, el.scrollTop - el.clientHeight);
-            return el.scrollTop;
+          // Seletor conhecido primeiro. `rc-scrollbars-view` é o container que
+          // este chat usa (o log de um envio antigo entregou o nome) — mirar
+          // nele evita depender da subida genérica, que acha o primeiro
+          // ancestral com overflow e nem sempre é a lista.
+          let caixa = null;
+          for (const s of cands) {
+            for (const el of document.querySelectorAll(s)) {
+              if (el.scrollHeight > el.clientHeight + 10) { caixa = el; break; }
+            }
+            if (caixa) break;
           }
-          el = el.parentElement;
-        }
-        return null;
-      }, SEL.mensagem.candidatos)
-      .catch(() => null);
+
+          // Reserva: sobe do último balão até o primeiro ancestral que rola.
+          if (!caixa) {
+            let ultima = null;
+            for (const s of msgs) {
+              const els = document.querySelectorAll(s);
+              if (els.length) { ultima = els[els.length - 1]; break; }
+            }
+            let el = ultima ? ultima.parentElement : null;
+            while (el && el !== document.body && el !== document.documentElement) {
+              const estilo = getComputedStyle(el);
+              if (/auto|scroll|overlay/.test(estilo.overflowY) && el.scrollHeight > el.clientHeight) {
+                caixa = el;
+                break;
+              }
+              el = el.parentElement;
+            }
+          }
+
+          if (!caixa) {
+            // Lista do que EXISTE de rolável, para consertar o seletor sem
+            // precisar de outra rodada de tentativa e erro.
+            const roláveis = [...document.querySelectorAll('div,ul,section')]
+              .filter((e) => e.scrollHeight > e.clientHeight + 10)
+              .slice(0, 6)
+              .map((e) => `${e.tagName}.${(e.className || '').toString().trim().slice(0, 40)}`);
+            return { ok: false, motivo: 'sem container rolável', roláveis };
+          }
+
+          const antes = caixa.scrollTop;
+          caixa.scrollTop = Math.max(0, antes - caixa.clientHeight);
+
+          return {
+            ok: true,
+            antes,
+            depois: caixa.scrollTop,
+            altura: caixa.clientHeight,
+            total: caixa.scrollHeight,
+            classe: (caixa.className || '').toString().trim().slice(0, 50),
+          };
+        },
+        { cands: SEL.listaRolavel?.candidatos || [], msgs: SEL.mensagem.candidatos },
+      )
+      .catch((e) => ({ ok: false, motivo: e.message }));
+
+    if (!rel.ok) return rel;
+
+    // scrollTop não pegou: o componente devolveu a posição. Tenta a roda.
+    if (rel.depois === rel.antes && rel.antes > 0) {
+      const viaRoda = await this._rolarComRoda(rel.altura);
+      return { ...rel, viaRoda, depois: viaRoda ? -1 : rel.depois };
+    }
+
+    return rel;
+  }
+
+  /**
+   * Roda do mouse sobre a lista de mensagens.
+   *
+   * Passa pelo handler do componente de scroll em vez de escrever scrollTop
+   * por fora — é o caminho que uma pessoa usa, e o único que funciona quando o
+   * componente controla a posição.
+   *
+   * O hover é num elemento DO FRAME: o Playwright resolve as coordenadas do
+   * iframe sozinho, coisa que a conta na mão erraria.
+   */
+  async _rolarComRoda(altura = 400) {
+    try {
+      const alvo = await this.frame.$(SEL.mensagem.candidatos[0]);
+      if (!alvo) return false;
+      await alvo.hover({ timeout: 4000 });
+      await this.pagina.mouse.wheel(0, -Math.abs(altura || 400));
+      return true;
+    } catch (err) {
+      console.warn(`[chat] roda do mouse falhou: ${err.message}`);
+      return false;
+    }
   }
 
   /**
@@ -1535,16 +1615,14 @@ class Chat {
             const mData = bruto.match(/\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}/);
             const quando = mData ? mData[0] : '';
 
-            // Identidade do balão, na melhor forma que existir.
-            //
-            // Um id do próprio chat é a chave perfeita para deduplicar entre
-            // rolagens. Quando não houver, cai em autor+horário+conteúdo — que
-            // é a mesma chave da marca d'água e funciona pelo mesmo motivo.
+            // Identidade do balão, na melhor forma que existir. Um id do
+            // próprio chat é a chave perfeita para deduplicar entre rolagens;
+            // sem ele, autor+horário+conteúdo — a mesma chave da marca d'água.
             const id =
               el.id ||
               el.getAttribute('data-id') ||
               el.getAttribute('data-msg-id') ||
-              el.dataset?.messageId ||
+              (el.dataset && el.dataset.messageId) ||
               '';
 
             saida.push({
@@ -1552,8 +1630,7 @@ class Chat {
               de: nosso ? 'nos' : 'coleta',
               quando,
               // Balão sem texto entra como marcador em vez de sumir: saber que
-              // houve uma foto naquele ponto muda a leitura da conversa. Sem o
-              // marcador, a resposta seguinte parece vir do nada.
+              // houve uma foto naquele ponto muda a leitura da conversa.
               texto: limpo || '[imagem]',
             });
           }
@@ -1567,21 +1644,16 @@ class Chat {
   /**
    * A conversa inteira, rolando para trás.
    *
-   * A LISTA É VIRTUALIZADA — este é o ponto que derrubou a primeira versão.
-   * O chat recicla os nós do DOM em vez de acumular: rolar para cima não
-   * aumenta a contagem de balões, ela fica parada em ~20. A primeira versão
-   * contava nós para saber se ainda vinha coisa nova, via o número não mudar e
-   * parava na segunda rolagem, sempre com o mesmo dia na mão.
+   * A LISTA É VIRTUALIZADA — foi o que derrubou a primeira versão. O chat
+   * recicla os nós do DOM em vez de acumular: rolar não aumenta a contagem de
+   * balões, ela fica parada em ~20. Contar nós para saber se ainda vinha coisa
+   * nova via o número não mudar e parava na segunda rolagem, sempre com o mesmo
+   * dia na mão. Por isso a extração acontece A CADA rolagem, acumulando num
+   * mapa: o que sai da tela já foi guardado.
    *
-   * A correção é extrair A CADA rolagem e acumular num mapa, em vez de rolar
-   * primeiro e ler no fim. O que sai da tela já foi guardado.
-   *
-   * Rolar para trás não é leitura local como o _irParaOFim: chegar no topo
-   * dispara o carregamento do bloco anterior no servidor da Taobao. Cada
-   * rolagem é uma requisição de verdade — por isso a pausa entre elas é
-   * sorteada e generosa. Quarenta rolagens em intervalo constante é o padrão
-   * que separa script de gente com mais clareza do que qualquer outra coisa
-   * que a gente faça neste chat.
+   * Devolve {mensagens, rolagens, diagnostico}. O diagnóstico não é enfeite —
+   * é ele que separa "rolou e o chat não carregou mais" de "nem rolou", que
+   * pelo resultado final são idênticos.
    */
   async lerHistorico({ maxRolagens = 40 } = {}) {
     await this.prender();
@@ -1596,17 +1668,29 @@ class Chat {
     };
 
     guardar(await this._coletarVisiveis()); // o que já está na tela
+    const naTela = vistas.size;
 
     let secas = 0;
     let rolagens = 0;
+    let diagnostico = '';
 
     for (let i = 0; i < maxRolagens; i++) {
       const antes = vistas.size;
-      const posicao = await this._rolarUmaTela();
-      if (posicao === null) {
-        console.warn('[chat] histórico: não achei container rolável');
+      const rel = (await this._rolarUmaTela()) || { ok: false, motivo: 'sem resposta da rolagem' };
+
+      if (!rel.ok) {
+        diagnostico = `parou: ${rel.motivo}` + (rel.roláveis ? ` · roláveis: ${rel.roláveis.join(', ')}` : '');
+        console.warn(`[chat] histórico — ${diagnostico}`);
         break;
       }
+
+      if (i === 0) {
+        diagnostico =
+          `caixa "${rel.classe}" ${rel.total}px de altura, tela de ${rel.altura}px` +
+          (rel.viaRoda ? ' (rolando pela roda)' : '');
+        console.log(`[chat] histórico — ${diagnostico}`);
+      }
+
       rolagens++;
 
       // Pausa de gente lendo. Também é o tempo do lazy-load: sem ela, a coleta
@@ -1615,33 +1699,34 @@ class Chat {
       guardar(await this._coletarVisiveis());
 
       const novas = vistas.size - antes;
+      console.log(`[chat] histórico — rolagem ${rolagens}: +${novas} (total ${vistas.size})`);
+
       if (novas === 0) {
         // Três seguidas sem novidade, e não duas: a primeira pode ser só o
         // carregamento demorando mais que a pausa.
-        if (++secas >= 3) break;
+        if (++secas >= 3) { diagnostico += ' · parou por 3 rolagens sem novidade'; break; }
       } else {
         secas = 0;
       }
 
       // No topo E sem novidade: acabou o histórico que o chat entrega.
-      if (posicao === 0 && secas >= 1) break;
+      if (rel.depois === 0 && secas >= 1) { diagnostico += ' · chegou ao topo'; break; }
     }
 
     const mensagens = [...vistas.values()];
 
-    // Ordena por horário quando existe. A ordem do DOM é cronológica dentro de
-    // cada leitura, mas as leituras vieram de trás para frente — sem ordenar, a
-    // conversa sai em blocos invertidos e não dá para seguir o fio.
+    // Ordena por horário quando existe. As leituras vieram de trás para frente:
+    // sem ordenar, a conversa sai em blocos invertidos e não dá para seguir o fio.
     const comData = mensagens.filter((m) => m.quando).sort((a, b) => a.quando.localeCompare(b.quando));
     const semData = mensagens.filter((m) => !m.quando);
 
     const nossas = mensagens.filter((m) => m.de === 'nos').length;
     console.log(
       `[chat] histórico: ${rolagens} rolagem(ns), ${mensagens.length} mensagem(ns) ` +
-        `(${nossas} nossas, ${comData.length} com data)`,
+        `(${nossas} nossas · ${naTela} já estavam na tela)`,
     );
 
-    return [...comData, ...semData];
+    return { mensagens: [...comData, ...semData], rolagens, diagnostico };
   }
 
 }

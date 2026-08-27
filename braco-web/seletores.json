@@ -72,6 +72,18 @@
     ]
   },
 
+  "listaRolavel": {
+    "_o_que_e": "A caixa que ROLA a lista de mensagens. Este chat e React com rc-scrollbars, e o container real e o .rc-scrollbars-view — o nome apareceu no log de um envio antigo. Mirar nele direto evita depender da subida generica (subir do ultimo balao ate o primeiro ancestral com overflow), que acha o primeiro elemento rolavel e nem sempre e a lista.",
+    "_cuidado": "Componente de scroll customizado costuma IGNORAR scrollTop escrito de fora: ele controla a posicao e a devolve no proximo render. Por isso o chat.js tem um segundo caminho com a roda do mouse, que passa pelo handler do componente. Se a exportacao voltar so com o dia de hoje, o log do braco diz qual caixa foi achada e o scrollTop antes/depois — e lista os rolaveis que existem quando nao acha nenhuma.",
+    "candidatos": [
+      ".rc-scrollbars-view",
+      "[class*='scrollbars-view']",
+      "[class*='message-list']",
+      "[class*='msg-list']",
+      "[class*='chat-content']"
+    ]
+  },
+
   "mensagem": {
     "_o_que_e": "Cada mensagem da conversa.",
     "candidatos": [".message-item", ".item"]

@@ -686,9 +686,22 @@ async function main() {
             conversaAberta = true;
           }
 
-          const mensagens = await chat.lerHistorico({ maxRolagens: telas });
-          await api.post('/historico', { mensagens });
-          await evento('info', 'historico', `${mensagens.length} mensagem(ns) exportadas`);
+          const r = await chat.lerHistorico({ maxRolagens: telas });
+          await api.post('/historico', {
+            mensagens: r.mensagens,
+            rolagens: r.rolagens,
+            diagnostico: r.diagnostico,
+          });
+          // As ROLAGENS vao no evento de proposito. Quando a exportacao volta
+          // curta, "o braco nao tem a versao nova" e "rolou e o chat nao
+          // carregou" dao o mesmo resultado — o numero de rolagens separa os
+          // dois sem precisar abrir o log do outro servico.
+          await evento(
+            'info',
+            'historico',
+            `${r.mensagens.length} mensagem(ns) em ${r.rolagens} rolagem(ns)` +
+              (r.diagnostico ? ` — ${r.diagnostico}` : ''),
+          );
         } catch (err) {
           console.warn(`[braço] exportação falhou: ${err.message}`);
           // Avisa o bot MESMO na falha: sem isto o pedido ficaria marcado para

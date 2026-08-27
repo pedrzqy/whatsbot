@@ -245,9 +245,16 @@ t('nenhum candidato mira por posição', !CAND.some((c) => /nth-child|nth-of-typ
     let offset = 0;
     c._rolarUmaTela = async () => {
       const maximo = TOTAL - JANELA;
-      if (offset >= maximo) return 0; // topo
-      offset = Math.min(maximo, offset + JANELA / 2); // meia tela por vez
-      return offset >= maximo ? 0 : alturaTela;
+      const noTopo = offset >= maximo;
+      if (!noTopo) offset = Math.min(maximo, offset + JANELA / 2); // meia tela por vez
+      return {
+        ok: true,
+        antes: noTopo ? 0 : alturaTela,
+        depois: offset >= maximo ? 0 : alturaTela,
+        altura: alturaTela,
+        total: alturaTela * 5,
+        classe: 'rc-scrollbars-view',
+      };
     };
     // SEMPRE 20 itens — é isto que a versão antiga interpretava como "acabou".
     c._coletarVisiveis = async () => {
@@ -258,7 +265,7 @@ t('nenhum candidato mira por posição', !CAND.some((c) => /nth-child|nth-of-typ
   }
 
   const chatV = chatVirtualizado();
-  const hist = await chatV.lerHistorico({ maxRolagens: 40 });
+  const { mensagens: hist, rolagens: nRolagens } = await chatV.lerHistorico({ maxRolagens: 40 });
 
   t('acumula além da janela visível', hist.length === TOTAL, `${hist.length} de ${TOTAL}`);
   t('não para na segunda rolagem', hist.length > JANELA * 2, `${hist.length}`);
@@ -277,8 +284,8 @@ t('nenhum candidato mira por posição', !CAND.some((c) => /nth-child|nth-of-typ
   console.log('\n--- histórico quando o chat não rola ---');
 
   const chatSemRolagem = chatVirtualizado();
-  chatSemRolagem._rolarUmaTela = async () => null; // não achou container
-  const so20 = await chatSemRolagem.lerHistorico({ maxRolagens: 40 });
+  chatSemRolagem._rolarUmaTela = async () => ({ ok: false, motivo: 'sem container rolável' });
+  const { mensagens: so20 } = await chatSemRolagem.lerHistorico({ maxRolagens: 40 });
   // Sem container não há o que fazer, mas o que estava na tela tem que voltar:
   // devolver vazio perderia a única coisa que dava para ler.
   t('devolve pelo menos o que estava visível', so20.length === JANELA, `${so20.length}`);
@@ -287,7 +294,10 @@ t('nenhum candidato mira por posição', !CAND.some((c) => /nth-child|nth-of-typ
 
   const chatCurto = chatVirtualizado();
   let voltas = 0;
-  chatCurto._rolarUmaTela = async () => { voltas++; return 0; }; // já no topo
+  chatCurto._rolarUmaTela = async () => {
+    voltas++;
+    return { ok: true, antes: 0, depois: 0, altura: 500, total: 500, classe: 'x' };
+  };
   chatCurto._coletarVisiveis = async () => todas.slice(0, JANELA); // nunca muda
   await chatCurto.lerHistorico({ maxRolagens: 40 });
   // Topo + nada novo tem que parar rápido. Sem isso o braço rolaria 40 vezes

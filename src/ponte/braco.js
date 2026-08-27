@@ -128,17 +128,29 @@ router.post('/historico', async (req, res) => {
     return res.json({ ok: false });
   }
 
+  const rolagens = Number(req.body?.rolagens) || 0;
+  const diagnostico = req.body?.diagnostico ? String(req.body.diagnostico) : '';
   const nossas = mensagens.filter((m) => m.de === 'nos').length;
   const datas = mensagens.map((m) => m.quando).filter(Boolean).sort();
   const periodo =
     datas.length >= 2 ? `${datas[0].slice(0, 10)} a ${datas[datas.length - 1].slice(0, 10)}` : '—';
 
-  console.log(`[ponte/braco] histórico gravado: ${mensagens.length} mensagens em ${arquivo}`);
+  console.log(
+    `[ponte/braco] histórico gravado: ${mensagens.length} mensagens, ` +
+      `${rolagens} rolagem(ns) em ${arquivo}` +
+      (diagnostico ? ` — ${diagnostico}` : ''),
+  );
 
   await ponte.alertar(
     `📚 *Histórico exportado.*\n\n` +
       `${mensagens.length} mensagens · ${nossas} suas\n` +
-      `Período: ${periodo}\n\n` +
+      `Período: ${periodo}\n` +
+      // A contagem de rolagens fica VISÍVEL para o operador, não só no log do
+      // outro serviço. Exportação curta com 0 rolagens é a versão antiga ainda
+      // rodando; curta com muitas rolagens é o chat que não entrega mais
+      // histórico. Sem este número as duas chegam idênticas ao WhatsApp — e
+      // foi essa confusão que custou uma rodada inteira de diagnóstico.
+      `Rolagens: ${rolagens}\n\n` +
       `_Está salvo no servidor, em data/historico-coleta.json._`,
   );
 
