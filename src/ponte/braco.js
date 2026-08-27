@@ -17,7 +17,12 @@ const fila = require('./fila');
 const limites = require('./limites');
 const janela = require('./janela');
 const midia = require('./midia');
+const fs = require('fs');
+const path = require('path');
 const { dados, persist } = require('./estado');
+
+// Mesma pasta do estado da ponte: e o volume que sobrevive ao deploy.
+const DATA_DIR = process.env.PONTE_DATA_DIR || path.join(__dirname, '..', '..', 'data');
 
 const router = express.Router();
 
@@ -69,6 +74,9 @@ router.get('/estado', (_req, res) => {
     smsTaobao: dados.smsTaobao?.codigo || null,
     // O operador pediu para recarregar a tela agora (#recarregar).
     recarregarPedido: Boolean(dados.recarregarPedido),
+    // O operador pediu o historico da conversa (#historico). Numero = quantas
+    // rolagens para tras; 0/ausente = nao pediu.
+    historicoPedido: Number(dados.historicoPedido) || 0,
   });
 });
 
@@ -77,6 +85,60 @@ router.post('/recarga-feita', (_req, res) => {
   dados.recarregarPedido = false;
   persist();
   res.json({ ok: true });
+});
+
+/**
+ * O braço entrega o histórico que o operador pediu com #historico.
+ *
+ * Grava em disco e manda um resumo ao operador. O arquivo inteiro NÃO vai pelo
+ * WhatsApp: um mês de conversa passa de qualquer limite de mensagem, e o que o
+ * operador precisa saber na hora é só se deu certo e quanto veio.
+ *
+ * O conteúdo é chinês cru, e é por isso que ele fica em arquivo e não em
+ * mensagem: caractere chinês saindo pelo número comercial entrega a origem do
+ * código igual à palavra "fornecedor" (ver politica.js).
+ */
+router.post('/historico', async (req, res) => {
+  const mensagens = Array.isArray(req.body?.mensagens) ? req.body.mensagens : [];
+  const erro = req.body?.erro ? String(req.body.erro) : '';
+
+  dados.historicoPedido = false;
+  persist();
+
+  if (erro || !mensagens.length) {
+    await ponte.alertar(
+      '📚 *Exportação do histórico falhou.*\n\n' +
+        'Não consegui ler a conversa. Tenta de novo mais tarde.',
+    );
+    console.warn(`[ponte/braco] histórico falhou: ${erro || 'veio vazio'}`);
+    return res.json({ ok: false });
+  }
+
+  const arquivo = path.join(DATA_DIR, 'historico-fornecedor.json');
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(arquivo, JSON.stringify(mensagens, null, 2), 'utf8');
+  } catch (err) {
+    console.error('[ponte/braco] não gravei o histórico:', err.message);
+    await ponte.alertar('📚 Li a conversa mas não consegui gravar o arquivo.');
+    return res.json({ ok: false });
+  }
+
+  const nossas = mensagens.filter((m) => m.de === 'nos').length;
+  const datas = mensagens.map((m) => m.quando).filter(Boolean).sort();
+  const periodo =
+    datas.length >= 2 ? `${datas[0].slice(0, 10)} a ${datas[datas.length - 1].slice(0, 10)}` : '—';
+
+  console.log(`[ponte/braco] histórico gravado: ${mensagens.length} mensagens em ${arquivo}`);
+
+  await ponte.alertar(
+    `📚 *Histórico exportado.*\n\n` +
+      `${mensagens.length} mensagens · ${nossas} suas\n` +
+      `Período: ${periodo}\n\n` +
+      `_Está salvo no servidor, em data/historico-fornecedor.json._`,
+  );
+
+  res.json({ ok: true, gravadas: mensagens.length });
 });
 
 /** O braço avisa que consumiu o código — evita reusar um já gasto. */

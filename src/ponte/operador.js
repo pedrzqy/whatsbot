@@ -49,6 +49,7 @@ const AJUDA = [
   '*#atender* — mostra se o atendimento está no ar · *#atender on* / *#atender off*',
   '*#auto on* — envio sai sem #ok · *#auto off* volta a pedir aprovação',
   '*#recarregar* — recarrega a tela e reabre a conversa (para teste)',
+  '*#historico* — exporta a conversa da coleta para estudar o padrão',
 ].join('\n');
 
 /** Quanto tempo o operador fica valendo como cliente depois do #teste. */
@@ -60,7 +61,7 @@ const min = (ms) => Math.round(ms / 60000);
 function ehComando(from, texto) {
   if (!cfg.ativa || !cfg.operador.numeros.length) return false;
   if (!cfg.operador.ehOperador(from)) return false;
-  return /^#(fila|status|vendas|liberar|ok|enviar|editar|nao|não|pular|ajuda|sms|taobao|teste|limpar|destravar|atender|auto|recarregar)\b/i.test(
+  return /^#(fila|status|vendas|historico|liberar|ok|enviar|editar|nao|não|pular|ajuda|sms|taobao|teste|limpar|destravar|atender|auto|recarregar)\b/i.test(
     String(texto || '').trim(),
   );
 }
@@ -132,6 +133,35 @@ async function executar(texto, de = '') {
       '_Os #comandos continuam funcionando e o limite de 5 códigos/hora não ' +
       'vale para você agora. Nada sai sem #ok. ' +
       'Mande #teste de novo para desligar antes da hora._'
+    );
+  }
+
+  // ── #historico [rolagens] ──────────────────────────────
+  //
+  // Exporta a conversa com a origem da coleta para arquivo, para estudar o
+  // padrão: o que costuma travar, o que foi respondido, o que resolveu.
+  //
+  // NÃO devolve o conteúdo pelo WhatsApp. A conversa é em chinês, e caractere
+  // chinês saindo pelo número comercial entrega a origem do código igual à
+  // palavra proibida — o arquivo fica no servidor e o WhatsApp recebe só o
+  // resumo.
+  //
+  // Pede, não executa. Quem rola a tela é o outro serviço, no ciclo dele, e só
+  // quando ninguém está esperando código: rolar o histórico carrega blocos
+  // antigos do servidor da Taobao, e fazer isso no meio de um atendimento
+  // atrapalharia a leitura da resposta que está chegando.
+  if (cmd === 'historico') {
+    const pedido = Math.min(Math.max(parseInt(id, 10) || 40, 5), 120);
+    dados.historicoPedido = pedido;
+    persistAgora();
+
+    const s = fila.situacao();
+    return (
+      '📚 *Exportação pedida.*\n\n' +
+      (s.ativo
+        ? `Tem um atendimento em curso (*${s.ativo.cliente}*), então a leitura começa quando ele terminar.`
+        : 'Começa no próximo ciclo. Leva alguns minutos — a rolagem é lenta de propósito.') +
+      `\n\n_Vou ler até ${pedido} telas para trás. Te aviso quando terminar._`
     );
   }
 

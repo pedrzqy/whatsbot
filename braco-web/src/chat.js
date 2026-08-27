@@ -1455,6 +1455,170 @@ class Chat {
 
     return novas;
   }
+  /**
+   * Rola a conversa PARA CIMA, carregando mensagens antigas.
+   *
+   * O chat carrega o histórico sob demanda: chegar no topo dispara o
+   * carregamento do bloco anterior. Cada rolagem é, portanto, uma requisição
+   * de verdade ao servidor da Taobao — não é leitura local como o _irParaOFim.
+   *
+   * Por isso o ritmo importa aqui mais que em qualquer outro lugar deste
+   * arquivo. Cinquenta rolagens em sequência, num intervalo constante, é o
+   * padrão que separa script de gente com mais clareza do que qualquer outra
+   * coisa que a gente faça no chat. Uma pessoa que vai reler a conversa do mês
+   * passado rola, para, lê, rola de novo.
+   *
+   * Devolve quantas rolagens realmente carregaram algo. Para quando duas
+   * seguidas não trazem mensagem nova — aí o topo chegou, ou o chat não vai
+   * carregar mais.
+   */
+  async _rolarParaCima(maxRolagens = 40) {
+    await this.prender();
+
+    const contar = () =>
+      this.frame.$$eval(SEL.mensagem.candidatos[0], (els) => els.length).catch(() => 0);
+
+    let antes = await contar();
+    let secas = 0;
+    let rolagens = 0;
+
+    for (let i = 0; i < maxRolagens; i++) {
+      const mexeu = await this.frame
+        .evaluate((cands) => {
+          // Mesma busca do _irParaOFim: sobe do último balão até o primeiro
+          // ancestral que rola de verdade, parando no body. Sem esse limite, a
+          // rolagem escapa para a página inteira e a tela salta.
+          let ultima = null;
+          for (const s of cands) {
+            const els = document.querySelectorAll(s);
+            if (els.length) { ultima = els[els.length - 1]; break; }
+          }
+          if (!ultima) return false;
+
+          let el = ultima.parentElement;
+          while (el && el !== document.body && el !== document.documentElement) {
+            const estilo = getComputedStyle(el);
+            if (/auto|scroll|overlay/.test(estilo.overflowY) && el.scrollHeight > el.clientHeight) {
+              // scrollTop = 0 de uma vez pularia o gatilho de carregamento em
+              // alguns builds. Subir uma tela por vez é o que uma pessoa faz e
+              // é o que dispara o lazy-load de forma confiável.
+              el.scrollTop = Math.max(0, el.scrollTop - el.clientHeight);
+              return true;
+            }
+            el = el.parentElement;
+          }
+          return false;
+        }, SEL.mensagem.candidatos)
+        .catch(() => false);
+
+      if (!mexeu) break;
+      rolagens++;
+
+      // Pausa de gente lendo, não de script varrendo.
+      await this.pagina.waitForTimeout(humaniza.ms(1200, 2600));
+
+      const agora = await contar();
+      if (agora > antes) {
+        antes = agora;
+        secas = 0;
+      } else if (++secas >= 2) {
+        break; // duas rolagens sem novidade: chegou no começo
+      }
+    }
+
+    console.log(`[chat] rolei ${rolagens}x para cima — ${antes} mensagem(ns) carregada(s)`);
+    return antes;
+  }
+
+  /**
+   * TODA a conversa visível, dos dois lados.
+   *
+   * Diferente de _lerFornecedor(), que descarta o que é nosso: aqui o que a
+   * gente respondeu é metade do valor. É lendo as duas pontas que dá para ver
+   * qual pergunta dele levou a qual resposta nossa, e quais respostas
+   * resolveram.
+   *
+   * Só leitura de DOM — não clica, não envia, não muda nada no chat.
+   */
+  async lerHistorico({ maxRolagens = 40 } = {}) {
+    await this.prender();
+    await this.checarBloqueio();
+
+    const total = await this._rolarParaCima(maxRolagens);
+
+    const selMensagem = SEL.mensagem.candidatos[0];
+    const classeSelf = SEL.minhaMensagem.classe;
+    const selConteudo = SEL.conteudoDaMensagem.candidatos;
+    const ruido = SEL.ruido.textos;
+
+    const mensagens = await this.frame.$$eval(
+      selMensagem,
+      (els, args) => {
+        const { classeSelf, selConteudo, ruido } = args;
+        const nickDe = (el) => ((el.innerText || '').split('\n')[0] || '').trim();
+
+        // Mesma correção do _lerFornecedor: a classe .self não aparece em balão
+        // de imagem colada, então o nick conserta o que a classe deixa passar.
+        const meusNicks = new Set();
+        for (const el of els) {
+          if (el.classList.contains(classeSelf)) meusNicks.add(nickDe(el));
+        }
+        meusNicks.delete('');
+
+        const saida = [];
+        for (const el of els) {
+          const nick = nickDe(el);
+          const nosso = el.classList.contains(classeSelf) || meusNicks.has(nick);
+
+          let texto = '';
+          for (const s of selConteudo) {
+            const alvo = el.querySelector(s);
+            if (alvo && alvo.innerText.trim()) { texto = alvo.innerText.trim(); break; }
+          }
+          const limpo = texto
+            .split('\n')
+            .map((l) => l.trim())
+            .filter((l) => l && !ruido.includes(l))
+            .join(' ')
+            .trim();
+
+          const bruto = el.innerText || '';
+          const mData = bruto.match(/\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}/);
+          const quando = mData ? mData[0] : '';
+
+          // Balão sem texto entra como marcador, não some.
+          //
+          // No _lerFornecedor ele é descartado porque lá a pergunta é "isto é
+          // uma resposta a entregar?" e imagem não é. Aqui a pergunta é outra:
+          // saber que houve uma foto naquele ponto muda a leitura da conversa
+          // inteira — sem o marcador, a resposta seguinte parece vir do nada.
+          saida.push({
+            de: nosso ? 'nos' : 'fornecedor',
+            quando,
+            texto: limpo || '[imagem]',
+          });
+        }
+        return saida;
+      },
+      { classeSelf, selConteudo, ruido },
+    );
+
+    // Ordena por horário quando existe. A ordem do DOM já é cronológica, mas
+    // uma virtualização que reaproveita nós pode entregar fora de ordem, e uma
+    // conversa fora de ordem não serve para achar padrão nenhum.
+    const comData = mensagens.filter((m) => m.quando);
+    const semData = mensagens.filter((m) => !m.quando);
+    comData.sort((a, b) => a.quando.localeCompare(b.quando));
+
+    console.log(
+      `[chat] histórico: ${mensagens.length} mensagem(ns) ` +
+        `(${mensagens.filter((m) => m.de === 'nos').length} nossas), ` +
+        `${total} balão(ões) no DOM`,
+    );
+
+    return [...comData, ...semData];
+  }
+
 }
 
 module.exports = { Chat, BloqueioDetectado, SeletorNaoEncontrado, NO_CHAT };

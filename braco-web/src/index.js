@@ -663,6 +663,46 @@ async function main() {
         }
       }
 
+      // ── Exportar o histórico ─────────────────────────────────
+      //
+      // A pedido do operador (#historico). Rola a conversa para trás, lê os
+      // dois lados e manda para o bot gravar.
+      //
+      // SÓ com a fila vazia, e a checagem é a mesma da recarga: rolar para
+      // cima tira a lista do fim, e é do fim que sai a marca d'água. Fazer
+      // isso no meio de um atendimento é a receita para o cliente ficar sem
+      // código — a leitura seguinte não saberia mais o que é resposta nova.
+      //
+      // Depois de exportar, volta para o fim de propósito. Deixar a tela
+      // parada no mês passado quebraria a próxima leitura e, pelo VNC,
+      // pareceria que o chat travou.
+      if (st.historicoPedido && !marcaAtual) {
+        const telas = Number(st.historicoPedido) || 40;
+        console.log(`[braço] exportando histórico (até ${telas} telas)`);
+
+        try {
+          if (!conversaAberta) {
+            await chat.abrirConversa(titulo);
+            conversaAberta = true;
+          }
+
+          const mensagens = await chat.lerHistorico({ maxRolagens: telas });
+          await api.post('/historico', { mensagens });
+          await evento('info', 'historico', `${mensagens.length} mensagem(ns) exportadas`);
+        } catch (err) {
+          console.warn(`[braço] exportação falhou: ${err.message}`);
+          // Avisa o bot MESMO na falha: sem isto o pedido ficaria marcado para
+          // sempre e o braço tentaria de novo a cada volta — rolagem repetida
+          // no chat é exatamente o que a pausa humanizada existe para evitar.
+          await api.post('/historico', { erro: err.message, mensagens: [] }).catch(() => {});
+          await evento('warn', 'historico', err.message);
+        }
+
+        // A lista ficou rolada para cima. Volta ao fim antes de qualquer outra
+        // coisa — todo o resto do laço assume a conversa no fim.
+        await chat.irParaOFim().catch(() => {});
+      }
+
       // 1) Tarefa pendente?
       //
       // LONG-POLLING: o bot segura a resposta até aparecer tarefa. É o que faz

@@ -722,6 +722,39 @@ const OP = '5541999999999';
   );
   t('URL do VNC sobrevive à limpeza', comVnc.texto.includes('89.116.186.155:6080/vnc.html'), comVnc.texto);
 
+  // ── #historico ─────────────────────────────────────────────
+  //
+  // Exporta a conversa para estudar o padrão. O risco aqui não é o comando: é
+  // o CONTEÚDO. A conversa é em chinês, e caractere chinês saindo pelo número
+  // comercial entrega a origem do código igual à palavra proibida — por isso o
+  // arquivo fica no servidor e o WhatsApp recebe só a contagem.
+  bloco('#historico exporta sem vazar a conversa');
+
+  const pediuHist = await operador.executar('#historico', OP);
+  t('#historico marca o pedido', Number(estadoPonte.dados.historicoPedido) > 0,
+    String(estadoPonte.dados.historicoPedido));
+  t('e confirma ao operador', /exporta/i.test(pediuHist), pediuHist.split('\n')[0]);
+  t('sem vocabulário proibido', !AUTOMACAO.test(pediuHist), (pediuHist.match(AUTOMACAO) || [''])[0] || 'limpo');
+  // A resposta fala de "coleta", nunca da origem real — mesma regra do #fila.
+  t('e sem caractere chinês', !politica.temCJK(pediuHist));
+
+  // Teto e piso: 120 telas é muito tempo rolando o chat de outra pessoa, e
+  // menos de 5 não traz conversa nenhuma. Número fora da faixa não pode virar
+  // uma rolagem infinita nem uma leitura vazia.
+  await operador.executar('#historico 999', OP);
+  t('teto de 120 telas', Number(estadoPonte.dados.historicoPedido) === 120,
+    String(estadoPonte.dados.historicoPedido));
+
+  await operador.executar('#historico 1', OP);
+  t('piso de 5 telas', Number(estadoPonte.dados.historicoPedido) === 5,
+    String(estadoPonte.dados.historicoPedido));
+
+  await operador.executar('#historico abc', OP);
+  t('argumento inválido cai no padrão', Number(estadoPonte.dados.historicoPedido) === 40,
+    String(estadoPonte.dados.historicoPedido));
+
+  estadoPonte.dados.historicoPedido = false;
+
   // ── Vigia da coleta ────────────────────────────────────────
   //
   // O outro serviço pode morrer às 3 da manhã. Antes disto, ninguém era
