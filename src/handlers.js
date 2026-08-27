@@ -298,7 +298,11 @@ async function handleMessage(msg) {
   // destravar em segundos, e não pode esbarrar em boas-vindas ou pausa.
   if (operador.ehComando(from, trimmed)) {
     try {
-      await sender.send(from, await operador.executar(trimmed, from), { typing: false });
+      // Resposta VAZIA significa "já respondi por outro caminho" — é o caso do
+      // comando que manda um arquivo como anexo. Enviar a string vazia aqui
+      // colocaria uma mensagem em branco no chat logo abaixo do anexo.
+      const resposta = await operador.executar(trimmed, from);
+      if (resposta) await sender.send(from, resposta, { typing: false });
     } catch (err) {
       console.error('[ponte/operador] erro:', err.message);
       await sender.send(from, `Falhou: ${err.message}`, { typing: false });

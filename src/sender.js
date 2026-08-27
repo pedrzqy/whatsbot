@@ -154,6 +154,28 @@ async function processJob(job) {
     }
   }
 
+  // ARQUIVO → documento. Sempre lança quando falha, sem cair para texto.
+  //
+  // Quem manda arquivo quer o arquivo. Cair para texto aqui entregaria uma
+  // mensagem solta no lugar do anexo, e quem pediu ficaria achando que
+  // recebeu — pior que o erro, porque some silenciosamente.
+  if (opts.document) {
+    await evolution.sendMedia(
+      number,
+      {
+        mediatype: 'document',
+        media: opts.document,
+        caption: text,
+        fileName: opts.fileName || 'arquivo',
+      },
+      evoOpts,
+    );
+    const td = Date.now();
+    lastGlobalSendAt = td;
+    lastContactSendAt.set(number, td);
+    return;
+  }
+
   // Com imagem → card de mídia. Se opts.imageOnly, NÃO cai pra texto (lança).
   if (opts.image) {
     try {

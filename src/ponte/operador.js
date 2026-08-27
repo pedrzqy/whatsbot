@@ -50,6 +50,7 @@ const AJUDA = [
   '*#auto on* — envio sai sem #ok · *#auto off* volta a pedir aprovação',
   '*#recarregar* — recarrega a tela e reabre a conversa (para teste)',
   '*#historico* — exporta a conversa da coleta para estudar o padrão',
+  '*#historico enviar* — manda o arquivo já exportado aqui pelo WhatsApp',
 ].join('\n');
 
 /** Quanto tempo o operador fica valendo como cliente depois do #teste. */
@@ -151,6 +152,66 @@ async function executar(texto, de = '') {
   // antigos do servidor da Taobao, e fazer isso no meio de um atendimento
   // atrapalharia a leitura da resposta que está chegando.
   if (cmd === 'historico') {
+    // ── #historico enviar ────────────────────────────────
+    //
+    // Manda o arquivo já exportado para o WhatsApp do operador, como anexo.
+    //
+    // Existe porque copiar o JSON do console web não funciona: o terminal do
+    // painel corta a saída no meio e não há como rolar para pegar o resto.
+    //
+    // Vai como ARQUIVO, não como mensagem. A conversa é em chinês, e caractere
+    // chinês no corpo de uma mensagem entrega a origem do código igual à
+    // palavra proibida — dentro de um anexo ele não aparece no chat, e quem
+    // abre é o operador, no computador dele.
+    //
+    // E vai em TEXTO, não no JSON cru: uma linha por mensagem, com hora e de
+    // quem é. O JSON tem chaves e aspas em cada linha e quase dobra o tamanho
+    // sem dizer nada a mais para quem vai ler.
+    if (/^enviar$/i.test(id || '')) {
+      const fs = require('fs');
+      const path = require('path');
+      const DATA_DIR = process.env.PONTE_DATA_DIR || path.join(__dirname, '..', '..', 'data');
+      const arquivo = path.join(DATA_DIR, 'historico-coleta.json');
+
+      let mensagens;
+      try {
+        mensagens = JSON.parse(fs.readFileSync(arquivo, 'utf8'));
+      } catch {
+        return (
+          '📚 Não achei nenhuma exportação salva.\n\n' +
+          'Roda *#historico* primeiro e espera terminar.'
+        );
+      }
+      if (!Array.isArray(mensagens) || !mensagens.length) {
+        return '📚 A última exportação veio vazia. Roda *#historico* de novo.';
+      }
+
+      const linhas = mensagens.map(
+        (m) => `${m.quando || '(sem data)'} ${m.de === 'nos' ? '>>' : '<<'} ${m.texto}`,
+      );
+      const conteudo = linhas.join('\n');
+      const b64 = Buffer.from(conteudo, 'utf8').toString('base64');
+
+      try {
+        await sender.send(de, `📚 ${mensagens.length} mensagens.`, {
+          document: b64,
+          fileName: 'conversa-coleta.txt',
+          typing: false,
+        });
+        return '';
+      } catch (err) {
+        console.error('[operador] envio do histórico falhou:', err.response?.status || err.message);
+        // Diz o TAMANHO no erro: acima de ~1MB a Evolution recusa o anexo, e
+        // sem esse número o operador tentaria de novo para sempre.
+        return (
+          '📚 Não consegui mandar o arquivo aqui ' +
+          `(${Math.round(b64.length / 1024)} KB).\n\n` +
+          'Provavelmente é grande demais para anexo. Roda *#historico 20* para ' +
+          'exportar um pedaço menor e tenta de novo.'
+        );
+      }
+    }
+
     const pedido = Math.min(Math.max(parseInt(id, 10) || 40, 5), 120);
     dados.historicoPedido = pedido;
     persistAgora();

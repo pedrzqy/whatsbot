@@ -784,6 +784,61 @@ const OP = '5541999999999';
     politica.limparAlerta(caminhoNaMensagem).texto,
   );
 
+  // ── #historico enviar ──────────────────────────────────────
+  //
+  // Copiar o JSON do console do painel não funciona: o terminal corta a saída
+  // no meio e não há como rolar para pegar o resto. Este comando manda o
+  // arquivo como ANEXO, que é o único caminho que entrega a conversa inteira.
+  bloco('#historico enviar manda o arquivo');
+
+  const arqTeste = pathMod.join(DATA_TESTE, 'historico-coleta.json');
+  fsMod.mkdirSync(DATA_TESTE, { recursive: true });
+  fsMod.writeFileSync(
+    arqTeste,
+    JSON.stringify([
+      { de: 'nos', quando: '2026-07-14 12:15', texto: 'Login: buty4240' },
+      { de: 'coleta', quando: '2026-07-14 12:20', texto: '稍等发您。' },
+      { de: 'coleta', quando: '2026-07-14 12:21', texto: '55287' },
+    ]),
+  );
+
+  const enviados = [];
+  const sendAntes = require('./src/sender').send;
+  require('./src/sender').send = async (para, texto, opts = {}) => {
+    enviados.push({ para, texto, opts });
+  };
+
+  const respEnviar = await operador.executar('#historico enviar', OP);
+
+  const anexo = enviados.find((e) => e.opts.document);
+  t('manda um anexo', Boolean(anexo));
+  t('para o operador', anexo?.para === OP, anexo?.para);
+  t('com nome de arquivo', Boolean(anexo?.opts.fileName), anexo?.opts.fileName);
+
+  // Resposta VAZIA de propósito: o comando já respondeu com o anexo, e o
+  // handlers não envia string vazia. Uma resposta aqui viraria uma mensagem
+  // em branco logo abaixo do arquivo.
+  t('e não devolve texto para mandar depois', respEnviar === '', JSON.stringify(respEnviar));
+
+  const conteudo = Buffer.from(anexo.opts.document, 'base64').toString('utf8');
+  t('o arquivo tem uma linha por mensagem', conteudo.split('\n').length === 3);
+  t('marca de quem é cada linha', /^2026-07-14 12:15 >> /m.test(conteudo));
+  t('e o conteúdo original vai inteiro', conteudo.includes('稍等发您。'));
+
+  // O chinês vai DENTRO do anexo, não no corpo. Caractere chinês numa mensagem
+  // entrega a origem do código igual à palavra proibida; dentro de um arquivo
+  // ele não aparece no chat.
+  t('a legenda não leva caractere chinês', !politica.temCJK(anexo.texto || ''), anexo.texto);
+  t('nem o nome do arquivo', !politica.temCJK(anexo.opts.fileName || ''));
+
+  // Sem exportação salva, explica o que fazer em vez de estourar.
+  fsMod.rmSync(arqTeste, { force: true });
+  const semArquivo = await operador.executar('#historico enviar', OP);
+  t('sem exportação, ensina o caminho', /#historico/.test(semArquivo), semArquivo.split('\n')[0]);
+  t('e não quebra', typeof semArquivo === 'string' && semArquivo.length > 0);
+
+  require('./src/sender').send = sendAntes;
+
   // ── Vigia da coleta ────────────────────────────────────────
   //
   // O outro serviço pode morrer às 3 da manhã. Antes disto, ninguém era
