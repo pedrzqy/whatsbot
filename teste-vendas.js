@@ -259,6 +259,182 @@ const CLI = '5541999998888';
   t('o prefixo entra na descrição da lista', ld.description.startsWith('Não achei essa opção'));
   t('e a descrição não leva asterisco cru', !ld.description.includes('*'), ld.description);
 
+  // As redes de vocabulario, da FONTE UNICA (politica.js). Copiar a lista em
+  // cada arquivo de teste e como "script" escapou uma vez: as copias divergem
+  // e cada teste passa a provar coisa diferente.
+  const AUTOMACAO = require('./src/ponte/politica').vocabularioProibido();
+  const PROIBIDO = /fornecedor|taobao|chin[êe]s|vendedor|parceiro/i;
+  const REPASSE = /encaminh\w*|repass\w*|terceir\w*|nosso\s+parceir\w*/i;
+
+  // ── Depois da entrega ──────────────────────────────────────
+  //
+  // O bot entregava a chave e calava. Se ela não ativou, quem descobria era o
+  // cliente, sozinho — e a primeira notícia disso chegava como reclamação,
+  // quase sempre depois de ele já ter desistido.
+  bloco('conferir a entrega');
+
+  const posvenda = require('./src/posvenda');
+  const vendasMod = require('./src/vendas');
+  const cfgPV = require('./src/config');
+  const storePV = require('./src/store');
+  const senderPV = require('./src/sender');
+
+  const HORA_PV = 3600_000;
+  const CLI_PV = '5541977770001';
+
+  // Hora fixa, e o pedido datado a partir DELA.
+  //
+  // Misturar um `agora` fixo com um `entregue` vindo de Date.now() faz a idade
+  // do pedido sair negativa -- o mesmo defeito do relogio decidindo o
+  // resultado, so que ao contrario: nunca passava, em vez de as vezes.
+  const AGORA_PV = Date.UTC(2026, 7, 27, 17, 0); // 14h BRT, quinta
+
+  /** Monta um pedido entregue ha N horas e roda a varredura. */
+  async function varrer(horasAtras, extra = {}) {
+    const d = vendasMod._dados();
+    d.pedidos = {};
+    d.pedidos.PED_PV = {
+      visto: AGORA_PV,
+      entregue: AGORA_PV - horasAtras * HORA_PV,
+      telefone: CLI_PV,
+      nome: 'Ana Silva',
+      ...extra,
+    };
+    const enviadas = [];
+    const antes = senderPV.send;
+    senderPV.send = async (para, txt) => { enviadas.push({ para, texto: String(txt) }); };
+    try {
+      // Hora fixa dentro do expediente: sem isto o teste passa de manha e
+      // falha de madrugada, que e o defeito do relogio decidindo o resultado.
+      await posvenda.conferirEntregas(AGORA_PV);
+    } finally {
+      senderPV.send = antes;
+    }
+    return { enviadas, registro: vendasMod._dados().pedidos.PED_PV };
+  }
+
+  // Cedo demais: o cliente compra e abre o jogo quando dá. Perguntar em
+  // seguida só interrompe.
+  const cedo = await varrer(1);
+  t('1h depois ainda não pergunta', cedo.enviadas.length === 0, String(cedo.enviadas.length));
+  t('  e não marca como conferido', !cedo.registro.conferido);
+
+  const naHora = await varrer(4);
+  t('4h depois pergunta', naHora.enviadas.length === 1, String(naHora.enviadas.length));
+  t('  para o cliente certo', naHora.enviadas[0]?.para === CLI_PV, naHora.enviadas[0]?.para);
+  // Pergunta ABERTA: "tudo certo?" convida a um "sim" automático de quem nem
+  // tentou, e o silêncio depois disso parece confirmação.
+  t('  perguntando da ativação', /ativa[çc][ãa]o/i.test(naHora.enviadas[0]?.texto || ''),
+    naHora.enviadas[0]?.texto);
+  t('  e abrindo caminho para responder', /me conta|resolvo/i.test(naHora.enviadas[0]?.texto || ''));
+  t('  sem entregar a origem nem admitir defeito',
+    !PROIBIDO.test(naHora.enviadas[0]?.texto || '') &&
+      !AUTOMACAO.test(naHora.enviadas[0]?.texto || '') &&
+      !/erro|falha|problema/i.test(naHora.enviadas[0]?.texto || ''),
+    naHora.enviadas[0]?.texto);
+
+  // Marca ANTES de enviar: uma falha no meio faria a pergunta sair de novo na
+  // varredura seguinte, e de novo, e de novo.
+  t('  e marca para não repetir', Boolean(naHora.registro.conferido));
+
+  const jaConferido = await varrer(4, { conferido: AGORA_PV });
+  t('não pergunta duas vezes', jaConferido.enviadas.length === 0, String(jaConferido.enviadas.length));
+
+  // Velho demais: a pergunta soa estranha, mas ele precisa sair da fila de
+  // avaliação — senão é reavaliado em toda varredura para sempre.
+  const velho = await varrer(24 * 5);
+  t('pedido velho não recebe a pergunta', velho.enviadas.length === 0);
+  t('  mas sai da fila de avaliação', Boolean(velho.registro.conferido));
+
+  // Cliente com atendente humano NÃO recebe: ele está no meio de um problema,
+  // e a pergunta do bot atropela quem está resolvendo.
+  storePV.saveContact(CLI_PV, { paused: true });
+  const comAtendente = await varrer(4);
+  t('quem está com atendente não é interrompido', comAtendente.enviadas.length === 0);
+  storePV.saveContact(CLI_PV, { paused: false });
+
+  // Sem telefone utilizável não dá para perguntar — e também não pode ficar
+  // rodando para sempre.
+  const semTelefone = await varrer(4, { telefone: '' });
+  t('sem telefone não tenta', semTelefone.enviadas.length === 0);
+  t('  e sai da fila', Boolean(semTelefone.registro.conferido));
+
+  // Desligado é desligado.
+  const conferirAntes = cfgPV.posvenda.conferirLigado;
+  cfgPV.posvenda.conferirLigado = false;
+  const desligadoPV = await varrer(4);
+  t('desligado não pergunta nada', desligadoPV.enviadas.length === 0);
+  cfgPV.posvenda.conferirLigado = conferirAntes;
+
+  // ── Reativar quem sumiu ────────────────────────────────────
+  //
+  // É a única coisa do bot que fala com quem NÃO puxou conversa. Mensagem em
+  // massa partindo de um número comercial é o padrão que faz o WhatsApp
+  // derrubar o número — e derrubar o número custa o atendimento inteiro.
+  bloco('reativar quem sumiu');
+
+  t('nasce DESLIGADO', cfgPV.posvenda.reativarLigado === false);
+
+  const reativarAntes = { ...cfgPV.posvenda };
+  cfgPV.posvenda.reativarLigado = true;
+  cfgPV.posvenda.reativarDias = 45;
+  cfgPV.posvenda.reativarPorDia = 2;
+  cfgPV.posvenda.reativarIntervaloDias = 120;
+
+  const DIA_PV = 24 * HORA_PV;
+  const agoraPV = Date.UTC(2026, 7, 27, 17, 0);
+
+  // Quatro perfis diferentes, um por regra.
+  storePV.saveContact('5541977771111', { engaged: true, lastSeen: agoraPV - 60 * DIA_PV });
+  storePV.saveContact('5541977772222', { engaged: true, lastSeen: agoraPV - 50 * DIA_PV });
+  storePV.saveContact('5541977773333', { engaged: true, lastSeen: agoraPV - 90 * DIA_PV });
+  // Nunca conversou com o bot: para ele isto seria mensagem fria.
+  storePV.saveContact('5541977774444', { engaged: false, lastSeen: agoraPV - 90 * DIA_PV });
+  // Está com atendente.
+  storePV.saveContact('5541977775555', { engaged: true, paused: true, lastSeen: agoraPV - 90 * DIA_PV });
+  // Sumiu há pouco.
+  storePV.saveContact('5541977776666', { engaged: true, lastSeen: agoraPV - 10 * DIA_PV });
+  // Já foi reativado faz pouco tempo.
+  storePV.saveContact('5541977777777', {
+    engaged: true, lastSeen: agoraPV - 90 * DIA_PV, reativadoEm: agoraPV - 30 * DIA_PV,
+  });
+
+  const reativadas = [];
+  const sendAntesRe = senderPV.send;
+  senderPV.send = async (para, txt) => { reativadas.push({ para, texto: String(txt) }); };
+  await posvenda.reativar(agoraPV);
+  senderPV.send = sendAntesRe;
+
+  const alvosReativados = reativadas.map((r) => r.para);
+  t('respeita o teto por dia', reativadas.length === 2, String(reativadas.length));
+  // Os mais RECENTES primeiro: quem sumiu há 50 dias ainda lembra da loja;
+  // quem sumiu há dois anos é quase mensagem fria de novo.
+  t('  começando pelos que sumiram há menos tempo',
+    alvosReativados.includes('5541977772222') && alvosReativados.includes('5541977771111'), alvosReativados.join(','));
+
+  for (const [regra, numero] of [
+    ['quem nunca conversou', '5541977774444'],
+    ['quem está com atendente', '5541977775555'],
+    ['quem sumiu há pouco', '5541977776666'],
+    ['quem já foi reativado', '5541977777777'],
+  ]) {
+    t(`NÃO fala com ${regra}`, !alvosReativados.includes(numero), numero);
+  }
+
+  // Marca antes de enviar, mesmo motivo da conferência.
+  t('marca quem foi reativado', Boolean(storePV.getContact('5541977772222')?.reativadoEm));
+
+  const textoRe = reativadas[0]?.texto || '';
+  // Uma porta aberta, não um anúncio: texto de propaganda é o que faz a pessoa
+  // denunciar como spam, e denúncia é o caminho mais rápido para o número cair.
+  t('o texto não é propaganda',
+    !/promo[çc][ãa]o|desconto|imperd[íi]vel|oferta|[úu]ltima chance|R\$/i.test(textoRe), textoRe);
+  t('  nem inventa urgência', !/corre|agora|hoje|acaba|s[óo] hoje/i.test(textoRe), textoRe);
+  t('  e não entrega a origem',
+    !PROIBIDO.test(textoRe) && !AUTOMACAO.test(textoRe) && !REPASSE.test(textoRe), textoRe);
+
+  Object.assign(cfgPV.posvenda, reativarAntes);
+
   console.log('\n' + (falhas ? falhas + ' FALHA(S)' : 'todos os testes passaram'));
   process.exit(falhas ? 1 : 0);
 })();

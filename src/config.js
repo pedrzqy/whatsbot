@@ -115,9 +115,6 @@ const config = {
     nerixSecret: process.env.NERIX_WEBHOOK_SECRET || '',
   },
 
-  // ── Recuperação de venda: cutuca quem engajou na conversa e sumiu ──
-  // Só cutuca contato que JÁ conversou com a IA (engaged) e não está com atendente (paused).
-  // Cliente que responde zera o ciclo. Passa pela fila anti-ban do sender.js e respeita horário.
   // ── Quando existe GENTE do outro lado ──────────────────────────────
   //
   // O bot atende 24h e continua atendendo — isso não muda. O que muda é o que
@@ -145,6 +142,28 @@ const config = {
   // coisa. Estourado, ele cai no menu — que responde na hora e não custa nada.
   iaPorClienteHora: Number(process.env.LLM_MAX_POR_CLIENTE_HORA || 20),
 
+  // ── Depois da entrega ──────────────────────────────────────────────
+  posvenda: {
+    // Perguntar se a ativacao deu certo. LIGADO: e uma pergunta a quem acabou
+    // de comprar, no meio de uma conversa que ele mesmo comecou.
+    conferirLigado: process.env.POSVENDA_CONFERIR !== 'false',
+
+    // Reativar quem sumiu. DESLIGADO, e a decisao e essa mesmo: e a unica
+    // coisa do bot que fala com quem nao puxou conversa, e mensagem em massa
+    // partindo de um numero comercial e o padrao que faz o WhatsApp derrubar o
+    // numero -- o que custa o atendimento inteiro, nao so a campanha.
+    reativarLigado: process.env.POSVENDA_REATIVAR === 'true',
+    // Sumido ha quantos dias para virar candidato.
+    reativarDias: Number(process.env.POSVENDA_REATIVAR_DIAS || 45),
+    // Teto por dia. Baixo de proposito: rajada e o que parece spam.
+    reativarPorDia: Number(process.env.POSVENDA_REATIVAR_POR_DIA || 5),
+    // Intervalo minimo antes de falar com a MESMA pessoa de novo.
+    reativarIntervaloDias: Number(process.env.POSVENDA_REATIVAR_INTERVALO_DIAS || 120),
+  },
+
+  // ── Recuperação de venda: cutuca quem engajou na conversa e sumiu ──
+  // Só cutuca contato que JÁ conversou com a IA (engaged) e não está com atendente (paused).
+  // Cliente que responde zera o ciclo. Passa pela fila anti-ban do sender.js e respeita horário.
   recovery: {
     enabled: process.env.RECOVERY_ENABLED !== 'false', // ligado por padrão
     // De quanto em quanto tempo o scheduler varre os contatos.

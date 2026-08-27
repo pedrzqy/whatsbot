@@ -11,6 +11,7 @@ const ponte = require('./ponte');
 const vendas = require('./vendas');
 const bracoRouter = require('./ponte/braco');
 const transcricao = require('./transcricao');
+const posvenda = require('./posvenda');
 
 const app = express();
 // 12mb: a foto do cliente chega em base64 pela rota do braço, e base64 infla ~33%.
@@ -213,6 +214,7 @@ const server = app.listen(config.port, () => {
   community.start(); // agente de comunidade: posta conteúdo no grupo (Fase 1: só saída)
   ponte.iniciar(); // ponte com o fornecedor da Taobao (fila serial + braço robô)
   vendas.iniciar(); // ciclo de venda: cutuca quem gerou pagamento e não pagou
+  posvenda.iniciar(); // depois da entrega: pergunta se ativou · reativa quem sumiu
 });
 
 // Socket ocioso vive 65s, não os 5s do padrão.
