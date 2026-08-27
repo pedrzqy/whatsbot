@@ -375,7 +375,17 @@ async function main() {
   try {
     const { data } = await api.get('/estado');
     console.log(
-      `[braço] bot ok — janela ${data.janelaAberta ? 'aberta' : 'fechada'}, disjuntor ${data.disjuntor}`,
+      // Diz QUANTO FALTA quando está fechada. "Janela fechada" sozinho não
+      // separa "abre em 20 min" de "a configuração está errada e nunca abre" —
+      // e com ela fechada o laço dorme 5 min por volta, o que de fora parece
+      // um braço travado.
+      `[braço] bot ok — janela ${
+        data.janelaAberta
+          ? 'aberta'
+          : `FECHADA, abre em ${Math.round((data.esperaMinutos || 0) / 60)}h${
+              (data.esperaMinutos || 0) % 60
+            }min`
+      }, disjuntor ${data.disjuntor}`,
     );
   } catch (err) {
     console.error(`[fatal] não falei com o bot em ${cfg.botUrl}: ${err.message}`);
@@ -523,6 +533,50 @@ async function main() {
     await evento('info', 'recarga', motivo);
   }
 
+  /**
+   * Exporta a conversa a pedido do operador (#historico).
+   *
+   * Rola para trás, lê os dois lados e manda ao bot gravar. Nunca lança: uma
+   * exportação que falha não pode derrubar o laço, e o bot é avisado do erro
+   * para o pedido não ficar marcado para sempre — pedido preso viraria rolagem
+   * repetida a cada volta, que é o oposto da cadência humana que a pausa
+   * entre rolagens existe para manter.
+   *
+   * Depois de exportar, VOLTA AO FIM. Todo o resto do laço assume a conversa
+   * no fim: deixá-la parada no mês passado quebraria a leitura seguinte e,
+   * pelo VNC, pareceria que o chat travou.
+   */
+  async function exportarHistorico(pedido, titulo) {
+    const telas = Number(pedido) || 40;
+    console.log(`[braço] exportando histórico (até ${telas} telas)`);
+
+    try {
+      if (!conversaAberta) {
+        await chat.abrirConversa(titulo);
+        conversaAberta = true;
+      }
+
+      const r = await chat.lerHistorico({ maxRolagens: telas });
+      await api.post('/historico', {
+        mensagens: r.mensagens,
+        rolagens: r.rolagens,
+        diagnostico: r.diagnostico,
+      });
+      await evento(
+        'info',
+        'historico',
+        `${r.mensagens.length} mensagem(ns) em ${r.rolagens} rolagem(ns)` +
+          (r.diagnostico ? ` — ${r.diagnostico}` : ''),
+      );
+    } catch (err) {
+      console.warn(`[braço] exportação falhou: ${err.message}`);
+      await api.post('/historico', { erro: err.message, mensagens: [] }).catch(() => {});
+      await evento('warn', 'historico', err.message);
+    }
+
+    await chat.irParaOFim().catch(() => {});
+  }
+
   await irAoChat('subida');
   console.log('[braço] página carregada — entrando no laço');
   console.log('[braço] long-poll ligado (espera 25s ocioso · 6s com cliente aguardando)');
@@ -602,6 +656,26 @@ async function main() {
           });
         }
 
+        // #historico também, e por um motivo mais forte ainda.
+        //
+        // Exportar é LEITURA: rola a conversa e lê o DOM, sem escrever nada
+        // para ninguém. Prender isso ao horário do fornecedor não protegia
+        // nada — só fazia o comando dado fora da janela dormir 5 minutos e
+        // voltar, para sempre, sem uma linha de log dizendo por quê.
+        //
+        // E fora da janela é a MELHOR hora para rolar: não existe atendimento
+        // em curso para atravessar.
+        //
+        // Precisa da sessão de pé, então garantirLogin() é chamado aqui — o
+        // caminho normal só chega nele depois deste gate.
+        if (st.historicoPedido && !marcaAtual && st.chatTitulo) {
+          if (await garantirLogin(pagina, chat)) {
+            await exportarHistorico(st.historicoPedido, st.chatTitulo);
+          } else {
+            console.warn('[braço] histórico adiado: sessão não está de pé');
+          }
+        }
+
         // Fora da janela do fornecedor: aí sim esperar muito é o certo, porque
         // o que muda é o relógio e não uma ação do operador.
         await dormir(300_000);
@@ -663,57 +737,8 @@ async function main() {
         }
       }
 
-      // ── Exportar o histórico ─────────────────────────────────
-      //
-      // A pedido do operador (#historico). Rola a conversa para trás, lê os
-      // dois lados e manda para o bot gravar.
-      //
-      // SÓ com a fila vazia, e a checagem é a mesma da recarga: rolar para
-      // cima tira a lista do fim, e é do fim que sai a marca d'água. Fazer
-      // isso no meio de um atendimento é a receita para o cliente ficar sem
-      // código — a leitura seguinte não saberia mais o que é resposta nova.
-      //
-      // Depois de exportar, volta para o fim de propósito. Deixar a tela
-      // parada no mês passado quebraria a próxima leitura e, pelo VNC,
-      // pareceria que o chat travou.
       if (st.historicoPedido && !marcaAtual) {
-        const telas = Number(st.historicoPedido) || 40;
-        console.log(`[braço] exportando histórico (até ${telas} telas)`);
-
-        try {
-          if (!conversaAberta) {
-            await chat.abrirConversa(titulo);
-            conversaAberta = true;
-          }
-
-          const r = await chat.lerHistorico({ maxRolagens: telas });
-          await api.post('/historico', {
-            mensagens: r.mensagens,
-            rolagens: r.rolagens,
-            diagnostico: r.diagnostico,
-          });
-          // As ROLAGENS vao no evento de proposito. Quando a exportacao volta
-          // curta, "o braco nao tem a versao nova" e "rolou e o chat nao
-          // carregou" dao o mesmo resultado — o numero de rolagens separa os
-          // dois sem precisar abrir o log do outro servico.
-          await evento(
-            'info',
-            'historico',
-            `${r.mensagens.length} mensagem(ns) em ${r.rolagens} rolagem(ns)` +
-              (r.diagnostico ? ` — ${r.diagnostico}` : ''),
-          );
-        } catch (err) {
-          console.warn(`[braço] exportação falhou: ${err.message}`);
-          // Avisa o bot MESMO na falha: sem isto o pedido ficaria marcado para
-          // sempre e o braço tentaria de novo a cada volta — rolagem repetida
-          // no chat é exatamente o que a pausa humanizada existe para evitar.
-          await api.post('/historico', { erro: err.message, mensagens: [] }).catch(() => {});
-          await evento('warn', 'historico', err.message);
-        }
-
-        // A lista ficou rolada para cima. Volta ao fim antes de qualquer outra
-        // coisa — todo o resto do laço assume a conversa no fim.
-        await chat.irParaOFim().catch(() => {});
+        await exportarHistorico(st.historicoPedido, titulo);
       }
 
       // 1) Tarefa pendente?
