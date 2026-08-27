@@ -19,6 +19,7 @@
 
 const { dados, persist, persistAgora, proximoId } = require('./estado');
 const cfg = require('./config');
+const registro = require('./registro');
 
 /** Serializa as operações da fila para não haver leitura-e-escrita entrelaçada. */
 let corrente = Promise.resolve();
@@ -114,6 +115,20 @@ function concluir(id, motivo) {
     at.estado = motivo === 'expirado' ? 'expirado' : 'concluido';
     at.concluidoEm = Date.now();
     at.motivoFim = motivo;
+
+    // O DESFECHO, e este é o único lugar por onde todos passam: código
+    // entregue, entrega recebida, problema explicado, expirado, pulado,
+    // limpeza. Anotar em cada chamador deixaria justamente os desfechos ruins
+    // de fora, que são os que mais interessam analisar.
+    //
+    // `duracao` é o número que responde "está resolvendo rápido?" sem ninguém
+    // precisar cruzar dois timestamps na mão.
+    registro.anotar('encerrado', {
+      atendimentoId: at.id,
+      motivo,
+      turnos: at.turnos || 0,
+      duracaoMin: at.iniciadoEm ? Math.round((Date.now() - at.iniciadoEm) / 60000) : null,
+    });
 
     const proximo = aguardando()[0];
     if (!proximo) {

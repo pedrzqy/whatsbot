@@ -1689,6 +1689,104 @@ const OP = '5541999999999';
   estadoPonte.dados.tarefas = [];
   estadoPonte.dados.aprovacoes = [];
 
+  // ── O registro dos casos ───────────────────────────────────
+  //
+  // Hoje o sistema guarda que HOUVE um problema, não qual problema nem o que
+  // resolveu: o histórico do atendimento some com a poda de 7 dias e o resto só
+  // existe no WhatsApp do operador. Sem este arquivo não há como saber se uma
+  // linha do repertório está resolvendo, nem propor linha nova.
+  bloco('registro dos casos');
+
+  const registroMod = require('./src/ponte/registro');
+  const fsR = require('fs');
+
+  // Arquivo limpo: o resumo conta o que está lá, e sobra de outro cenário
+  // faria este bloco medir a execução anterior em vez do que ele testa.
+  if (fsR.existsSync(registroMod.FILE)) fsR.rmSync(registroMod.FILE);
+
+  const tradutorR6 = require('./src/ponte/tradutor');
+  const traduzAntesR6 = tradutorR6.paraCliente;
+  tradutorR6.paraCliente = async () => ({ traducao: 'a conta nao existe', resumo: '', confianca: 'alta' });
+
+  estadoPonte.dados.atendimentos = [];
+  estadoPonte.dados.tarefas = [];
+  estadoPonte.dados.aprovacoes = [];
+
+  const senderR6 = require('./src/sender');
+  const sendR6Antes = senderR6.send;
+  senderR6.send = async () => {};
+
+  const casoR6 = await filaMod.entrar('5541966660001', 'Dani');
+  casoR6.atendimento.usuario = 'rrtt9321';
+  const idCaso = casoR6.atendimento.id;
+
+  await ponteMod.receberDoFornecedor({ texto: '这个账号不存在' }); // problema
+  await ponteMod.receberDoFornecedor({ texto: '为您推荐以下商品' }); // ruído
+  await ponteMod.receberDoFornecedor({ texto: '394860' }); // código: encerra
+  senderR6.send = sendR6Antes;
+  tradutorR6.paraCliente = traduzAntesR6;
+
+  const anotado = registroMod.ultimos(50);
+  t('grava uma linha por mensagem dele', anotado.filter((l) => l.tipo === 'recebido').length === 3,
+    String(anotado.filter((l) => l.tipo === 'recebido').length));
+  t('  com a classificação', anotado.some((l) => l.classe === 'problema') &&
+    anotado.some((l) => l.classe === 'ignorar') && anotado.some((l) => l.classe === 'codigo'),
+    JSON.stringify(anotado.filter((l) => l.classe).map((l) => l.classe)));
+  // O chinês PODE ficar aqui: é arquivo, não é mensagem de WhatsApp. É
+  // justamente o dado que a análise precisa ver para propor linha nova.
+  t('  guardando o texto original em chinês',
+    anotado.some((l) => l.texto === '这个账号不存在'),
+    JSON.stringify(anotado.find((l) => l.tipo === 'recebido')?.texto));
+  t('  e quantos turnos já tinham passado',
+    anotado.every((l) => l.tipo !== 'recebido' || typeof l.turnos === 'number'));
+
+  // O desfecho vem do fila.concluir, que é o único ponto por onde TODOS passam
+  // — anotar em cada chamador deixaria de fora justamente os desfechos ruins.
+  const encerrado = anotado.find((l) => l.tipo === 'encerrado');
+  t('grava o desfecho', Boolean(encerrado), JSON.stringify(encerrado));
+  t('  com o motivo', encerrado?.motivo === 'codigo_entregue', encerrado?.motivo);
+  t('  e quanto tempo levou', typeof encerrado?.duracaoMin === 'number', String(encerrado?.duracaoMin));
+
+  // Os eventos de um caso se amarram pelo id — que é tudo de que a análise
+  // precisa, e por isso nome, telefone e e-mail do cliente não entram aqui.
+  t('os eventos do caso se amarram pelo id',
+    anotado.filter((l) => l.atendimentoId === idCaso).length >= 4,
+    String(anotado.filter((l) => l.atendimentoId === idCaso).length));
+
+  const bruto = fsR.readFileSync(registroMod.FILE, 'utf8');
+  for (const [nome, valor] of [['telefone', '5541966660001'], ['nome', 'Dani']]) {
+    t(`o arquivo NÃO guarda ${nome} do cliente`, !bruto.includes(valor), valor);
+  }
+  // JSONL: cada linha independente, então uma queda no meio de um append não
+  // corrompe o que já está lá.
+  t('cada linha é um JSON válido sozinho',
+    bruto.split('\n').filter(Boolean).every((l) => { try { JSON.parse(l); return true; } catch { return false; } }),
+    `${bruto.split('\n').filter(Boolean).length} linha(s)`);
+  t('  e o horário vem primeiro, em ISO',
+    /^\{"em":"\d{4}-\d{2}-\d{2}T/.test(bruto.split('\n')[0]), bruto.split('\n')[0].slice(0, 40));
+
+  // ── #casos: o resumo, sem abrir o console ──
+  const casos = await operador.executar('#casos', OP);
+  t('#casos conta o que chegou', /descartado como ru[íi]do|foi para voc[êe] decidir/.test(casos),
+    casos.split('\n')[2] || casos);
+  t('  e como terminou', /codigo entregue/.test(casos), casos);
+  // Regra 1: isto sai pelo número comercial. O detalhe fica no arquivo.
+  t('  sem caractere chinês', !politica.temCJK(casos), casos);
+  t('  sem vocabulário proibido', !AUTOMACAO.test(casos),
+    (casos.match(AUTOMACAO) || [''])[0] || 'limpo');
+  t('  e aponta o arquivo para o detalhe', /cat .*casos-ponte\.jsonl/.test(casos),
+    casos.split('\n').pop());
+
+  // Arquivo vazio não pode virar erro nem tela em branco.
+  fsR.rmSync(registroMod.FILE);
+  const semNada = await operador.executar('#casos', OP);
+  t('#casos com o arquivo vazio explica em vez de quebrar',
+    /ainda n[ãa]o tem nada/i.test(semNada), semNada.split('\n')[0]);
+
+  estadoPonte.dados.atendimentos = [];
+  estadoPonte.dados.aprovacoes = [];
+  estadoPonte.dados.tarefas = [];
+
   // ── Com a IA ligada: o que muda e o que NÃO pode mudar ─────
   //
   // Este bloco existe porque BOT_IA=true troca o caminho principal do

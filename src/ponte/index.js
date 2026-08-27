@@ -28,6 +28,7 @@ const fila = require('./fila');
 const limites = require('./limites');
 const codigo = require('./codigo');
 const repertorio = require('./repertorio');
+const registro = require('./registro');
 const tradutor = require('./tradutor');
 const janela = require('./janela');
 const midia = require('./midia');
@@ -354,6 +355,19 @@ async function receberDoFornecedor(entrada) {
 
   const c = codigo.classificar(entrada.texto);
 
+  // Uma linha por mensagem dele, ANTES de decidir o que fazer com ela.
+  //
+  // Antes disto o sistema guardava que houve um problema, nao QUAL problema
+  // nem o que resolveu: o historico do atendimento some com a poda de 7 dias e
+  // o resto so existia no WhatsApp do operador. Sem este arquivo nao ha como
+  // saber se uma linha do repertorio esta resolvendo, nem propor linha nova.
+  registro.anotar('recebido', {
+    atendimentoId: at.id,
+    classe: c.tipo,
+    texto: entrada.texto,
+    turnos: at.turnos || 0,
+  });
+
   if (c.tipo === 'codigo') {
     await entregarCodigo(at, c.codigo);
     return;
@@ -585,6 +599,12 @@ async function tentarResponder(atendimento, textoDele) {
       }
     }
     fila.registrar(atendimento.id, 'vendedor', textoDele, `(${linha.id})`);
+    registro.anotar('respondido', {
+      atendimentoId: atendimento.id,
+      linha: linha.id,
+      textoZh: null, // de proposito: esta linha existe para NAO responder
+      turnos: atendimento.turnos || 0,
+    });
     console.log(`[ponte] repertório: ${linha.id} — não respondo, avisei o cliente`);
     return true;
   }
@@ -602,6 +622,14 @@ async function tentarResponder(atendimento, textoDele) {
   }
 
   fila.registrar(atendimento.id, 'vendedor', textoDele, `(${linha.id})`);
+  registro.anotar('respondido', {
+    atendimentoId: atendimento.id,
+    linha: linha.id,
+    // O chines vai junto: e o que a analise precisa conferir para saber se a
+    // linha esta dizendo o que deveria dizer.
+    textoZh: texto,
+    turnos: atendimento.turnos || 0,
+  });
   await despachar(atendimento, {
     tipo: 'responder_fornecedor',
     textoZh: texto,

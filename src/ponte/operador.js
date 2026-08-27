@@ -23,6 +23,7 @@ const janela = require('./janela');
 const ponte = require('./index');
 const politica = require('./politica');
 const tradutor = require('./tradutor');
+const registro = require('./registro');
 const sender = require('../sender');
 const nerix = require('../nerix');
 const evolution = require('../evolution');
@@ -42,6 +43,7 @@ const AJUDA = [
   '*#enviar <id>* — manda a resposta ao cliente',
   '*#editar <id> <texto>* — corrige antes de mandar',
   '*#responder <id> <texto>* — fala com o outro lado (escreva em português)',
+  '*#casos* — o que a ponte resolveu nos últimos 7 dias',
   '*#nao <id>* — descarta',
   '*#limpar* — descarta o que espera aprovação',
   '*#limpar fila* — encerra TODOS os atendimentos e avisa cada cliente',
@@ -64,7 +66,7 @@ const min = (ms) => Math.round(ms / 60000);
 function ehComando(from, texto) {
   if (!cfg.ativa || !cfg.operador.numeros.length) return false;
   if (!cfg.operador.ehOperador(from)) return false;
-  return /^#(fila|status|vendas|historico|liberar|ok|enviar|editar|responder|nao|não|pular|ajuda|sms|taobao|teste|limpar|destravar|atender|auto|recarregar)\b/i.test(
+  return /^#(fila|status|vendas|historico|liberar|ok|enviar|editar|responder|casos|nao|não|pular|ajuda|sms|taobao|teste|limpar|destravar|atender|auto|recarregar)\b/i.test(
     String(texto || '').trim(),
   );
 }
@@ -865,6 +867,50 @@ async function executar(texto, de = '') {
     await fila.concluir(at.id, 'pulado_pelo_operador');
     await ponte.promoverProximo();
     return `Atendimento de *${at.nome}* encerrado. Próximo da fila promovido.`;
+  }
+
+  // ── #casos — o que a ponte andou resolvendo ────────────
+  //
+  // O resumo do registro, para o dono não precisar abrir o console do painel
+  // para saber se vale abrir o console do painel. A pergunta que ele responde
+  // é uma só: quanto está sendo resolvido sem mim?
+  if (cmd === 'casos') {
+    const r = registro.resumo(7);
+    if (!r.eventos) {
+      return (
+        'Ainda não tem nada registrado dos últimos 7 dias.\n\n' +
+        '_O arquivo enche sozinho conforme os atendimentos acontecem._'
+      );
+    }
+
+    const linhas = [`*Últimos 7 dias* — ${r.eventos} anotações`, ''];
+
+    // Como o outro lado respondeu. É a tabela que diz onde vale escrever uma
+    // linha nova de repertório: o que aparece muito em "problema" é o que
+    // ainda cai no colo do operador.
+    const nomes = {
+      codigo: 'código',
+      senha: 'senha',
+      pacote: 'conta completa',
+      ignorar: 'descartado como ruído',
+      problema: 'foi para você decidir',
+    };
+    const classes = Object.entries(r.porClasse).sort((a, b) => b[1] - a[1]);
+    if (classes.length) {
+      linhas.push('*O que chegou:*');
+      for (const [k, n] of classes) linhas.push(`${n}× ${nomes[k] || k}`);
+    }
+
+    const desfechos = Object.entries(r.porDesfecho).sort((a, b) => b[1] - a[1]);
+    if (desfechos.length) {
+      linhas.push('', '*Como terminou:*');
+      for (const [k, n] of desfechos) linhas.push(`${n}× ${k.replace(/_/g, ' ')}`);
+    }
+
+    // O caminho para o detalhe. Não vai pelo WhatsApp: o texto do outro lado
+    // está em chinês, e chinês no número comercial entrega a origem.
+    linhas.push('', `_Detalhe por caso: \`cat ${registro.FILE}\` no console._`);
+    return linhas.join('\n');
   }
 
   if (!id) return `Faltou o id. Use *#${cmd} <id>*. Veja os pendentes com *#fila*.`;
