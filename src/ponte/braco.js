@@ -150,8 +150,12 @@ router.post('/historico', async (req, res) => {
       // rodando; curta com muitas rolagens é o chat que não entrega mais
       // histórico. Sem este número as duas chegam idênticas ao WhatsApp — e
       // foi essa confusão que custou uma rodada inteira de diagnóstico.
-      `Rolagens: ${rolagens}\n\n` +
-      `_Está salvo no servidor, em data/historico-coleta.json._`,
+      `Rolagens: ${rolagens}\n` +
+      // O diagnóstico vem JUNTO, não só no log do outro serviço. Cada rodada
+      // de "veio curto de novo" custava uma ida ao painel de logs para
+      // descobrir o porquê — e o porquê cabe numa linha.
+      (diagnostico ? `\n_${diagnostico}_\n` : '') +
+      `\n_Está salvo no servidor, em data/historico-coleta.json._`,
   );
 
   res.json({ ok: true, gravadas: mensagens.length });

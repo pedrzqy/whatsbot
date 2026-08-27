@@ -1478,19 +1478,33 @@ class Chat {
         (args) => {
           const { cands, msgs } = args;
 
-          // Seletor conhecido primeiro. `rc-scrollbars-view` é o container que
-          // este chat usa (o log de um envio antigo entregou o nome) — mirar
-          // nele evita depender da subida genérica, que acha o primeiro
-          // ancestral com overflow e nem sempre é a lista.
+          // A caixa certa é a que CONTÉM MENSAGENS.
+          //
+          // `.rc-scrollbars-view` existe mais de uma vez nesta tela: a lista de
+          // CONVERSAS, na lateral, também rola e também é rc-scrollbars. Pegar
+          // "o primeiro que rola" pegava ela — e o braço passou a rolar a lista
+          // de contatos enquanto a conversa ficava parada. O sintoma era
+          // exatamente o que apareceu: rolagem acontecendo, scrollTop mudando,
+          // e zero mensagem nova, exportação atrás de exportação.
+          //
+          // Conter um .message-item é o que separa as duas de forma que não
+          // depende de ordem no DOM nem de classe nova.
           let caixa = null;
+          let candidatas = 0;
           for (const s of cands) {
             for (const el of document.querySelectorAll(s)) {
-              if (el.scrollHeight > el.clientHeight + 10) { caixa = el; break; }
+              if (el.scrollHeight <= el.clientHeight + 10) continue;
+              candidatas++;
+              const temMensagem = msgs.some((m) => el.querySelector(m));
+              if (temMensagem) { caixa = el; break; }
             }
             if (caixa) break;
           }
 
-          // Reserva: sobe do último balão até o primeiro ancestral que rola.
+          // Reserva: sobe DO ÚLTIMO BALÃO até o primeiro ancestral que rola.
+          //
+          // Este caminho já garante a lista certa por construção — ele parte de
+          // uma mensagem, então o ancestral que ele encontra é o que a contém.
           if (!caixa) {
             let ultima = null;
             for (const s of msgs) {
@@ -1509,17 +1523,30 @@ class Chat {
           }
 
           if (!caixa) {
-            // Lista do que EXISTE de rolável, para consertar o seletor sem
-            // precisar de outra rodada de tentativa e erro.
+            // Lista do que EXISTE de rolável, e se cada um contém mensagem.
+            // É a resposta para "qual devia ser o seletor?" sem mais uma rodada
+            // de tentativa e erro.
             const roláveis = [...document.querySelectorAll('div,ul,section')]
               .filter((e) => e.scrollHeight > e.clientHeight + 10)
               .slice(0, 6)
-              .map((e) => `${e.tagName}.${(e.className || '').toString().trim().slice(0, 40)}`);
-            return { ok: false, motivo: 'sem container rolável', roláveis };
+              .map((e) => {
+                const tem = msgs.some((m) => e.querySelector(m));
+                return `${e.tagName}.${(e.className || '').toString().trim().slice(0, 32)}${tem ? '(msgs)' : ''}`;
+              });
+            return { ok: false, motivo: 'sem lista de mensagens rolável', candidatas, roláveis };
           }
 
           const antes = caixa.scrollTop;
           caixa.scrollTop = Math.max(0, antes - caixa.clientHeight);
+
+          // Quantos balões existem AGORA. Junto com o scrollTop, é o que
+          // distingue "rolei na lista errada" de "rolei na certa e o chat não
+          // carregou mais nada".
+          let baloes = 0;
+          for (const m of msgs) {
+            const n = caixa.querySelectorAll(m).length;
+            if (n) { baloes = n; break; }
+          }
 
           return {
             ok: true,
@@ -1527,6 +1554,8 @@ class Chat {
             depois: caixa.scrollTop,
             altura: caixa.clientHeight,
             total: caixa.scrollHeight,
+            baloes,
+            candidatas,
             classe: (caixa.className || '').toString().trim().slice(0, 50),
           };
         },
@@ -1685,10 +1714,18 @@ class Chat {
       }
 
       if (i === 0) {
+        // Curto de propósito: isto vai para o WhatsApp junto com o resultado, e
+        // é lido no celular. O log do braço tem a versão longa.
         diagnostico =
-          `caixa "${rel.classe}" ${rel.total}px de altura, tela de ${rel.altura}px` +
-          (rel.viaRoda ? ' (rolando pela roda)' : '');
-        console.log(`[chat] histórico — ${diagnostico}`);
+          `${rel.classe || 'caixa sem classe'} · ${rel.baloes} balões · ` +
+          `${rel.total}/${rel.altura}px` +
+          (rel.candidatas > 1 ? ` · ${rel.candidatas} caixas roláveis` : '') +
+          (rel.viaRoda ? ' · roda' : '');
+        console.log(
+          `[chat] histórico — caixa "${rel.classe}", ${rel.baloes} balões, ` +
+            `${rel.total}px de altura, tela de ${rel.altura}px, ` +
+            `${rel.candidatas} candidata(s) rolável(is)${rel.viaRoda ? ', rolando pela roda' : ''}`,
+        );
       }
 
       rolagens++;

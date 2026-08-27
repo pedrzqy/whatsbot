@@ -216,6 +216,53 @@ t('nenhum candidato mira por posição', !CAND.some((c) => /nth-child|nth-of-typ
   // fornecedor — atividade que ninguém pediu, na conversa errada.
   t('e não desce a conversa errada', desceu2.n === 0);
 
+  // ── A caixa certa é a que CONTÉM mensagens ─────────────────
+  //
+  // `.rc-scrollbars-view` existe mais de uma vez nesta tela: a lista de
+  // CONVERSAS, na lateral, também rola e também é rc-scrollbars. Pegar "o
+  // primeiro que rola" pegava ela, e o braço rolava a lista de contatos
+  // enquanto a conversa ficava parada — rolagem acontecendo, scrollTop
+  // mudando, zero mensagem nova. Exatamente o que a exportação mostrou.
+  //
+  // Este teste roda a função de escolha DE VERDADE, com dois roláveis na tela.
+  console.log('\n--- escolher entre duas caixas que rolam ---');
+
+  // Reproduz a lógica do evaluate() do _rolarUmaTela: dado o DOM, qual caixa.
+  // Fora do navegador não há getComputedStyle, então o dublê representa cada
+  // caixa pelo que a escolha realmente usa: rola? contém mensagem?
+  const escolher = (caixas, cands) => {
+    for (const s of cands) {
+      for (const c of caixas) {
+        if (!c.seletores.includes(s)) continue;
+        if (!c.rola) continue;
+        if (!c.temMensagem) continue;
+        return c;
+      }
+    }
+    return null;
+  };
+
+  const LATERAL = { nome: 'conversas', seletores: ['.rc-scrollbars-view'], rola: true, temMensagem: false };
+  const MENSAGENS = { nome: 'mensagens', seletores: ['.rc-scrollbars-view'], rola: true, temMensagem: true };
+  const CANDS = SEL.listaRolavel.candidatos;
+
+  // A lateral vem PRIMEIRO no DOM — é a ordem que causou o bug.
+  const escolhida = escolher([LATERAL, MENSAGENS], CANDS);
+  t('pula a lista de conversas', escolhida?.nome === 'mensagens', escolhida?.nome || 'nenhuma');
+
+  // E continua funcionando quando só existe uma.
+  t('acha quando só há a de mensagens', escolher([MENSAGENS], CANDS)?.nome === 'mensagens');
+  t('não inventa caixa quando nenhuma tem mensagem', escolher([LATERAL], CANDS) === null);
+
+  // O seletor tem que ser genérico o bastante para achar as duas — é a busca
+  // que separa, não o seletor. Se o seletor já excluísse a lateral, o dia em
+  // que a Taobao trocasse a classe voltaria a quebrar em silêncio.
+  t(
+    'o seletor conhecido está na lista',
+    CANDS.includes('.rc-scrollbars-view'),
+    CANDS[0],
+  );
+
   // ── Histórico numa lista VIRTUALIZADA ──────────────────────
   //
   // O furo da primeira versão: o chat recicla os nós do DOM em vez de
@@ -253,6 +300,8 @@ t('nenhum candidato mira por posição', !CAND.some((c) => /nth-child|nth-of-typ
         depois: offset >= maximo ? 0 : alturaTela,
         altura: alturaTela,
         total: alturaTela * 5,
+        baloes: JANELA,
+        candidatas: 2, // a lateral de conversas também rola
         classe: 'rc-scrollbars-view',
       };
     };
@@ -296,7 +345,7 @@ t('nenhum candidato mira por posição', !CAND.some((c) => /nth-child|nth-of-typ
   let voltas = 0;
   chatCurto._rolarUmaTela = async () => {
     voltas++;
-    return { ok: true, antes: 0, depois: 0, altura: 500, total: 500, classe: 'x' };
+    return { ok: true, antes: 0, depois: 0, altura: 500, total: 500, baloes: 20, candidatas: 1, classe: 'x' };
   };
   chatCurto._coletarVisiveis = async () => todas.slice(0, JANELA); // nunca muda
   await chatCurto.lerHistorico({ maxRolagens: 40 });
