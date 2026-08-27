@@ -232,8 +232,15 @@ nerix.checkPayment = async (codigo) => {
   //
   // Antes esta checagem era só "exige e-mail". Ela estava certa quando havia um
   // caminho só; o que ela protege é a prova, não o campo.
+  //
+  // `criar_pedido` fica FORA desta lista, e o motivo importa: ela nao LE pedido
+  // de ninguem, ela cria um novo. O e-mail ali e o destino da chave, nao prova
+  // de posse de nada -- deixar ela passar por "tem email no required" seria a
+  // checagem passando pelo motivo errado. O que a protege e outra coisa: o
+  // telefone vem do ctx, e o bloco abaixo cobre isso.
+  const LEEM_PEDIDO = ['consultar_pedido', 'meus_pedidos'];
   for (const d of tools.definitions) {
-    if (!/pedido|order/i.test(d.function.name)) continue;
+    if (!LEEM_PEDIDO.includes(d.function.name)) continue;
     const req = d.function.parameters?.required || [];
     const props = Object.keys(d.function.parameters?.properties || {});
     const porEmail = req.includes('email');
@@ -241,6 +248,15 @@ nerix.checkPayment = async (codigo) => {
     t(`${d.function.name} tem prova de posse`, porEmail || porRemetente,
       porEmail ? 'e-mail' : `campos: ${props.join(',') || 'nenhum'}`);
   }
+
+  // Ferramenta nova que fale de pedido tem que entrar conscientemente num dos
+  // dois grupos. Sem isto, a proxima nasce sem checagem nenhuma e ninguem ve.
+  const CRIAM_PEDIDO = ['criar_pedido'];
+  const orfas = tools.definitions
+    .map((d) => d.function.name)
+    .filter((n) => /pedido|order/i.test(n))
+    .filter((n) => !LEEM_PEDIDO.includes(n) && !CRIAM_PEDIDO.includes(n));
+  t('nenhuma ferramenta de pedido sem grupo', orfas.length === 0, orfas.join(',') || 'nenhuma');
 
   // ── Menu: resposta pronta, IA só num ramo ───────────────────
   bloco('menu responde sem IA');
@@ -487,6 +503,206 @@ nerix.checkPayment = async (codigo) => {
   // escolha de opção e o cliente nunca consegue pedir esses títulos.
   t('“3” seria opção de menu válida', Boolean(menu.resolve('main', '3')));
   t('e “23” não resolve como opção', menu.resolve('main', '23') === null);
+
+  // ── Fechar a compra na conversa ─────────────────────────────
+  //
+  // Até aqui toda conversa terminava em "compra no site": o cliente saía do
+  // WhatsApp e quem não voltava era venda perdida. Este é o ÚNICO caminho do
+  // bot que movimenta dinheiro, e por isso cada trava aqui falha para o lado de
+  // NÃO criar o pedido.
+  bloco('criar_pedido — as travas');
+
+  const nerixV = require('./src/nerix');
+  const listProdutosAntes = nerixV.listProducts;
+  const createOrderAntes = nerixV.createOrder;
+  const listOrdersAntes = nerixV.listOrders;
+
+  const CATALOGO = {
+    'hollow knight': [{ id: 'p1', name: 'Hollow Knight', slug: 'hollow-knight', price: 49.9 }],
+    zelda: [{
+      id: 'p2', name: 'Zelda', slug: 'zelda',
+      variants: [
+        { id: 'v1', name: 'Switch 1', price: 199.9 },
+        { id: 'v2', name: 'Switch 2', price: 299.9 },
+      ],
+    }],
+    ambiguo: [
+      { id: 'p3', name: 'Ambiguo', slug: 'a1', price: 10 },
+      { id: 'p4', name: 'Ambiguo', slug: 'a2', price: 20 },
+    ],
+  };
+  nerixV.listProducts = async ({ search }) => ({ data: CATALOGO[String(search).toLowerCase()] || [] });
+  nerixV.listOrders = async () => ({ data: [] });
+
+  const criados = [];
+  nerixV.createOrder = async (payload) => {
+    criados.push(payload);
+    return {
+      data: {
+        order_number: 'NOVO-1',
+        status: 'pending',
+        total: 49.9,
+        created_at: '2026-08-27T17:00:00Z',
+        items: [{ product_name: 'Hollow Knight', quantity: 1 }],
+        payment: { pix_qr_code: '00020126...PIX' },
+      },
+    };
+  };
+
+  const COMPRADOR = '5541955550001';
+  const bom = {
+    produto: 'Hollow Knight',
+    preco_informado: 'R$ 49.90',
+    nome_completo: 'Ana Silva',
+    email: 'ana@exemplo.com',
+  };
+
+  // O caminho feliz primeiro, para as travas terem um contraste.
+  criados.length = 0;
+  const vendeu = await tools.execute('criar_pedido', bom, { from: COMPRADOR });
+  t('fecha a compra', vendeu.codigo === 'NOVO-1', JSON.stringify(vendeu.erro || vendeu.codigo));
+  t('  e devolve o Pix', vendeu.pix_copia_e_cola === '00020126...PIX', vendeu.pix_copia_e_cola);
+  // O Pix tem que ir sozinho numa mensagem: é assim que o cliente copia de uma
+  // vez no celular.
+  t('  mandando o Pix ir sozinho', /SEPARADA|sozinho/i.test(vendeu.instrucao || ''), vendeu.instrucao);
+
+  // O TELEFONE vem do ctx, nunca de argumento — é ele que vai receber a chave.
+  t('o telefone vai do contexto', criados[0]?.customer?.phone === COMPRADOR,
+    criados[0]?.customer?.phone);
+  const telefoneForjado = await tools.execute(
+    'criar_pedido',
+    { ...bom, telefone: '5541999999999', phone: '5541999999999' },
+    { from: COMPRADOR },
+  );
+  t('  e argumento de telefone é ignorado',
+    criados[1]?.customer?.phone === COMPRADOR, criados[1]?.customer?.phone);
+  t('sem telefone no contexto não cria nada',
+    (await tools.execute('criar_pedido', bom, {})).erro === 'sem_telefone');
+
+  // ── O preço prometido tem que bater ──
+  //
+  // É a trava que impede o cliente de pagar diferente do combinado: ele já leu
+  // o valor na tela dele.
+  criados.length = 0;
+  const precoErrado = await tools.execute(
+    'criar_pedido', { ...bom, preco_informado: 'R$ 29.90' }, { from: COMPRADOR },
+  );
+  t('preço divergente NÃO cria pedido', criados.length === 0, `${criados.length} pedido(s)`);
+  t('  e diz qual é o certo', precoErrado.preco_correto === 'R$ 49.90', precoErrado.preco_correto);
+  t('  mandando confirmar com o cliente', /confirme/i.test(precoErrado.instrucao || ''),
+    precoErrado.instrucao);
+  // Centavos, não float: 49.90 escrito de outro jeito continua sendo o mesmo.
+  const mesmoPreco = await tools.execute(
+    'criar_pedido', { ...bom, preco_informado: 'R$ 49,90' }, { from: COMPRADOR },
+  );
+  t('vírgula ou ponto dá no mesmo', !mesmoPreco.erro, mesmoPreco.erro);
+
+  // ── Produto: resolvido no catálogo REAL, pelo nome ──
+  //
+  // O modelo não passa id de propósito: um id alucinado que por acaso existe
+  // criaria um pedido do produto errado com o preço errado.
+  criados.length = 0;
+  const foraDoCatalogo = await tools.execute(
+    'criar_pedido', { ...bom, produto: 'Jogo Que Nao Existe' }, { from: COMPRADOR },
+  );
+  t('produto fora do catálogo não vira pedido', criados.length === 0);
+  t('  e manda buscar de novo', /buscar_produtos/.test(foraDoCatalogo.instrucao || ''),
+    foraDoCatalogo.erro);
+
+  const ambiguo = await tools.execute(
+    'criar_pedido', { ...bom, produto: 'Ambiguo', preco_informado: 'R$ 10.00' },
+    { from: COMPRADOR },
+  );
+  t('nome ambíguo não vira pedido', ambiguo.erro === 'produto_nao_encontrado', ambiguo.erro);
+
+  // ── Opção obrigatória quando o produto tem variantes ──
+  //
+  // Chutar aqui vende Switch 1 para quem quer Switch 2.
+  criados.length = 0;
+  const semOpcao = await tools.execute(
+    'criar_pedido', { ...bom, produto: 'Zelda', preco_informado: 'R$ 199.90' },
+    { from: COMPRADOR },
+  );
+  t('produto com opções exige a escolha', semOpcao.erro === 'falta_opcao', semOpcao.erro);
+  t('  sem criar nada', criados.length === 0);
+  t('  e devolve as opções para o cliente escolher',
+    semOpcao.opcoes?.length === 2, JSON.stringify(semOpcao.opcoes));
+
+  const comOpcao = await tools.execute(
+    'criar_pedido',
+    { ...bom, produto: 'Zelda', opcao: 'Switch 2', preco_informado: 'R$ 299.90' },
+    { from: COMPRADOR },
+  );
+  t('com a opção certa, fecha', !comOpcao.erro, comOpcao.erro);
+  t('  mandando a variante escolhida', criados.at(-1)?.items?.[0]?.variant_id === 'v2',
+    criados.at(-1)?.items?.[0]?.variant_id);
+  // O preço conferido é o DA VARIANTE, não o do produto.
+  const opcaoPrecoErrado = await tools.execute(
+    'criar_pedido',
+    { ...bom, produto: 'Zelda', opcao: 'Switch 2', preco_informado: 'R$ 199.90' },
+    { from: COMPRADOR },
+  );
+  t('o preço conferido é o da opção', opcaoPrecoErrado.erro === 'preco_divergente',
+    opcaoPrecoErrado.preco_correto);
+
+  // ── Dados do cliente ──
+  criados.length = 0;
+  t('sem sobrenome não fecha',
+    (await tools.execute('criar_pedido', { ...bom, nome_completo: 'Ana' }, { from: COMPRADOR }))
+      .erro === 'falta_sobrenome');
+  // O e-mail é para onde a chave vai: um errado entrega a compra no vazio, e o
+  // cliente descobre depois de pagar.
+  for (const ruim of ['ana', 'ana@', 'ana@exemplo', '@exemplo.com', '']) {
+    t(`e-mail "${ruim}" não passa`,
+      (await tools.execute('criar_pedido', { ...bom, email: ruim }, { from: COMPRADOR }))
+        .erro === 'email_invalido');
+  }
+  t('  e nada foi criado no caminho', criados.length === 0, `${criados.length} pedido(s)`);
+
+  // ── Duplo toque não vira dois Pix ──
+  //
+  // Cliente confuso manda "quero sim" duas vezes, e o modelo pode repetir a
+  // chamada depois de um erro de rede. Sem isto ele recebe dois Pix, paga um, e
+  // o outro fica pendurado cobrando lembrete.
+  nerixV.listOrders = async () => ({
+    data: [{
+      order_number: 'JA-EXISTE',
+      status: 'pending',
+      total: 49.9,
+      customer_phone: COMPRADOR,
+      created_at: new Date().toISOString(),
+      items: [{ product_name: 'Hollow Knight', quantity: 1 }],
+      payment: { pix_qr_code: '00020126...ANTIGO' },
+    }],
+  });
+  criados.length = 0;
+  const pedidoRepetido = await tools.execute('criar_pedido', bom, { from: COMPRADOR });
+  t('pedido repetido NÃO cria outro', criados.length === 0, `${criados.length} pedido(s)`);
+  t('  e devolve o que já existia', pedidoRepetido.codigo === 'JA-EXISTE' && pedidoRepetido.ja_existia === true,
+    pedidoRepetido.codigo);
+  t('  com o Pix do original', pedidoRepetido.pix_copia_e_cola === '00020126...ANTIGO',
+    pedidoRepetido.pix_copia_e_cola);
+  nerixV.listOrders = async () => ({ data: [] });
+
+  // ── A API recusando o formato: cai no site, não em erro ──
+  //
+  // Um 400 aqui quase sempre é o FORMATO do que mandamos, não o cliente. O
+  // desfecho seguro é o comportamento de sempre: mandar o link.
+  nerixV.createOrder = async () => {
+    const e = new Error('bad request');
+    e.response = { status: 400, data: { message: 'items.0.product_id is required' } };
+    throw e;
+  };
+  const recusado = await tools.execute('criar_pedido', bom, { from: COMPRADOR });
+  t('API recusando não vira "pedido não encontrado"',
+    recusado.erro === 'nao_consegui_fechar', recusado.erro);
+  t('  e manda o cliente para o site', /LINK|site/i.test(recusado.instrucao || ''),
+    recusado.instrucao);
+  t('  sem admitir defeito ao cliente', /sem falar em erro/i.test(recusado.instrucao || ''));
+
+  nerixV.listProducts = listProdutosAntes;
+  nerixV.createOrder = createOrderAntes;
+  nerixV.listOrders = listOrdersAntes;
 
   // ── Consulta pelo telefone de quem está falando ─────────────
   //

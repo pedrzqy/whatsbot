@@ -121,6 +121,44 @@ const definitions = [
   {
     type: 'function',
     function: {
+      name: 'criar_pedido',
+      description:
+        'Fecha a compra AQUI na conversa e devolve o Pix copia-e-cola. ' +
+        'Use SOMENTE depois de: (1) ter buscado o produto com buscar_produtos, ' +
+        '(2) ter dito o preço ao cliente, (3) o cliente ter CONFIRMADO que quer comprar, ' +
+        'e (4) ter o nome completo e o e-mail dele. ' +
+        'Nunca invente produto, preço, nome ou e-mail — se faltar qualquer um, PEÇA. ' +
+        'O nome do produto tem que ser o mesmo que veio de buscar_produtos.',
+      parameters: {
+        type: 'object',
+        properties: {
+          produto: {
+            type: 'string',
+            description: 'Nome do produto, EXATAMENTE como veio de buscar_produtos.',
+          },
+          opcao: {
+            type: 'string',
+            description:
+              'Nome da opção/variante, quando o produto tiver "opcoes" (ex.: "Switch 2"). ' +
+              'Deixe vazio se o produto não tiver opções.',
+          },
+          preco_informado: {
+            type: 'string',
+            description:
+              'O preço que você DISSE ao cliente, no formato "R$ 49.90". É conferido contra o ' +
+              'catálogo: se não bater, o pedido não é criado. Serve para o cliente nunca pagar ' +
+              'diferente do que foi combinado.',
+          },
+          nome_completo: { type: 'string', description: 'Nome e sobrenome do cliente.' },
+          email: { type: 'string', description: 'E-mail do cliente, para receber a chave.' },
+        },
+        required: ['produto', 'preco_informado', 'nome_completo', 'email'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'falar_com_atendente',
       description: 'Transfere p/ atendente humano e pausa o bot. OBRIGATÓRIO colete NOME e SOBRENOME antes. Use p/ qualquer questão de PEDIDO (cliente disse que comprou, quer receber o jogo/login, entrega não chegou, dúvida/problema de pedido), opção online/perfil próprio, ou pedido de atendente. Se só tiver o primeiro nome, peça o sobrenome. Se o cliente tiver informado, passe também o e-mail OU o código da compra em "contato".',
       parameters: {
@@ -251,6 +289,172 @@ function formatOrder(p) {
     // QR, com 8 mil caracteres — fora daqui de propósito: estouraria o
     // contexto do modelo e ele não tem como mandar imagem por este caminho.
     pix_copia_e_cola: pago ? undefined : p.payment?.pix_qr_code || p.payment?.qr_code || undefined,
+  };
+}
+
+// ─── Fechar a compra na conversa ─────────────────────────────────────
+
+const RE_EMAIL_SIMPLES = /^[\w.+-]+@[\w-]+\.[\w.-]{2,}$/;
+
+/** Centavos, para comparar preço sem sofrer com ponto flutuante. */
+const centavos = (v) => Math.round(Number(String(v).replace(/[^\d.,]/g, '').replace(',', '.')) * 100);
+
+/**
+ * Acha o produto no catálogo REAL, pelo nome que o modelo passou.
+ *
+ * O modelo NÃO passa id, e isso não é conveniência — é a trava. Um id vindo do
+ * modelo pode ser alucinado, e um id alucinado que por acaso existe cria um
+ * pedido do produto errado com o preço errado. Resolvendo pelo nome contra a
+ * busca de verdade, o pior caso é não achar.
+ *
+ * Devolve null quando não acha ou quando fica ambíguo: melhor pedir ao cliente
+ * que escolha do que fechar a compra do jogo errado.
+ */
+async function acharProduto(nomeProduto) {
+  const alvo = String(nomeProduto || '').trim().toLowerCase();
+  if (!alvo) return null;
+
+  const data = await nerix.listProducts({ search: alvo, limit: 8 });
+  const lista = data.data || data || [];
+  if (!Array.isArray(lista) || !lista.length) return null;
+
+  const exatos = lista.filter((p) => String(p.name || '').trim().toLowerCase() === alvo);
+  if (exatos.length === 1) return exatos[0];
+  if (exatos.length > 1) return null; // dois produtos com o mesmo nome: humano decide
+  return lista.length === 1 ? lista[0] : null;
+}
+
+/**
+ * Cria o pedido e devolve o Pix.
+ *
+ * Até aqui toda conversa terminava em "compra no site": o cliente saía do
+ * WhatsApp e quem não voltava era venda perdida. Este é o único caminho do bot
+ * que movimenta dinheiro, então cada passo tem uma trava, e todas falham para
+ * o lado de NÃO criar o pedido.
+ */
+async function criarPedido(args, ctx) {
+  // O telefone vem do ctx, nunca de argumento — mesma regra do meus_pedidos.
+  // Aqui ela vale ainda mais: é o número que vai receber a chave.
+  if (!ctx.from) return { erro: 'sem_telefone' };
+
+  const nome = String(args.nome_completo || '').trim();
+  const email = String(args.email || '').trim();
+
+  if (nome.split(/\s+/).length < 2) {
+    return { erro: 'falta_sobrenome', instrucao: 'Peça o nome COMPLETO antes de fechar.' };
+  }
+  // Validação de verdade, e não só "tem alguma coisa": o e-mail é para onde a
+  // chave vai. Um e-mail digitado errado entrega a compra no vazio, e o
+  // cliente descobre isso depois de pagar.
+  if (!RE_EMAIL_SIMPLES.test(email)) {
+    return {
+      erro: 'email_invalido',
+      instrucao: 'O e-mail parece incompleto. Confirme com o cliente e chame de novo.',
+    };
+  }
+
+  const produto = await acharProduto(args.produto);
+  if (!produto) {
+    return {
+      erro: 'produto_nao_encontrado',
+      instrucao:
+        'Não achei esse produto no catálogo, ou há mais de um com esse nome. ' +
+        'Use buscar_produtos, mostre as opções ao cliente e peça para ele escolher.',
+    };
+  }
+
+  // Variante, quando o produto tem opções. Produto com opções e sem escolha
+  // não pode virar pedido: qual delas seria? Qualquer chute aqui vende Switch 1
+  // para quem quer Switch 2.
+  const variantes = (produto.variants || []).filter((v) => v.is_active !== false);
+  let variante = null;
+  if (variantes.length) {
+    const alvoOpcao = String(args.opcao || '').trim().toLowerCase();
+    variante = variantes.find((v) => String(v.name || '').trim().toLowerCase() === alvoOpcao) || null;
+    if (!variante) {
+      return {
+        erro: 'falta_opcao',
+        opcoes: variantes.map((v) => ({ nome: v.name, ...fmtPrice(priceParts(v.price, v.promotional_price)) })),
+        instrucao: 'Esse produto tem opções. Mostre as opções ao cliente e pergunte qual ele quer.',
+      };
+    }
+  }
+
+  // O PREÇO QUE FOI PROMETIDO tem que bater com o do catálogo.
+  //
+  // É a trava que impede o cliente de pagar diferente do combinado. O modelo
+  // pode ter lido um preço de uma busca antiga da conversa, ou simplesmente
+  // errado o número — e o cliente já leu aquele valor na tela dele. Divergiu,
+  // o pedido não sai e o modelo recebe o valor certo para corrigir.
+  const fonte = variante || produto;
+  const real = priceParts(fonte.price, fonte.promotional_price).por;
+  const prometido = centavos(args.preco_informado);
+  if (real == null) {
+    return { erro: 'sem_preco', instrucao: 'Esse produto está sem preço. Chame um atendente.' };
+  }
+  if (!Number.isFinite(prometido) || Math.abs(centavos(real) - prometido) > 1) {
+    return {
+      erro: 'preco_divergente',
+      preco_correto: brl(real),
+      instrucao:
+        `O preço mudou ou você informou errado. O valor certo é ${brl(real)}. ` +
+        'Diga o valor correto ao cliente, confirme com ele, e só então chame de novo.',
+    };
+  }
+
+  // Já existe pedido igual, recente e não pago? Devolve ELE.
+  //
+  // Cliente confuso manda "quero sim" duas vezes, e o modelo pode repetir a
+  // chamada depois de um erro de rede. Sem isto, cada repetição vira um pedido
+  // novo — e o cliente recebe dois Pix, paga um, e o outro fica pendurado
+  // cobrando lembrete.
+  try {
+    const meus = await carregarVendas().pedidosDoTelefone(ctx.from, { limite: 20 });
+    const trintaMin = Date.now() - 30 * 60 * 1000;
+    const repetido = meus.find((p) => {
+      const bruto = String(p.status || p.payment_status || '').toLowerCase();
+      if (!ESPERANDO_PAGAMENTO.has(bruto)) return false;
+      if (new Date(p.created_at || 0).getTime() < trintaMin) return false;
+      return (p.items || p.order_items || []).some((i) =>
+        String(i.product_name || i.name || '').trim().toLowerCase() ===
+        String(produto.name || '').trim().toLowerCase());
+    });
+    if (repetido) {
+      console.log(`[tools] ${ctx.from} já tinha pedido recente de "${produto.name}" — devolvi o mesmo`);
+      return { ...formatOrder(repetido), ja_existia: true };
+    }
+  } catch (err) {
+    // Não achar o pedido anterior não pode impedir a venda. O pior caso volta a
+    // ser o de antes: dois pedidos, um pago.
+    console.warn('[tools] não consegui checar pedido repetido:', err.message);
+  }
+
+  const payload = {
+    items: [
+      {
+        product_id: produto.id,
+        ...(variante ? { variant_id: variante.id } : {}),
+        quantity: 1,
+      },
+    ],
+    customer: { name: nome, email, phone: ctx.from },
+  };
+
+  const resp = await nerix.createOrder(payload);
+  const pedido = resp?.data || resp;
+  const out = formatOrder(pedido);
+
+  console.log(
+    `[tools] pedido criado para ${ctx.from}: ${produto.name}` +
+      `${variante ? ` (${variante.name})` : ''} — ${out.codigo}`,
+  );
+
+  return {
+    ...out,
+    instrucao:
+      'Pedido criado. Mande o Pix copia-e-cola ao cliente numa mensagem SEPARADA, sem nada em ' +
+      'volta, para ele conseguir copiar de uma vez. Diga que a chave chega aqui assim que o ' +
+      'pagamento cair. NÃO invente prazo diferente disso.',
   };
 }
 
@@ -403,6 +607,15 @@ async function execute(name, args = {}, ctx = {}) {
       return out;
     }
 
+    if (name === 'criar_pedido') {
+      // `await` obrigatório, e não é estilo: devolver a promessa direto faz o
+      // `try` sair ANTES de ela rejeitar, e o catch lá embaixo — que é quem
+      // transforma a falha em "manda o link do site" — nunca roda. O erro subia
+      // cru para o laço de ferramentas do ai.js e derrubava o atendimento
+      // inteiro em cima de uma tentativa de compra.
+      return await criarPedido(args, ctx);
+    }
+
     if (name === 'buscar_produtos') {
       const data = await nerix.listProducts({ search: args.termo || '', limit: 8 });
       const list = data.data || data || [];
@@ -412,6 +625,31 @@ async function execute(name, args = {}, ctx = {}) {
     return { erro: 'ferramenta_desconhecida' };
   } catch (err) {
     const status = err.response?.status;
+
+    // A criação de pedido tem saída PRÓPRIA, e não pode cair nos erros de
+    // consulta abaixo.
+    //
+    // Um 400 aqui quase sempre é o FORMATO do que mandamos para a Nerix, não o
+    // cliente — e devolver "pedido não encontrado" para uma tentativa de compra
+    // faria o modelo dizer ao cliente algo que não tem nada a ver. O desfecho
+    // seguro é o comportamento de sempre: mandar o link do site.
+    //
+    // O corpo do erro vai INTEIRO para o log do servidor, porque é ele que diz
+    // qual campo a API não aceitou — e é a única forma de descobrir o contrato
+    // sem ficar chutando.
+    if (name === 'criar_pedido') {
+      console.error(
+        `[tools] criar_pedido falhou (${status || err.code || 'sem status'}):`,
+        JSON.stringify(err.response?.data || err.message).slice(0, 600),
+      );
+      return {
+        erro: 'nao_consegui_fechar',
+        instrucao:
+          'Não consegui fechar a compra aqui agora. Mande o LINK do produto para o cliente ' +
+          'comprar pelo site, com naturalidade, sem falar em erro nem em sistema.',
+      };
+    }
+
     if (status === 404) return { erro: 'pedido_nao_encontrado' };
 
     // 403 é o CLIENTE: o e-mail não é o dono daquele pedido.
