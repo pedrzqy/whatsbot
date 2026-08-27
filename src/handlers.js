@@ -25,6 +25,7 @@ const menu = require('./menu');
 const tools = require('./tools');
 const expediente = require('./expediente');
 const chaves = require('./chaves');
+const telas = require('./telas');
 // O mesmo registro da ponte: o arquivo e "o que o bot fez", e quem for
 // analisar quer os dois lados juntos -- quanto o atendimento resolveu e
 // quanto a ponte resolveu. Dois arquivos seriam duas analises pela metade.
@@ -483,6 +484,35 @@ async function handleMessage(msg) {
   if (contact?.aguardandoJogo && trimmed) {
     store.saveContact(from, { aguardandoJogo: false, menuNode: 'main' });
     await pedirJogo(from, trimmed, pushName);
+    return;
+  }
+
+  // ─── 3.055) Tela de erro que a gente já conhece ───
+  //
+  // Quatro telas cobrem quase tudo que chega, e as três primeiras têm conserto
+  // conhecido. Quando o cliente ESCREVE o código do erro ("2819-0042"), a
+  // resposta sai daqui: instantânea, sem token, sem chance de o modelo inventar
+  // um passo a passo de console que não existe.
+  //
+  // Vem antes da IA pelo mesmo motivo que o pedido de código vem: é
+  // estereotipado, e regra fixa não muda de ideia nem depende de a IA estar no
+  // ar. Quando ele manda só a FOTO, aí sim é a IA que reconhece — com o mesmo
+  // texto, que o prompt carrega de src/telas.js.
+  const telaConhecida = trimmed && telas.porTexto(trimmed);
+  if (telaConhecida && telaConhecida.resposta) {
+    store.saveContact(from, { menuNode: 'main', modoIA: false });
+    await sender.send(
+      from,
+      // Uma saída só no fim, não duas. Quando a tela tem o `seInsistir`, ele JÁ
+      // diz o que fazer se não resolver — e com mais precisão ("me manda o
+      // usuário do perfil"). Somar a frase genérica em cima faria a mensagem
+      // terminar pedindo duas coisas diferentes para o mesmo caso.
+      telaConhecida.resposta +
+        (telaConhecida.seInsistir
+          ? `\n\n_${telaConhecida.seInsistir}_`
+          : '\n\n_Se não resolver, me avisa que eu vejo isso com você._'),
+    );
+    console.log(`[telas] ${from}: reconheci "${telaConhecida.id}" pelo texto`);
     return;
   }
 

@@ -19,6 +19,7 @@ const tools = require('./tools');
 const knowledge = require('./knowledge');
 const store = require('./store');
 const claude = require('./claude');
+const telas = require('./telas');
 
 // Uma camada so, e o menu embaixo. A cascata de seis provedores foi removida:
 // ver o comentario do chat().
@@ -264,6 +265,12 @@ async function buildSystemPrompt() {
     `Depois de criado, mande o Pix copia-e-cola numa mensagem SEPARADA, sozinho, sem texto em volta: ` +
     `é assim que ele consegue copiar de uma vez no celular. A chave chega sozinha quando o pagamento ` +
     `cair — não prometa prazo diferente disso, e não peça comprovante.\n\n` +
+
+    // As quatro telas de erro conhecidas, com a resposta pronta de cada uma.
+    // Vem de src/telas.js: o conserto é ESCOLHIDO, não gerado. Modelo
+    // inventando solução de console manda o cliente mexer em configuração que
+    // não existe, e isso volta como reclamação.
+    telas.paraOPrompt() + `\n\n` +
 
     `FOTO: o cliente pode mandar print de tela (erro de ativação, tela de login, comprovante). Você ENXERGA a ` +
     `imagem — leia o que está escrito nela e use, sem pedir para ele digitar o que já dá para ver. Se a foto ` +

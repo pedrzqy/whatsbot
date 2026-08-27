@@ -2465,6 +2465,133 @@ const OP = '5541999999999';
   estadoI.dados.tarefas = [];
   estadoI.dados.aprovacoes = [];
 
+  // ── As telas de erro que o cliente fotografa ───────────────
+  //
+  // Quatro telas cobrem quase tudo que chega, e três têm conserto conhecido. O
+  // reconhecimento é por texto (instantâneo) e por foto (o modelo escolhe qual
+  // é) — mas o TEXTO DA SOLUÇÃO vem sempre daqui. Modelo inventando conserto de
+  // console manda o cliente mexer em configuração que não existe, e isso volta
+  // como reclamação.
+  bloco('telas de erro conhecidas');
+
+  const telasMod = require('./src/telas');
+
+  for (const [caso, texto, esperado] of [
+    ['o código do erro', 'erro 2819-0042', 'jogo_em_outro_console'],
+    ['  escrito com espaço', '2819 0042', 'jogo_em_outro_console'],
+    ['  ou pelo que a tela diz', 'o cartão de jogo virtual está sendo usado em outro console',
+      'jogo_em_outro_console'],
+    ['sessão expirada', 'Inicie a sessão novamente com a sua conta Nintendo', 'sessao_expirada'],
+    ['software indisponível', 'no momento este software não pode ser usado',
+      'software_indisponivel'],
+    ['  pela outra frase da tela', 'conta Nintendo estiver vinculada a outro console',
+      'software_indisponivel'],
+    ['pedido de código', 'confirmação do endereço de e-mail', 'pediu_codigo'],
+  ]) {
+    t(`reconhece ${caso}`, telasMod.porTexto(texto)?.id === esperado,
+      telasMod.porTexto(texto)?.id || '(nada)');
+  }
+
+  // Conversa normal NÃO pode virar tela de erro: um falso positivo responde
+  // "liga o modo avião" para quem perguntou o preço.
+  for (const normal of ['oi tudo bem', 'quanto custa zelda', 'quero comprar', 'obrigado']) {
+    t(`"${normal}" não vira tela de erro`, telasMod.porTexto(normal) === null,
+      telasMod.porTexto(normal)?.id);
+  }
+
+  // O que o CLIENTE lê em cada uma.
+  for (const tela of telasMod.TELAS) {
+    if (!tela.resposta) continue;
+    const texto = tela.resposta + (tela.seInsistir || '');
+    t(`"${tela.id}" não entrega a origem`,
+      !PROIBIDO.test(texto) && !AUTOMACAO.test(texto) && !REPASSE.test(texto) &&
+        !politica.temCJK(texto),
+      (texto.match(AUTOMACAO) || texto.match(PROIBIDO) || texto.match(REPASSE) || [''])[0] || 'limpo');
+    // Erro técnico nunca vira mensagem ao cliente — mas "código de erro" é o que
+    // ele mesmo está lendo na tela, então a palavra pode aparecer no reconhecimento.
+    t(`  e não admite defeito nosso`, !/nosso sistema|falha no sistema|bug/i.test(texto), texto);
+    t(`  e tem passo a passo`, tela.resposta.length > 40);
+    // Negrito no WhatsApp e UM asterisco. Dois aparecem crus na tela do
+    // cliente -- o proprio prompt do bot avisa isso, e eu errei aqui mesmo.
+    t(`  com negrito de WhatsApp, nao de markdown`, !/\*\*/.test(texto),
+      (texto.match(/\*\*[^*]+\*\*/) || [''])[0] || 'limpo');
+  }
+
+  // O pedido de código NÃO responde nada aqui: quem conduz é a recepção da
+  // ponte, que já pede foto e usuário no passo certo. Duas mensagens sobre a
+  // mesma coisa confundiriam mais do que ajudariam.
+  t('a tela de código não responde sozinha',
+    telasMod.porId('pediu_codigo').resposta === null);
+  t('  e aponta para o fluxo do código',
+    telasMod.porId('pediu_codigo').depois === 'codigo');
+
+  // ── O que o modelo recebe para reconhecer pela FOTO ──
+  const promptTelas = telasMod.paraOPrompt();
+  t('o prompt descreve as telas', /2819|outro console/i.test(promptTelas) === false ||
+    promptTelas.length > 200, `${promptTelas.length} caracteres`);
+  t('  com a resposta pronta de cada uma', /modo avi[ãa]o/i.test(promptTelas), 'inclui o conserto');
+  // A trava principal: o conserto é ESCOLHIDO, não gerado.
+  t('  mandando NÃO inventar solução', /N[ÃA]O invente conserto/i.test(promptTelas), promptTelas.slice(-120));
+  t('  e chamar atendente no que não conhece', /chame um atendente/i.test(promptTelas));
+  // O prompt e texto INTERNO: ele pode citar o nome da ferramenta
+  // (`pedir_codigo_fornecedor`), que ja aparece na lista de ferramentas. O que
+  // ele nao pode e mandar o modelo DIZER isso ao cliente -- e nenhuma das
+  // respostas prontas contem a palavra, o que o bloco acima ja garante.
+  const semNomeDeFerramenta = promptTelas.replace(/pedir_codigo_fornecedor/g, '');
+  t('  o prompt nao manda falar da origem',
+    !PROIBIDO.test(semNomeDeFerramenta) && !politica.temCJK(promptTelas),
+    (semNomeDeFerramenta.match(PROIBIDO) || [''])[0] || 'limpo');
+
+  // ── O caminho inteiro: o cliente escreve o erro ────────────
+  //
+  // Vem ANTES da IA, pelo mesmo motivo que o pedido de código vem: é
+  // estereotipado, e regra fixa não custa token nem muda de ideia.
+  bloco('o cliente escreve o código do erro');
+
+  const handlersT = require('./src/handlers');
+  const cfgT = require('./src/config');
+  const storeT = require('./src/store');
+  const aiT = require('./src/ai');
+  const senderT = require('./src/sender');
+
+  const iaAntesT = cfgT.iaLigada;
+  const autoAntesT = cfgT.autoReply;
+  const replyAntesT = aiT.reply;
+  cfgT.iaLigada = true;
+  cfgT.autoReply = true;
+  require('./src/chaves').definir('ia', true);
+
+  let chamouIAT = false;
+  aiT.reply = async () => { chamouIAT = true; return 'resposta da IA'; };
+
+  const CLI_T = '5541922221111';
+  storeT.saveContact(CLI_T, {
+    greetedAt: Date.now(), lastSeen: Date.now(), paused: false, menuNode: null, modoIA: false,
+  });
+
+  const recebidasT = [];
+  const sendTAntes = senderT.send;
+  senderT.send = async (para, txt) => { recebidasT.push({ para, texto: String(txt) }); };
+  await handlersT.onIncomingMessage({ from: CLI_T, text: 'deu erro 2819-0042 aqui', pushName: 'Ana' });
+  senderT.send = sendTAntes;
+
+  const respostaT = recebidasT.filter((r) => r.para === CLI_T).map((r) => r.texto).join('\n');
+  t('responde na hora, sem passar pela IA', chamouIAT === false,
+    chamouIAT ? 'foi para a IA' : 'resolveu com regra fixa');
+  t('  com o passo a passo certo', /modo avi[ãa]o/i.test(respostaT), respostaT.split('\n')[0]);
+  // A ORDEM é o que faz funcionar: o console checa a licença ao abrir, então
+  // cortar a rede antes impede de entrar.
+  t('  deixando claro que é DEPOIS de abrir', /depois de entrar|assim que ele abrir/i.test(respostaT),
+    respostaT);
+  t('  e abrindo caminho se não resolver', /me avisa/i.test(respostaT));
+  t('  sem entregar a origem',
+    !PROIBIDO.test(respostaT) && !AUTOMACAO.test(respostaT) && !REPASSE.test(respostaT),
+    respostaT);
+
+  aiT.reply = replyAntesT;
+  cfgT.iaLigada = iaAntesT;
+  cfgT.autoReply = autoAntesT;
+
   // ── Com a IA ligada: o que muda e o que NÃO pode mudar ─────
   //
   // Este bloco existe porque BOT_IA=true troca o caminho principal do
