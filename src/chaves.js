@@ -32,7 +32,13 @@ const { dados, persistAgora } = require('./ponte/estado');
  *
  *   id      nome curto, usado no log e no comando por extenso
  *   nome    o que o dono lê
- *   explica uma frase sobre o que muda quando desliga
+ *   curto   UMA linha, para a lista. Diz o que a função FAZ, nunca o que
+ *           acontece se desligar -- na lista cabe o suficiente para ele
+ *           reconhecer a função, e o resto está a um `#admin N` de distância.
+ *   explica o paragágrafo, para quando ele abre uma
+ *   perigoQuando  em que estado esta função merece atenção ('ligada' ou
+ *           'desligada'). O painel marca com ⚠️ só quando ela ESTÁ nesse
+ *           estado: marcar sempre viraria decoração e ele pararia de ver
  *   padrao  função que devolve o padrão do Environment
  *   risco   'baixo' | 'medio' | 'alto' — o que a confirmação usa
  *   cuidado o que ele precisa saber ANTES de ligar (só nos de risco alto)
@@ -40,6 +46,7 @@ const { dados, persistAgora } = require('./ponte/estado');
 const CATALOGO = [
   {
     id: 'atendimento',
+    curto: 'Responder cliente no WhatsApp',
     nome: 'Atendimento',
     explica: 'Responder mensagem de cliente. Desligado, a mensagem chega e ninguém responde.',
     padrao: () => config.autoReply,
@@ -47,6 +54,7 @@ const CATALOGO = [
   },
   {
     id: 'ia',
+    curto: 'A IA responde além do menu',
     nome: 'Conversa livre',
     explica:
       'A IA responde o que o menu não cobre, com as palavras dela. ' +
@@ -56,6 +64,7 @@ const CATALOGO = [
   },
   {
     id: 'vender',
+    curto: 'Fecha a compra e manda o Pix aqui',
     nome: 'Vender pelo chat',
     explica:
       'Fechar a compra na conversa e mandar o Pix. Desligado, o cliente recebe o ' +
@@ -65,6 +74,7 @@ const CATALOGO = [
   },
   {
     id: 'codigos',
+    curto: 'Busca o código com o outro lado',
     nome: 'Códigos de segurança',
     explica: 'Buscar o código com o outro lado quando o cliente precisa.',
     padrao: () => cfgPonte.ativa,
@@ -72,6 +82,7 @@ const CATALOGO = [
   },
   {
     id: 'aprovacao',
+    curto: 'Nada sai sem o seu #ok',
     nome: 'Pedir sua aprovação',
     explica:
       'Nada sai para o outro lado sem o seu #ok. Desligado, sai sozinho.',
@@ -79,24 +90,29 @@ const CATALOGO = [
     // significa copiloto.
     padrao: () => cfgPonte.modo !== 'autopiloto',
     risco: 'alto',
+    // O perigo aqui e DESLIGAR: ligada, ela e o freio.
+    perigoQuando: 'desligada',
     cuidado:
       'Desligando isso, mensagens saem para o outro lado sem você ver. ' +
       'É o freio principal do sistema.',
   },
   {
     id: 'repertorio',
+    curto: 'Usa suas frases prontas com o outro lado',
     nome: 'Responder o outro lado sozinho',
     explica:
       'As perguntas repetidas dele são respondidas com uma frase que você ' +
       'escreveu. Fora da lista, o atendimento chama você.',
     padrao: () => cfgPonte.repertorioLigado,
     risco: 'alto',
+    perigoQuando: 'ligada',
     cuidado:
       'É a única parte que escreve para fora. Só ligue depois de olhar o ' +
       '#casos por uns dias.',
   },
   {
     id: 'conferir',
+    curto: 'Confere a entrega 3h depois',
     nome: 'Perguntar se ativou',
     explica: 'Três horas depois de entregar a chave, pergunta se deu certo.',
     padrao: () => config.posvenda.conferirLigado,
@@ -104,10 +120,12 @@ const CATALOGO = [
   },
   {
     id: 'reativar',
+    curto: 'Chama quem comprou e sumiu faz tempo',
     nome: 'Chamar quem sumiu',
     explica: 'Manda mensagem para quem comprou, gostou e sumiu faz tempo.',
     padrao: () => config.posvenda.reativarLigado,
     risco: 'alto',
+    perigoQuando: 'ligada',
     cuidado:
       'É a única coisa que fala com quem não puxou conversa. Mensagem em ' +
       'massa é como se perde o número do WhatsApp.',
@@ -171,10 +189,13 @@ function situacao() {
     numero: i + 1,
     id: c.id,
     nome: c.nome,
+    curto: c.curto,
     explica: c.explica,
     risco: c.risco,
     cuidado: c.cuidado || null,
     ligada: ligada(c.id),
+    // Marca so quando ela ESTA no estado que merece atencao.
+    atencao: Boolean(c.perigoQuando) && c.perigoQuando === (ligada(c.id) ? 'ligada' : 'desligada'),
     mexida: foiMexida(c.id),
   }));
 }

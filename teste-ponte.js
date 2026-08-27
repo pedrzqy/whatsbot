@@ -2283,6 +2283,188 @@ const OP = '5541999999999';
   estadoAdm.dados.modo = null;
   estadoAdm.dados.botLigado = null;
 
+  // ── AS DUAS DIREÇÕES, E QUE IDIOMA VAI EM CADA UMA ─────────
+  //
+  // A regra que este bloco existe para provar:
+  //
+  //   → para o outro lado: SÓ chinês, sempre traduzido
+  //   ← do outro lado:     nada de conteúdo chega ao cliente sem o operador
+  //                        liberar, e o que ele libera vai em português
+  //
+  // As duas falham em silêncio se quebrarem: português no chat de lá o
+  // fornecedor não entende e o pedido trava; chinês no WhatsApp entrega a
+  // origem ao cliente.
+  bloco('idioma: o que vai para lá');
+
+  const repertorioI = require('./src/ponte/repertorio');
+  const cfgI = require('./src/ponte/config');
+  const estadoI = require('./src/ponte/estado');
+  const chavesI = require('./src/chaves');
+
+  // Toda linha do repertório que RESPONDE alguma coisa tem que ser chinês, ou
+  // ter um campo que só é preenchido com chinês.
+  for (const l of repertorioI.LINHAS) {
+    if (l.resposta === null) continue;
+    const soCampos = l.resposta.replace(/\{\w+\}/g, '').trim();
+    const ehChines = politica.temCJK(l.resposta);
+    const ehSoCampo = soCampos === '' || /^[:：\s]*$/.test(soCampos);
+    t(`linha "${l.id}" não sai em português`, ehChines || ehSoCampo, l.resposta);
+  }
+
+  // A trava de verdade é na SAÍDA, e não na origem do texto: é a única porta
+  // por onde tudo passa.
+  const senderI = require('./src/sender');
+  const sendIAntes = senderI.send;
+
+  /** Tenta despachar uma resposta e diz se ela virou tarefa. */
+  async function tentarResponder(textoZh) {
+    estadoI.dados.atendimentos = [];
+    estadoI.dados.tarefas = [];
+    const r = await filaMod.entrar('5541933339999', 'Ana');
+    r.atendimento.usuario = 'rrtt9321';
+    const alertas = [];
+    senderI.send = async (para, txt) => { alertas.push({ para, texto: String(txt) }); };
+    try {
+      await ponteMod.despachar(r.atendimento, { tipo: 'responder_fornecedor', textoZh });
+    } finally {
+      senderI.send = sendIAntes;
+    }
+    return { tarefa: estadoI.dados.tarefas[0], alertas };
+  }
+
+  const emChines = await tentarResponder('账号：rrtt9321');
+  t('resposta em chinês sai', Boolean(emChines.tarefa), emChines.tarefa?.textoZh);
+
+  // Português NÃO sai. Acontece de três jeitos, todos silenciosos: um campo
+  // {jogo} que voltou sem traduzir, uma linha nova escrita com pressa, ou o
+  // tradutor devolvendo a entrada.
+  for (const [caso, texto] of [
+    ['frase em português', 'pode mandar o codigo por favor'],
+    ['nome de jogo sem traduzir', 'Hollow Knight'],
+    ['só pontuação', '...'],
+  ]) {
+    const r = await tentarResponder(texto);
+    t(`${caso} NÃO sai`, !r.tarefa, r.tarefa?.textoZh || 'barrado');
+    t(`  e o operador é avisado`, r.alertas.some((a) => a.para === OP));
+  }
+
+  // O pedido de CÓDIGO manda o usuário, que é alfanumérico de propósito. A
+  // trava de idioma não pode barrá-lo.
+  estadoI.dados.atendimentos = [];
+  estadoI.dados.tarefas = [];
+  const paraCodigo = await filaMod.entrar('5541933338888', 'Beto');
+  paraCodigo.atendimento.usuario = 'rrtt9321';
+  senderI.send = async () => {};
+  await ponteMod.despachar(paraCodigo.atendimento);
+  senderI.send = sendIAntes;
+  t('o pedido de código continua saindo com o usuário',
+    estadoI.dados.tarefas[0]?.usuario === 'rrtt9321', estadoI.dados.tarefas[0]?.usuario);
+  t('  e sem texto de resposta junto', !estadoI.dados.tarefas[0]?.textoZh);
+
+  // O #responder: o operador escreve PORTUGUÊS e o que sai é chinês.
+  const tradutorI = require('./src/ponte/tradutor');
+  const paraForncAntesI = tradutorI.paraFornecedor;
+
+  estadoI.dados.atendimentos = [];
+  estadoI.dados.tarefas = [];
+  estadoI.dados.aprovacoes = [];
+  const paraTraduzir = await filaMod.entrar('5541933337777', 'Carla');
+  paraTraduzir.atendimento.usuario = 'rrtt9321';
+
+  tradutorI.paraFornecedor = async () => ({ traducao: '好的，稍等', resumo: '', confianca: 'alta' });
+  senderI.send = async () => {};
+  await operador.executar(`#responder ${paraTraduzir.atendimento.id} pode mandar quando puder`, OP);
+  senderI.send = sendIAntes;
+  t('#responder traduz o português para chinês',
+    politica.temCJK(estadoI.dados.tarefas[0]?.textoZh || ''), estadoI.dados.tarefas[0]?.textoZh);
+
+  // Tradutor devolvendo a ENTRADA (acontece com nome próprio e frase curta):
+  // não pode virar português saindo para o outro lado.
+  estadoI.dados.tarefas = [];
+  tradutorI.paraFornecedor = async (txt) => ({ traducao: txt, resumo: '', confianca: 'alta' });
+  senderI.send = async () => {};
+  await operador.executar(`#responder ${paraTraduzir.atendimento.id} pode mandar quando puder`, OP);
+  senderI.send = sendIAntes;
+  t('tradução que volta em português é barrada',
+    !estadoI.dados.tarefas.length, estadoI.dados.tarefas[0]?.textoZh || 'barrado');
+  tradutorI.paraFornecedor = paraForncAntesI;
+
+  // ── E o que vem de LÁ ──────────────────────────────────────
+  bloco('idioma: o que vem de lá');
+
+  const tradutorI2 = require('./src/ponte/tradutor');
+  const traduzClienteAntes = tradutorI2.paraCliente;
+
+  /** Recebe uma mensagem do outro lado e diz o que foi para cada um. */
+  async function receberDeLa(textoZh, traducao) {
+    estadoI.dados.atendimentos = [];
+    estadoI.dados.tarefas = [];
+    estadoI.dados.aprovacoes = [];
+    const r = await filaMod.entrar('5541933336666', 'Dani');
+    r.atendimento.usuario = 'rrtt9321';
+    tradutorI2.paraCliente = async () => ({ traducao, resumo: '', confianca: 'alta' });
+
+    const saiu = [];
+    senderI.send = async (para, txt) => { saiu.push({ para, texto: String(txt) }); };
+    try {
+      await ponteMod.receberDoFornecedor({ texto: textoZh });
+    } finally {
+      senderI.send = sendIAntes;
+    }
+    return {
+      aoCliente: saiu.filter((s) => s.para === '5541933336666').map((s) => s.texto).join('\n'),
+      aoOperador: saiu.filter((s) => s.para === OP).map((s) => s.texto).join('\n'),
+      aprovacoes: estadoI.dados.aprovacoes.length,
+      id: estadoI.dados.aprovacoes[0]?.id,
+    };
+  }
+
+  const chavesAntesI = { ...estadoI.dados.chaves };
+  chavesI.definir('repertorio', false); // sem repertório: tudo vira decisão sua
+
+  const veioChines = await receberDeLa('这个账号不存在', 'essa conta não existe');
+
+  // O CLIENTE não recebe nada até você liberar.
+  t('nada vai ao cliente sem você liberar', veioChines.aoCliente === '', veioChines.aoCliente);
+  t('  e vira uma aprovação esperando', veioChines.aprovacoes === 1, String(veioChines.aprovacoes));
+  // E o que VOCÊ lê já é português.
+  t('o que chega para você é português',
+    !politica.temCJK(veioChines.aoOperador) && /não existe/.test(veioChines.aoOperador),
+    veioChines.aoOperador);
+
+  // Só depois do #enviar o cliente recebe — e em português.
+  const enviouI = [];
+  senderI.send = async (para, txt) => { enviouI.push({ para, texto: String(txt) }); };
+  await operador.executar(`#enviar ${veioChines.id}`, OP);
+  senderI.send = sendIAntes;
+  const aoClienteI = enviouI.filter((e) => e.para === '5541933336666').map((e) => e.texto).join('\n');
+  t('depois do #enviar, o cliente recebe', aoClienteI.length > 0, aoClienteI);
+  t('  em português, sem caractere chinês', !politica.temCJK(aoClienteI), aoClienteI);
+  t('  e sem entregar a origem',
+    !PROIBIDO.test(aoClienteI) && !AUTOMACAO.test(aoClienteI) && !REPASSE.test(aoClienteI),
+    aoClienteI);
+
+  // A ÚNICA coisa que vai sozinha ao cliente é o código — que é um número, sem
+  // idioma, e a fila serial garante de quem ele é.
+  const soCodigo = await receberDeLa('394860', '(não usado)');
+  t('o código vai sozinho ao cliente', /394860/.test(soCodigo.aoCliente), soCodigo.aoCliente);
+  t('  e mesmo ele vai em português', !politica.temCJK(soCodigo.aoCliente), soCodigo.aoCliente);
+  t('  sem virar aprovação', soCodigo.aprovacoes === 0);
+
+  // Conta e senha NÃO vão sozinhas: viram alerta para você mandar.
+  const contaCompleta = await receberDeLa('rrtt9321\t密码\tpdmtm5fk', '(não usado)');
+  t('conta e senha não vão sozinhas ao cliente',
+    !/pdmtm5fk/.test(contaCompleta.aoCliente), contaCompleta.aoCliente);
+  t('  chegam para você, em português',
+    /pdmtm5fk/.test(contaCompleta.aoOperador) && !politica.temCJK(contaCompleta.aoOperador),
+    contaCompleta.aoOperador);
+
+  tradutorI2.paraCliente = traduzClienteAntes;
+  estadoI.dados.chaves = chavesAntesI;
+  estadoI.dados.atendimentos = [];
+  estadoI.dados.tarefas = [];
+  estadoI.dados.aprovacoes = [];
+
   // ── Com a IA ligada: o que muda e o que NÃO pode mudar ─────
   //
   // Este bloco existe porque BOT_IA=true troca o caminho principal do

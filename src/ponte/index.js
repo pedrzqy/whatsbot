@@ -237,6 +237,28 @@ async function despachar(atendimento, opcoes = {}) {
     return;
   }
 
+  // NADA em português atravessa.
+  //
+  // O texto de uma resposta chega por dois caminhos -- uma linha do repertório
+  // com campos preenchidos, ou o #responder passando pelo tradutor -- e os dois
+  // podem produzir português sem ninguém perceber: um campo `{jogo}` que voltou
+  // sem traduzir, uma linha nova escrita com pressa, o tradutor devolvendo a
+  // entrada. A checagem fica AQUI, na única porta por onde tudo passa, em vez
+  // de em cada origem.
+  //
+  // Só para `responder_fornecedor`: o pedido de código manda o USUÁRIO, que é
+  // alfanumérico de propósito e não pode ser barrado por não ser chinês.
+  if (respondendo && !politica.temCJK(bruto)) {
+    await alertar(
+      `⚠️ Não mandei nada no atendimento de *${atendimento.nome}*: a resposta não saiu no ` +
+        `idioma do outro lado.
+
+Use *#responder* e escreva em português que eu traduzo.`,
+    );
+    console.warn(`[ponte] resposta barrada por não estar em chinês: ${bruto.slice(0, 60)}`);
+    return;
+  }
+
   const saida = politica.paraFornecedor(bruto);
   if (saida.texto !== bruto || saida.flags.length) {
     await alertar(
@@ -547,6 +569,17 @@ async function jogoDoPedido(atendimento) {
     // Confiança baixa não sai. Nome de jogo traduzido errado faz o fornecedor
     // separar outro título, e isso só aparece quando o cliente reclama.
     if (!zh || confianca === 'baixa') return null;
+
+    // E TEM QUE TER VOLTADO EM CHINÊS.
+    //
+    // O tradutor devolve o que o modelo escreveu, e nome próprio de jogo ele
+    // muitas vezes deixa como está -- "Hollow Knight" entra e "Hollow Knight"
+    // sai. Sem esta checagem, isso ia para o outro lado em português, dentro de
+    // uma linha que existe justamente para falar a língua dele.
+    if (!politica.temCJK(zh)) {
+      console.warn(`[ponte] o jogo "${nome}" não voltou em chinês — deixo para o operador`);
+      return null;
+    }
     return zh;
   } catch (err) {
     console.warn('[ponte] não consegui identificar o jogo do pedido:', err.message);

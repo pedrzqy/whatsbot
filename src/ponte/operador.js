@@ -979,13 +979,24 @@ async function executar(texto, de = '') {
 
     // ── #admin — a lista ──
     if (!alvo) {
+      // Cada função com a descrição EMBAIXO, e não só o nome.
+      //
+      // Só o nome obriga a abrir uma por uma para lembrar o que faz — oito
+      // `#admin N` para conferir um painel de oito itens. A linha curta
+      // responde ali mesmo, e o parágrafo continua a um comando de distância.
       const linhas = ['⚙️ *Painel*', ''];
       for (const c of chaves.situacao()) {
-        linhas.push(`*${c.numero}.* ${c.ligada ? '✅' : '⛔'} ${c.nome}`);
+        // O ⚠️ só aparece quando ela ESTÁ no estado que merece atenção —
+        // desligar a aprovação, ligar o repertório ou a reativação. Marcar
+        // sempre viraria decoração e ele pararia de enxergar.
+        linhas.push(
+          `*${c.numero}.* ${c.ligada ? '✅' : '⛔'} *${c.nome}*${c.atencao ? ' ⚠️' : ''}`,
+          `_${c.curto}_`,
+          '',
+        );
       }
       linhas.push(
-        '',
-        '*#admin 2* — o que é a 2',
+        '*#admin 2* — explica a 2',
         '*#admin 2 on* — liga · *#admin 2 off* — desliga',
         '',
         '_Vale na hora, sem precisar mexer no painel do servidor._',
