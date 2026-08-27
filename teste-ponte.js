@@ -2057,6 +2057,70 @@ const OP = '5541999999999';
   //
   // Foi assim que o #admin chegou ao WhatsApp e a IA respondeu ao dono
   // "Como posso te ajudar, Pedro?" em vez de abrir o painel.
+  // ── O MESMO número, nas formas que o WhatsApp entrega ──────
+  //
+  // A comparação era string exata, e falhava em silêncio em três formas comuns:
+  // o comando do operador virava mensagem de cliente e a IA respondia a ele
+  // "como posso te ajudar?". Aconteceu de verdade com o #admin.
+  bloco('o número do operador chega de várias formas');
+
+  const cfgNum = require('./src/ponte/config');
+  const numerosAntesNum = cfgNum.operador.numeros;
+  const ehAntesNum = cfgNum.operador.ehOperador;
+
+  // Recria a checagem como o config faz, mas com um número conhecido.
+  const CONFIGURADO = '5541999998888';
+  const normaliza = (b) => String(b || '').split('@')[0].split(':')[0].replace(/\D/g, '');
+  const formas = (n) => {
+    const x = normaliza(n);
+    if (!x.startsWith('55')) return [x];
+    const ddd = x.slice(2, 4);
+    const resto = x.slice(4);
+    if (resto.length === 9 && resto.startsWith('9')) return [x, `55${ddd}${resto.slice(1)}`];
+    if (resto.length === 8) return [x, `55${ddd}9${resto}`];
+    return [x];
+  };
+  cfgNum.operador.numeros = [CONFIGURADO];
+  cfgNum.operador.ehOperador = (from) => {
+    const alvo = normaliza(from);
+    return Boolean(alvo) && formas(CONFIGURADO).includes(alvo);
+  };
+
+  for (const [caso, jid] of [
+    ['do celular', '5541999998888'],
+    ['do WhatsApp Web (sufixo :5)', '5541999998888:5'],
+    ['sem o nono dígito', '554199998888'],
+    ['no endereço novo (@lid)', '5541999998888@lid'],
+    ['sem o nono E com sufixo', '554199998888:12'],
+  ]) {
+    t(`#admin ${caso}`, operador.ehComando(jid, '#admin') === true, jid);
+  }
+
+  // E quem NÃO é operador continua sem alcançar nada — a normalização não pode
+  // ter afrouxado a porta.
+  for (const estranho of ['5511900001111', '554199998887', '', '55']) {
+    t(`"${estranho || '(vazio)'}" continua de fora`,
+      operador.ehComando(estranho, '#admin') === false);
+  }
+
+  // Um número de outro país não vira o de alguém por causa da regra do nono
+  // dígito, que é brasileira.
+  t('número de fora não entra pela regra do 9',
+    operador.ehComando('351912345678', '#admin') === false);
+
+  cfgNum.operador.numeros = numerosAntesNum;
+  cfgNum.operador.ehOperador = ehAntesNum;
+
+  // ── O regex dos comandos está inteiro ──
+  //
+  // Um `\b` virou caractere de backspace ao ser escrito por script, e o regex
+  // parou de casar com TUDO — todos os comandos sumiram de uma vez, em
+  // silêncio. É o tipo de estrago que não aparece lendo o arquivo.
+  const fonteOperador = require('fs').readFileSync('./src/ponte/operador.js', 'utf8');
+  t('nenhum caractere de controle no arquivo',
+    !/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(fonteOperador),
+    (fonteOperador.match(/[\x00-\x08\x0b\x0c\x0e-\x1f]/) || []).map((c) => c.charCodeAt(0)).join(','));
+
   bloco('o comando é reconhecido como comando');
 
   const cfgP = require('./src/ponte/config');

@@ -80,6 +80,33 @@ module.exports = {
   vncUrl: process.env.PONTE_VNC_URL || '',
 
   operador: (() => {
+    /**
+     * Só os dígitos do número, tirando o que o WhatsApp pendura nele.
+     *
+     * O corte no `:` e no `@` vem ANTES de tirar os não-dígitos, e a ordem é a
+     * regra: `5541999998888:5@s.whatsapp.net` com um `replace(/\D/g,'')` direto
+     * vira `55419999888885` — o sufixo do aparelho grudado no fim do número.
+     */
+    const normalizarNumero = (bruto) =>
+      String(bruto || '').split('@')[0].split(':')[0].replace(/\D/g, '');
+
+    /**
+     * As duas formas do mesmo celular brasileiro: com e sem o nono dígito.
+     *
+     * 55 + DDD + 9 + 8 dígitos (13) é o formato novo; 55 + DDD + 8 dígitos (12)
+     * é o antigo, e contas registradas há mais tempo ainda chegam assim. Quem
+     * configura escreve de um jeito e o WhatsApp entrega do outro.
+     */
+    const mesmasFormas = (numero) => {
+      const n = normalizarNumero(numero);
+      if (!n.startsWith('55')) return [n];
+      const ddd = n.slice(2, 4);
+      const resto = n.slice(4);
+      if (resto.length === 9 && resto.startsWith('9')) return [n, `55${ddd}${resto.slice(1)}`];
+      if (resto.length === 8) return [n, `55${ddd}9${resto}`];
+      return [n];
+    };
+
     // Números (só dígitos) que recebem alertas de captcha e fila travada e
     // podem dar comandos. Sem nenhum, o disjuntor abre e ninguém fica sabendo.
     //
@@ -105,8 +132,34 @@ module.exports = {
       // hoje ninguém depende disso, mas some código antigo esperando `numero`
       // e um undefined silencioso aqui vira alerta sem destino.
       numero: unicos[0] || '',
-      /** Este número manda no bot? */
-      ehOperador: (from) => Boolean(from) && unicos.includes(String(from)),
+
+      /**
+       * Este número manda no bot?
+       *
+       * Era `unicos.includes(String(from))` — comparação de string exata — e
+       * isso falha em silêncio em TRÊS formas comuns de o WhatsApp entregar o
+       * mesmo número. O comando do operador virava mensagem de cliente e a IA
+       * respondia a ele "como posso te ajudar?":
+       *
+       *  1. SUFIXO DE APARELHO. Mandando do WhatsApp Web ou de um aparelho
+       *     ligado, o remetente vem como `5541999998888:5@s.whatsapp.net`. O
+       *     `:5` sobrevivia ao replace e nada batia.
+       *  2. O NONO DÍGITO. No Brasil o mesmo celular aparece com 13 dígitos
+       *     (55 41 9 9999-8888) ou com 12 (55 41 9999-8888), dependendo de
+       *     como a conta foi registrada. Quem configura escreve de um jeito e
+       *     o WhatsApp entrega do outro.
+       *  3. ENDEREÇO NOVO (`@lid`). O replace só tirava `@s.whatsapp.net`, e o
+       *     `@lid` ficava colado no número.
+       *
+       * Normaliza os dois lados e aceita as duas formas do nono dígito. É o
+       * mesmo cuidado que o `vendas.paraWhatsApp` já tinha para não mandar
+       * chave para o telefone errado — só que aqui ninguém tinha feito.
+       */
+      ehOperador: (from) => {
+        const alvo = normalizarNumero(from);
+        if (!alvo) return false;
+        return unicos.some((n) => mesmasFormas(n).includes(alvo));
+      },
     };
   })(),
 

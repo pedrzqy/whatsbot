@@ -64,6 +64,12 @@ const TESTE_MS = 30 * 60 * 1000;
 
 const min = (ms) => Math.round(ms / 60000);
 
+// A lista de comandos, num lugar so: o ehComando precisa dela duas vezes (para
+// decidir e para logar o motivo de ter ignorado), e duas copias divergiriam --
+// que e como o "script" escapou do filtro de vocabulario uma vez.
+const RE_COMANDOS =
+  /^#(fila|status|vendas|historico|liberar|ok|enviar|editar|responder|casos|analisar|admin|nao|não|pular|ajuda|sms|taobao|teste|limpar|destravar|atender|auto|recarregar)\b/i;
+
 /** É comando de operador? */
 function ehComando(from, texto) {
   // NAO depende mais da ponte estar ativa.
@@ -77,11 +83,39 @@ function ehComando(from, texto) {
   // #admin 4 off desligaria o proprio #admin, e a unica saida seria o Easypanel
   // -- exatamente o que o painel existe para evitar. Comando de operador so
   // depende de quem mandou.
-  if (!cfg.operador.numeros.length) return false;
-  if (!cfg.operador.ehOperador(from)) return false;
-  return /^#(fila|status|vendas|historico|liberar|ok|enviar|editar|responder|casos|analisar|admin|nao|não|pular|ajuda|sms|taobao|teste|limpar|destravar|atender|auto|recarregar)\b/i.test(
-    String(texto || '').trim(),
-  );
+  const pareceComando = RE_COMANDOS.test(String(texto || '').trim());
+
+  if (!cfg.operador.numeros.length) {
+    if (pareceComando) {
+      console.warn(
+        '[ponte/operador] chegou um #comando e NÃO HÁ operador configurado. ' +
+          'Defina PONTE_OPERADOR_NUMERO no Environment do serviço.',
+      );
+    }
+    return false;
+  }
+
+  if (!cfg.operador.ehOperador(from)) {
+    // O LOG QUE FALTAVA.
+    //
+    // Antes isto era um `return false` mudo: o #comando virava mensagem de
+    // cliente, a IA respondia "como posso te ajudar?", e não havia UMA linha em
+    // lugar nenhum dizendo por que o comando foi ignorado. A pessoa fica
+    // olhando para o WhatsApp sem ter o que investigar.
+    //
+    // Só quando PARECE comando: logar toda mensagem de cliente que não é
+    // comando encheria o log com o atendimento inteiro.
+    if (pareceComando) {
+      console.warn(
+        `[ponte/operador] "${String(texto).trim().slice(0, 20)}" veio de ${from}, que NÃO está ` +
+          `na lista de operadores (${cfg.operador.numeros.join(', ')}). Ignorei. ` +
+          'Confira o PONTE_OPERADOR_NUMERO — tem que ser só dígitos, com o 55 na frente.',
+      );
+    }
+    return false;
+  }
+
+  return pareceComando;
 }
 
 /**
