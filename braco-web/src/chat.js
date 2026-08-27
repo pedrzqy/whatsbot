@@ -1762,10 +1762,12 @@ class Chat {
     // diferentes e nunca são comparadas. Aqui elas ficam lado a lado.
     await this._retratoDaLista();
 
+    // Rolagens vazias seguidas até desistir. Cada uma custa uma tentativa de
+    // roda e ~6s de espera, e o teto existe porque a alternativa é rolar contra
+    // um topo que acabou, para sempre — rolagem repetida no chat de outra
+    // pessoa é o padrão que a pausa entre rolagens existe para não fazer.
+    const SECAS_ATE_DESISTIR = 5;
     let secas = 0;
-    // Quantas vezes já insisti com a roda estando no topo. Limitado porque a
-    // alternativa é rolar contra um topo que não tem mais nada, para sempre.
-    let noTopo = 0;
     let rolagens = 0;
     let diagnostico = '';
 
@@ -1802,41 +1804,57 @@ class Chat {
       guardar(await this._coletarVisiveis());
 
       let novas = vistas.size - antes;
-      console.log(`[chat] histórico — rolagem ${rolagens}: +${novas} (total ${vistas.size})`);
+      // O scrollTop antes→depois entra no log porque é ele que conta se a
+      // rolagem MEXEU. "536->536" já apareceu numa investigação e significava
+      // caixa no fim; sem esse par, uma rolagem que não move é idêntica a uma
+      // que move e não carrega.
+      console.log(
+        `[chat] histórico — rolagem ${rolagens}: +${novas} (total ${vistas.size}) · ` +
+          `scroll ${rel.antes}→${rel.depois}`,
+      );
 
-      // NO TOPO E SEM NOVIDADE: insiste com o GESTO, não com scrollTop.
+      // SEM NOVIDADE: insiste com o GESTO. Sem condição de posição.
       //
-      // Este é o ponto onde a exportação estava morrendo. A área rolável tem
-      // ~900px: em três rolagens o scrollTop chega a zero, e daí em diante
-      // escrever scrollTop=0 de novo não é evento nenhum para o componente —
-      // ele já está lá. O que dispara o "carregar mais" é a pessoa continuar
-      // rolando contra o topo, e isso é a roda do mouse.
+      // A versão anterior só tentava a roda com scrollTop exatamente em zero, e
+      // esse zero nunca chegava. O log contou por quê: o chat mantém 10 balões
+      // por vez e carrega de 10 em 10 — quando o bloco anterior entra, o
+      // componente REAJUSTA o scroll para manter a posição visual, e a caixa
+      // volta a ter folga. A condição de topo era uma aposta sobre o
+      // comportamento interno de um componente que a gente não controla.
       //
-      // A roda antes só era tentada quando o scrollTop não mexia. Aqui ele
-      // mexe (vai até zero direitinho), então o gesto nunca era usado
-      // justamente no lugar em que ele é o único que funciona.
+      // "Não veio nada" é o sinal que importa, e ele não depende de adivinhar
+      // onde o scroll parou. A roda é o gesto que o componente escuta; o
+      // scrollTop é escrita por fora, que ele pode ignorar ou desfazer.
       //
-      // E a espera aqui é longa: carregar um bloco antigo vai ao servidor da
-      // Taobao, e o custo de esperar 5s é nada perto de desistir do mês.
-      if (novas === 0 && rel.depois === 0 && noTopo < 3) {
-        noTopo++;
-        console.log(`[chat] histórico — no topo, insistindo com a roda (${noTopo}/3)`);
+      // A espera aqui é longa de propósito: carregar um bloco antigo vai ao
+      // servidor da Taobao, e 6s não é nada perto de desistir do mês.
+      if (novas === 0 && secas < SECAS_ATE_DESISTIR) {
+        secas++;
+        console.log(
+          `[chat] histórico — sem novidade, insistindo com a roda (${secas}/${SECAS_ATE_DESISTIR})`,
+        );
         await this._rolarComRoda(rel.altura);
         await this.pagina.waitForTimeout(humaniza.ms(3500, 6000));
         guardar(await this._coletarVisiveis());
         novas = vistas.size - antes;
         if (novas > 0) {
           console.log(`[chat] histórico — a roda destravou: +${novas}`);
-          noTopo = 0;
         }
       }
 
-      if (novas === 0) {
-        // Três seguidas sem novidade, e não duas: a primeira pode ser só o
-        // carregamento demorando mais que a pausa.
-        if (++secas >= 3) { diagnostico += ` · sem novidade após ${noTopo} tentativa(s) no topo`; break; }
-      } else {
+      // UM contador só, e não dois.
+      //
+      // Antes eram `secas` (parava em 3) e `noTopo` (insistia até 5) contando a
+      // mesma coisa. O menor vencia sempre: a exportação desistia na terceira
+      // rolagem vazia com duas tentativas de roda ainda no bolso, e o
+      // diagnóstico dizia "0 tentativas no topo" porque o outro contador é que
+      // tinha subido. Dois contadores para um estado é como o limite vira
+      // mentira.
+      if (novas > 0) {
         secas = 0;
+      } else if (secas >= SECAS_ATE_DESISTIR) {
+        diagnostico += ` · parou após ${secas} rolagens vazias`;
+        break;
       }
     }
 

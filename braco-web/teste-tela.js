@@ -394,7 +394,10 @@ t('nenhum candidato mira por posição', !CAND.some((c) => /nth-child|nth-of-typ
 
   // Insistir para sempre contra um topo que acabou seria rolagem repetida no
   // chat de outra pessoa — o oposto da cadência que a pausa existe para manter.
-  t('desiste depois de poucas tentativas', rodadasVazias <= 3, `${rodadasVazias} tentativa(s)`);
+  // O teto e 5 rolagens vazias seguidas (SECAS_ATE_DESISTIR). O que o teste
+  // exige e que ele DESISTA, nao o numero exato — subir ou descer o teto e
+  // ajuste de cadencia, nao regressao.
+  t('desiste em vez de insistir para sempre', rodadasVazias <= 6, `${rodadasVazias} tentativa(s)`);
   console.log('\n--- histórico quando o chat não rola ---');
 
   const chatSemRolagem = chatVirtualizado();
@@ -416,7 +419,7 @@ t('nenhum candidato mira por posição', !CAND.some((c) => /nth-child|nth-of-typ
   await chatCurto.lerHistorico({ maxRolagens: 40 });
   // Topo + nada novo tem que parar rápido. Sem isso o braço rolaria 40 vezes
   // uma lista que acabou — 40 requisições à Taobao por nada.
-  t('para cedo quando não vem mais nada', voltas <= 4, `${voltas} rolagem(ns)`);
+  t('para cedo quando não vem mais nada', voltas <= 6, `${voltas} rolagem(ns)`);
 
 
   console.log('');
