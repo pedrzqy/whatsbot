@@ -322,7 +322,11 @@ const ai = require('./src/ai');
   t('o raciocínio não é gravado em disco', !hist.includes('preciso ver o preco'),
     hist.slice(0, 120) || '(vazio)');
 
-  delete process.env.ANTHROPIC_API_KEY;
+  // Vazio, e nao `delete`. O config.js chama dotenv, que RE-LE o .env e repoe
+// qualquer chave que nao esteja em process.env -- entao apagar aqui e ser
+// sobrescrito um require depois. Definida como string vazia, a chave existe
+// (dotenv nao mexe) e e falsy (nenhum provedor nasce).
+process.env.ANTHROPIC_API_KEY = '';
 
   // ── O cliente manda foto: o modelo ENXERGA ─────────────────
   //

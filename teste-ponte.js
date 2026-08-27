@@ -29,8 +29,30 @@ process.env.PONTE_DATA_DIR = DATA_TESTE;
 // E o esforco e fixado porque CLAUDE_EFFORT ja existe no ambiente de algumas
 // maquinas: o teste passava ou falhava conforme QUEM estava rodando, que e o
 // mesmo defeito do relogio que decidia o resultado do teste-ponte.
-delete process.env.ANTHROPIC_API_KEY;
+// Vazio, e nao `delete`. O config.js chama dotenv, que RE-LE o .env e repoe
+// qualquer chave que nao esteja em process.env -- entao apagar aqui e ser
+// sobrescrito um require depois. Definida como string vazia, a chave existe
+// (dotenv nao mexe) e e falsy (nenhum provedor nasce).
+process.env.ANTHROPIC_API_KEY = '';
 process.env.BOT_CLAUDE_ESFORCO = 'low';
+
+// E TODAS as outras chaves de LLM tambem, e nao so a da Anthropic.
+//
+// O config.js carrega o .env local, e a maquina de quem desenvolve tem
+// GEMINI_API_KEY de verdade la dentro: a cascata nascia com um provedor
+// configurado e qualquer teste que tocasse ai.chat saia para a REDE -- lento,
+// cobrado, e falhando conforme a internet. Foi assim que o teste do teto de
+// mensagens passou a acusar AxiosError em vez do erro que ele mede.
+//
+// Sem provedor nenhum, ai.chat falha na hora e offline, que e o que este
+// arquivo precisa.
+for (const k of [
+  'GEMINI_API_KEY', 'CEREBRAS_API_KEY', 'GROQ_API_KEY', 'GROQ_FALLBACK_API_KEY',
+  'FALLBACK_API_KEY', 'MISTRAL_API_KEY', 'COHERE_API_KEY', 'OPENROUTER_API_KEY',
+  'TRANSCRICAO_API_KEY',
+]) {
+  process.env[k] = '';
+}
 
 process.env.PONTE_ATIVA = 'true';
 process.env.PONTE_OPERADOR_NUMERO = '5541999999999';
@@ -1786,6 +1808,141 @@ const OP = '5541999999999';
   estadoPonte.dados.atendimentos = [];
   estadoPonte.dados.aprovacoes = [];
   estadoPonte.dados.tarefas = [];
+
+  // ── Expediente: o bot atende 24h, a PROMESSA não ──────────
+  //
+  // O falar_com_atendente dizia "um atendente vai continuar em instantes" a
+  // qualquer hora. Às 3h da manhã isso é mentira: o cliente fica acordado
+  // esperando alguém que só vê a mensagem às 9h. Promessa quebrada custa mais
+  // que demora avisada.
+  bloco('expediente do atendente');
+
+  const expediente = require('./src/expediente');
+  const cfgRaiz = require('./src/config');
+  const atendenteAntes = { ...cfgRaiz.atendente };
+  cfgRaiz.atendente = { inicioHora: 9, fimHora: 21, dias: [1, 2, 3, 4, 5, 6] };
+
+  // BRT = UTC-3, então soma 3 para chegar no UTC do mesmo instante.
+  // 2026-08-27 é uma quinta-feira; 2026-08-30 é um domingo.
+  const emBRT2 = (dia, hora) => Date.UTC(2026, 7, dia, hora + 3, 0, 0);
+
+  t('14h de quinta = tem gente', expediente.aberto(emBRT2(27, 14)) === true);
+  t('03h de quinta = não tem', expediente.aberto(emBRT2(27, 3)) === false);
+  t('22h de quinta = não tem', expediente.aberto(emBRT2(27, 22)) === false);
+  t('domingo 14h = não tem', expediente.aberto(emBRT2(30, 14)) === false);
+
+  t('de madrugada, volta hoje', /hoje a partir das 09h/.test(expediente.quandoVolta(emBRT2(27, 3))),
+    expediente.quandoVolta(emBRT2(27, 3)));
+  t('à noite, volta amanhã', /amanhã/.test(expediente.quandoVolta(emBRT2(27, 22))),
+    expediente.quandoVolta(emBRT2(27, 22)));
+  // Domingo não tem atendimento: o próximo é segunda, e "amanhã" está certo.
+  t('domingo aponta para segunda', /amanhã/.test(expediente.quandoVolta(emBRT2(30, 14))),
+    expediente.quandoVolta(emBRT2(30, 14)));
+
+  const dentro = expediente.promessaDeAtendimento(emBRT2(27, 14));
+  const fora = expediente.promessaDeAtendimento(emBRT2(27, 3));
+  t('dentro do horário promete agora', /chamando um atendente/i.test(dentro), dentro);
+  t('fora do horário NÃO promete "em instantes"',
+    !/instantes|agora|já já/i.test(fora), fora);
+  t('  e diz QUANDO', /a partir das/.test(fora), fora);
+  // As duas saem pelo número comercial.
+  for (const frase of [dentro, fora]) {
+    t(`"${frase.slice(0, 28)}…" sem vocabulário proibido`,
+      !AUTOMACAO.test(frase) && !PROIBIDO.test(frase) && !REPASSE.test(frase) &&
+        !politica.temCJK(frase),
+      (frase.match(AUTOMACAO) || frase.match(REPASSE) || [''])[0] || 'limpo');
+  }
+
+  // Nenhum dia configurado não pode virar horário inventado.
+  cfgRaiz.atendente = { inicioHora: 9, fimHora: 21, dias: [] };
+  t('sem dia configurado não inventa horário',
+    /assim que abrirmos/.test(expediente.quandoVolta(emBRT2(27, 14))),
+    expediente.quandoVolta(emBRT2(27, 14)));
+  cfgRaiz.atendente = atendenteAntes;
+
+  // ── Teto por cliente na IA ─────────────────────────────────
+  //
+  // Existe um teto DIÁRIO global no claude.js, mas ele só percebe o estrago
+  // depois de 400 chamadas. Uma conversa normal tem ~5 turnos; 20 numa hora já
+  // é outra coisa — cliente preso em laço ou alguém testando em rajada.
+  bloco('teto de mensagens por cliente');
+
+  const aiTeto = require('./src/ai');
+  const tetoAntes = cfgRaiz.iaPorClienteHora;
+  cfgRaiz.iaPorClienteHora = 3;
+
+  // Sem provedor nenhum (a trava do topo do arquivo), ai.chat falha na hora.
+  // O que este bloco mede e QUAL erro sai: ate o teto, o erro e de provedor --
+  // ou seja, a chamada chegou la; depois do teto, e o teto, que dispara ANTES
+  // de qualquer provedor ser consultado. E essa diferenca que prova que ele
+  // corta o gasto em vez de so contar.
+  const CLI_TETO = '5541988880001';
+  aiTeto.clearHistory(CLI_TETO);
+  const erros = [];
+  for (let i = 0; i < 5; i++) {
+    try {
+      await aiTeto.reply(CLI_TETO, `mensagem ${i}`, 'Ana');
+      erros.push(null);
+    } catch (err) {
+      erros.push(err);
+    }
+  }
+
+  t('as 3 primeiras chegam ao modelo',
+    erros.slice(0, 3).every((e) => e && !e.tetoDoCliente),
+    erros.slice(0, 3).map((e) => e?.name).join(','));
+  t('a 4ª e a 5ª batem no teto',
+    erros.slice(3).every((e) => e && e.tetoDoCliente === true),
+    erros.slice(3).map((e) => e?.name).join(','));
+  // O teto dispara ANTES do provedor: e isso que faz ele cortar o gasto em vez
+  // de so contar depois que a conta ja subiu.
+  t('  e o teto vem antes de gastar',
+    erros[3]?.name === 'TetoDoCliente', erros[3]?.name);
+
+  // Outro cliente nao e afetado -- o teto e por contato, nao global.
+  const CLI_OUTRO = '5541988880002';
+  aiTeto.clearHistory(CLI_OUTRO);
+  let erroDoOutro = null;
+  try {
+    await aiTeto.reply(CLI_OUTRO, 'oi', 'Beto');
+  } catch (err) {
+    erroDoOutro = err;
+  }
+  t('outro cliente nao paga pelo primeiro', erroDoOutro?.tetoDoCliente !== true,
+    erroDoOutro?.name);
+
+  cfgRaiz.iaPorClienteHora = tetoAntes;
+
+  // ── O painel de "quanto saiu do meu colo" ──────────────────
+  //
+  // Handoff sozinho não diz nada: dez handoffs em dez conversas e dez em mil
+  // são situações opostas com o mesmo número. A fração é o que responde.
+  bloco('quanto o atendimento resolveu sozinho');
+
+  const registroIA = require('./src/ponte/registro');
+  const fsIA = require('fs');
+  if (fsIA.existsSync(registroIA.FILE)) fsIA.rmSync(registroIA.FILE);
+
+  for (let i = 0; i < 7; i++) registroIA.anotar('ia_respondeu', {});
+  registroIA.anotar('ia_handoff', { motivo: 'chave nao ativou' });
+  registroIA.anotar('ia_handoff', { motivo: 'chave nao ativou' });
+  registroIA.anotar('ia_handoff', { motivo: 'quer reembolso' });
+  registroIA.anotar('ia_caiu', { motivo: 'prazo' });
+
+  const rIA = registroIA.resumo(7);
+  t('conta o que resolveu sozinho', rIA.ia.respondeu === 7, String(rIA.ia.respondeu));
+  t('  e o que passou para o operador', rIA.ia.handoff === 3, String(rIA.ia.handoff));
+  t('  e calcula a fração', rIA.ia.semOperador === 70, String(rIA.ia.semOperador));
+  t('  agrupando por motivo', rIA.ia.porMotivoHandoff['chave nao ativou'] === 2,
+    JSON.stringify(rIA.ia.porMotivoHandoff));
+
+  const painelIA = await operador.executar('#casos', OP);
+  t('o #casos mostra a fração', /70%/.test(painelIA), painelIA.split('\n')[2] || painelIA);
+  t('  e o que ainda chega no seu colo', /chave nao ativou/.test(painelIA), painelIA);
+  t('  sem vocabulário proibido', !AUTOMACAO.test(painelIA) && !politica.temCJK(painelIA),
+    (painelIA.match(AUTOMACAO) || [''])[0] || 'limpo');
+
+  fsIA.rmSync(registroIA.FILE, { force: true });
 
   // ── Com a IA ligada: o que muda e o que NÃO pode mudar ─────
   //

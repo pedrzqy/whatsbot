@@ -301,7 +301,27 @@ async function execute(name, args = {}, ctx = {}) {
       // esperava por um atendente que não sabia que existia um cliente.
       await ponte.alertarHandoff({ nome, from: ctx.from, motivo: args.motivo, contato });
 
-      return { transferido: true, instrucao: 'Confirme ao cliente, de forma calorosa, que um atendente humano vai continuar o atendimento em instantes.' };
+      // O denominador de "quanto saiu do meu colo", com o MOTIVO junto: e a
+      // lista do que ainda cai no operador, que e onde vale escrever resposta
+      // pronta nova. Sem o motivo, o numero diz que ha trabalho sobrando e nao
+      // diz de que tipo.
+      require('./ponte/registro').anotar('ia_handoff', {
+        motivo: String(args.motivo || '').replace(/\s+/g, ' ').trim().slice(0, 120) || null,
+      });
+
+      // A instrução muda com a hora. "Em instantes" às 3h da manhã é mentira: o
+      // cliente fica acordado esperando alguém que só vê a mensagem às 9h, e o
+      // modelo não tem como saber que horas são nem quando a loja abre.
+      const exp = require('./expediente');
+      const temGente = exp.aberto();
+      return {
+        transferido: true,
+        atendente_disponivel_agora: temGente,
+        instrucao: temGente
+          ? 'Confirme ao cliente, de forma calorosa, que um atendente humano vai continuar o atendimento em instantes.'
+          : `Confirme com calor que anotou tudo e diga que um atendente responde ${exp.quandoVolta()}. ` +
+            'NÃO prometa retorno imediato nem diga "em instantes".',
+      };
     }
 
     if (name === 'meus_pedidos') {

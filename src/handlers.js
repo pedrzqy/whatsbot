@@ -23,6 +23,11 @@ const recepcao = require('./ponte/recepcao');
 const ponte = require('./ponte');
 const menu = require('./menu');
 const tools = require('./tools');
+const expediente = require('./expediente');
+// O mesmo registro da ponte: o arquivo e "o que o bot fez", e quem for
+// analisar quer os dois lados juntos -- quanto o atendimento resolveu e
+// quanto a ponte resolveu. Dois arquivos seriam duas analises pela metade.
+const registro = require('./ponte/registro');
 
 // E-mail e código de pedido dentro de uma frase solta.
 //
@@ -255,7 +260,11 @@ async function acaoDoMenu(acao, { from, pushName }) {
 
     await sender.send(
       from,
-      'Certo! Já estou chamando um atendente pra continuar com você 🧑‍💼\n\n' +
+      // A promessa vem do expediente, e não está escrita aqui: as três portas
+      // de handoff escreviam cada uma a sua, e foi assim que passaram a
+      // prometer coisas diferentes para a mesma situação — todas as três
+      // dizendo "em instantes" também às 3h da manhã, quando não há ninguém.
+      `Certo! ${expediente.promessaDeAtendimento()}\n\n` +
         '_Se quiser voltar ao atendimento automático, digite *#inicio*._',
     );
     return true;
@@ -504,7 +513,7 @@ async function handleMessage(msg) {
 
     await sender.send(
       from,
-      'Anotei ✅ Já estou chamando um atendente pra resolver isso com você 🧑‍💼\n\n' +
+      `Anotei ✅ ${expediente.promessaDeAtendimento()}\n\n` +
         '_Se quiser voltar ao menu, digite *#inicio*._',
     );
     return;
@@ -603,11 +612,20 @@ async function handleMessage(msg) {
 
   // IA só quando ligada de propósito (BOT_IA=true).
   try {
+    // A foto sem legenda é foto de verdade — só que agora o modelo a enxerga.
+    // Antes esta frase era mandada também para ÁUDIO, que não era extraído:
+    // a IA respondia sobre uma foto que não existia.
     const texto = trimmed || '(o cliente mandou uma foto sem escrever nada)';
     const answer = await ai.reply(from, texto, pushName, { imagem, imagemBase64 });
     await sender.send(from, answer);
+
+    // Uma linha por resposta da IA. É o numerador de "quanto saiu do meu colo":
+    // sem ele, o dono só sabia quantos handoffs chegaram — nunca quantas
+    // conversas terminaram sem ele. Um número sem o outro não diz nada.
+    registro.anotar('ia_respondeu', { de: 'cliente', veioDeAudio: Boolean(veioDeAudio), comFoto: Boolean(imagemBase64) });
   } catch (err) {
     console.error('[ai] erro ao responder:', err.response?.data || err.message);
+    registro.anotar('ia_caiu', { motivo: err.tetoDoCliente ? 'teto_do_cliente' : err.prazoEsgotado ? 'prazo' : 'falha' });
 
     // O menu é a REDE, não uma mensagem de desculpa.
     //
@@ -653,8 +671,7 @@ function respostaDePedido(r, { codigo }) {
     // Inclui sistema_indisponivel (nossa chave) — problema nosso, atendente
     // assume. NÃO dizer que o dado do cliente está errado.
     return (
-      'Não consegui consultar agora 🙏 Já estou chamando um atendente pra ' +
-      'resolver com você.'
+      `Não consegui consultar agora 🙏 ${expediente.promessaDeAtendimento()}`
     );
   }
 

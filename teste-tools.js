@@ -17,7 +17,11 @@
 // E o esforco e fixado porque CLAUDE_EFFORT ja existe no ambiente de algumas
 // maquinas: o teste passava ou falhava conforme QUEM estava rodando, que e o
 // mesmo defeito do relogio que decidia o resultado do teste-ponte.
-delete process.env.ANTHROPIC_API_KEY;
+// Vazio, e nao `delete`. O config.js chama dotenv, que RE-LE o .env e repoe
+// qualquer chave que nao esteja em process.env -- entao apagar aqui e ser
+// sobrescrito um require depois. Definida como string vazia, a chave existe
+// (dotenv nao mexe) e e falsy (nenhum provedor nasce).
+process.env.ANTHROPIC_API_KEY = '';
 process.env.BOT_CLAUDE_ESFORCO = 'low';
 
 process.env.NERIX_API_KEY = 'teste';

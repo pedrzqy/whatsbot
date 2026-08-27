@@ -431,7 +431,54 @@ async function chat(messages, opts = {}) {
  * A IA pode chamar ferramentas (consultar a Nerix) antes de responder.
  * @returns {Promise<string>} texto da resposta
  */
+/**
+ * Quantas mensagens cada contato mandou para a IA na última hora.
+ *
+ * Existe um teto DIÁRIO global no claude.js, mas nenhum por cliente — e o
+ * global só percebe o estrago depois de 400 chamadas. Uma conversa normal tem
+ * uns 5 turnos; 20 numa hora já é outra coisa: cliente preso em laço, alguém
+ * testando em rajada, ou uma automação do outro lado respondendo sozinha.
+ *
+ * Em memória de propósito. Um reinício zerar é o comportamento certo para um
+ * freio contra descontrole, e evita mais um arquivo de estado no disco.
+ */
+const usoPorContato = new Map();
+
+function passouDoTeto(from) {
+  const teto = config.iaPorClienteHora;
+  if (!teto || teto <= 0) return false;
+
+  const agora = Date.now();
+  const marcas = (usoPorContato.get(from) || []).filter((t) => t > agora - 3600_000);
+  marcas.push(agora);
+  usoPorContato.set(from, marcas);
+
+  // Poda o mapa inteiro de vez em quando: sem isto ele guarda todo contato que
+  // já falou com o bot, para sempre, num processo que não reinicia.
+  if (usoPorContato.size > 500) {
+    for (const [k, v] of usoPorContato) {
+      if (!v.some((t) => t > agora - 3600_000)) usoPorContato.delete(k);
+    }
+  }
+
+  return marcas.length > teto;
+}
+
+/** Erro tipado: quem chama precisa saber que foi teto, não falha. */
+class TetoDoCliente extends Error {
+  constructor() {
+    super('cliente passou do teto de mensagens por hora');
+    this.name = 'TetoDoCliente';
+    this.tetoDoCliente = true;
+  }
+}
+
 async function reply(from, userText, pushName, extra = {}) {
+  if (passouDoTeto(from)) {
+    console.warn(`[ai] ${from} passou do teto de ${config.iaPorClienteHora}/h — cai no menu`);
+    throw new TetoDoCliente();
+  }
+
   const contact = store.getContact(from);
   const system = await buildSystemPrompt();
   const history = getHistory(from);

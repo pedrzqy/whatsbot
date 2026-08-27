@@ -883,7 +883,29 @@ async function executar(texto, de = '') {
       );
     }
 
-    const linhas = [`*Últimos 7 dias* — ${r.eventos} anotações`, ''];
+    const linhas = [`*Últimos 7 dias*`, ''];
+
+    // PRIMEIRO o número que ele quer: quanto terminou sem ele.
+    //
+    // Handoff sozinho não diz nada — dez handoffs em dez conversas e dez em
+    // mil são situações opostas com o mesmo número. A fração é o que responde.
+    if (r.ia.respondeu || r.ia.handoff) {
+      linhas.push(
+        `*Atendimento:* ${r.ia.respondeu} resolvidos sozinho · ${r.ia.handoff} passaram para você` +
+          (r.ia.semOperador === null ? '' : `\n*${r.ia.semOperador}%* terminou sem você`),
+      );
+      if (r.ia.caiu) linhas.push(`_${r.ia.caiu}× caiu no menu_`);
+
+      // O que ainda chega no seu colo, por motivo. É a lista de onde vale
+      // escrever resposta pronta nova: um motivo que se repete é trabalho
+      // recorrente que a IA ainda não sabe resolver.
+      const motivos = Object.entries(r.ia.porMotivoHandoff).sort((a, b) => b[1] - a[1]).slice(0, 5);
+      if (motivos.length) {
+        linhas.push('', '*Por que passaram para você:*');
+        for (const [m, n] of motivos) linhas.push(`${n}× ${m}`);
+      }
+      linhas.push('');
+    }
 
     // Como o outro lado respondeu. É a tabela que diz onde vale escrever uma
     // linha nova de repertório: o que aparece muito em "problema" é o que
@@ -897,7 +919,7 @@ async function executar(texto, de = '') {
     };
     const classes = Object.entries(r.porClasse).sort((a, b) => b[1] - a[1]);
     if (classes.length) {
-      linhas.push('*O que chegou:*');
+      linhas.push('*Códigos — o que chegou:*');
       for (const [k, n] of classes) linhas.push(`${n}× ${nomes[k] || k}`);
     }
 

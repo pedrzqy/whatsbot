@@ -118,6 +118,33 @@ const config = {
   // ── Recuperação de venda: cutuca quem engajou na conversa e sumiu ──
   // Só cutuca contato que JÁ conversou com a IA (engaged) e não está com atendente (paused).
   // Cliente que responde zera o ciclo. Passa pela fila anti-ban do sender.js e respeita horário.
+  // ── Quando existe GENTE do outro lado ──────────────────────────────
+  //
+  // O bot atende 24h e continua atendendo — isso não muda. O que muda é o que
+  // ele PROMETE: o falar_com_atendente dizia "um atendente vai continuar em
+  // instantes", e às 3h da manhã isso é mentira. O cliente espera acordado por
+  // alguém que só vê a mensagem às 9h, e a promessa quebrada custa mais que a
+  // demora.
+  //
+  // Horário de Brasília, mesma convenção do resto do arquivo.
+  atendente: {
+    inicioHora: Number(process.env.ATENDENTE_INICIO_HORA || 9),
+    fimHora: Number(process.env.ATENDENTE_FIM_HORA || 21),
+    // Dias da semana com atendimento: 0 = domingo. Padrão segunda a sábado.
+    dias: String(process.env.ATENDENTE_DIAS || '1,2,3,4,5,6')
+      .split(',')
+      .map((n) => parseInt(String(n).trim(), 10))
+      .filter((n) => Number.isInteger(n) && n >= 0 && n <= 6),
+  },
+
+  // ── Teto de mensagens por cliente na IA ────────────────────────────
+  //
+  // Existe um teto DIÁRIO global no claude.js, mas nenhum por cliente. Um
+  // cliente confuso em laço, ou alguém testando de propósito, consome sozinho:
+  // são ~5 turnos por conversa normal, então 20 numa hora já é claramente outra
+  // coisa. Estourado, ele cai no menu — que responde na hora e não custa nada.
+  iaPorClienteHora: Number(process.env.LLM_MAX_POR_CLIENTE_HORA || 20),
+
   recovery: {
     enabled: process.env.RECOVERY_ENABLED !== 'false', // ligado por padrão
     // De quanto em quanto tempo o scheduler varre os contatos.

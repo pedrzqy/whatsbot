@@ -112,12 +112,37 @@ function resumo(dias = 7) {
 
   const porClasse = {};
   const porDesfecho = {};
+  const porMotivoHandoff = {};
+  let iaRespondeu = 0;
+  let iaHandoff = 0;
+  let iaCaiu = 0;
+
   for (const l of linhas) {
     if (l.tipo === 'recebido') porClasse[l.classe] = (porClasse[l.classe] || 0) + 1;
     if (l.tipo === 'encerrado') porDesfecho[l.motivo] = (porDesfecho[l.motivo] || 0) + 1;
+    if (l.tipo === 'ia_respondeu') iaRespondeu += 1;
+    if (l.tipo === 'ia_caiu') iaCaiu += 1;
+    if (l.tipo === 'ia_handoff') {
+      iaHandoff += 1;
+      const m = l.motivo || 'sem motivo';
+      porMotivoHandoff[m] = (porMotivoHandoff[m] || 0) + 1;
+    }
   }
 
-  return { dias, eventos: linhas.length, porClasse, porDesfecho, arquivo: FILE };
+  // A fração que responde a pergunta única do dono: quanto do atendimento
+  // terminou SEM ele. Handoff sozinho não diz nada — dez handoffs em dez
+  // conversas e dez em mil são situações opostas com o mesmo número.
+  const totalIA = iaRespondeu + iaHandoff;
+  const semOperador = totalIA ? Math.round((iaRespondeu / totalIA) * 100) : null;
+
+  return {
+    dias,
+    eventos: linhas.length,
+    porClasse,
+    porDesfecho,
+    ia: { respondeu: iaRespondeu, handoff: iaHandoff, caiu: iaCaiu, semOperador, porMotivoHandoff },
+    arquivo: FILE,
+  };
 }
 
 module.exports = { anotar, ultimos, resumo, FILE };
