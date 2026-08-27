@@ -44,6 +44,7 @@ const AJUDA = [
   '*#editar <id> <texto>* — corrige antes de mandar',
   '*#responder <id> <texto>* — fala com o outro lado (escreva em português)',
   '*#casos* — o que a ponte resolveu nos últimos 7 dias',
+  '*#analisar* — o que ainda cai no seu colo, e o que dá para resolver sozinho',
   '*#nao <id>* — descarta',
   '*#limpar* — descarta o que espera aprovação',
   '*#limpar fila* — encerra TODOS os atendimentos e avisa cada cliente',
@@ -66,7 +67,7 @@ const min = (ms) => Math.round(ms / 60000);
 function ehComando(from, texto) {
   if (!cfg.ativa || !cfg.operador.numeros.length) return false;
   if (!cfg.operador.ehOperador(from)) return false;
-  return /^#(fila|status|vendas|historico|liberar|ok|enviar|editar|responder|casos|nao|não|pular|ajuda|sms|taobao|teste|limpar|destravar|atender|auto|recarregar)\b/i.test(
+  return /^#(fila|status|vendas|historico|liberar|ok|enviar|editar|responder|casos|analisar|nao|não|pular|ajuda|sms|taobao|teste|limpar|destravar|atender|auto|recarregar)\b/i.test(
     String(texto || '').trim(),
   );
 }
@@ -867,6 +868,51 @@ async function executar(texto, de = '') {
     await fila.concluir(at.id, 'pulado_pelo_operador');
     await ponte.promoverProximo();
     return `Atendimento de *${at.nome}* encerrado. Próximo da fila promovido.`;
+  }
+
+  // ── #analisar — o analista propõe, você decide ─────────
+  //
+  // Lê o registro, agrupa o que ainda cai no seu colo e propõe respostas
+  // prontas novas. NADA do que ele escreve entra em uso: a saída é um arquivo
+  // para você ler. O laço de aprendizado é dele; a execução continua sendo
+  // código que passou por teste.
+  if (cmd === 'analisar') {
+    const hermes = require('../hermes');
+    const r = await hermes.analisar(30);
+
+    const linhas = [
+      '🔍 *Análise dos últimos 30 dias*',
+      '',
+      `${r.problemas} mensagem(ns) do outro lado viraram decisão sua`,
+      `${r.handoffs} atendimento(s) passaram para você`,
+    ];
+    if (r.naoUsadas.length) {
+      linhas.push(`${r.naoUsadas.length} resposta(s) pronta(s) não foram usadas nenhuma vez`);
+    }
+    if (!r.comModelo) {
+      linhas.push('', '_A contagem está pronta; as sugestões não saíram desta vez._');
+    }
+
+    // O relatório vai como ARQUIVO e não no corpo da mensagem: ele contém
+    // texto do outro lado em chinês, e caractere chinês no número comercial
+    // entrega a origem igual à palavra proibida. Dentro de um anexo ele não
+    // aparece no chat, e quem abre é o operador, no computador dele.
+    const conteudo = hermes.ultimoRelatorio();
+    if (conteudo) {
+      try {
+        await sender.send(de, linhas.join('\n'), {
+          document: Buffer.from(conteudo, 'utf8').toString('base64'),
+          fileName: 'propostas.md',
+          mimetype: 'text/markdown',
+        });
+        return '';
+      } catch (err) {
+        console.error('[ponte/operador] não consegui enviar o relatório:', err.message);
+      }
+    }
+
+    linhas.push('', `_O arquivo está em \`${hermes.ARQUIVO}\`._`);
+    return linhas.join('\n');
   }
 
   // ── #casos — o que a ponte andou resolvendo ────────────
