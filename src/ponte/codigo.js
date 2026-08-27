@@ -30,29 +30,119 @@ const NAO_E_CODIGO = [
 ];
 
 /**
+ * Mensagens que NÃO pedem decisão nenhuma.
+ *
+ * São 8% do que chega — e cada uma virava uma aprovação no WhatsApp do
+ * operador, com tradução paga, esperando um #enviar ou #nao que não muda nada.
+ *
+ * Vem do estudo de 14 dias do chat: card de produto que a loja dispara sozinha,
+ * pesquisa de satisfação automática, e o "ok" que fecha uma troca já resolvida.
+ *
+ * Checado ANTES de NAO_E_CODIGO de propósito: o card de produto carrega preço
+ * (`¥8.00起`, `元`), então cairia em "problema" e viraria decisão — que é
+ * exatamente o que ele não é.
+ */
+const RUIDO = [
+  /为您推荐|亲，为您推荐/, // card de produto disparado pela loja
+  /满意吗/, // "está satisfeito com o atendimento?" — pesquisa automática
+  /^(好的?|是的?|可以|有|收到|嗯+)[。！!\s]*$/, // confirmação seca, sozinha
+];
+
+/**
+ * Senha de conta: alfanumérico com letra E dígito, sozinho na mensagem.
+ *
+ * O `密码` do pacote é o que dá certeza; aqui, solto, é inferência — e ela tem
+ * um limite conhecido: um LOGIN tem exatamente a mesma cara (`rrtt9255` é login,
+ * `z23trzqx` é senha). O que separa os dois é quem escreveu, não o formato.
+ *
+ * Como só classificamos o que VEM dele, e login é o que NÓS mandamos, na
+ * prática o alfanumérico que chega é senha. Mas por isso ela não é entregue
+ * sozinha ao cliente — vai para o operador com o texto pronto (ver
+ * ponte/index.js). Errar aqui custaria mandar um login no lugar de uma senha.
+ */
+const SENHA_SOLTA = /^\s*(?=[a-z0-9]{6,14}\s*$)(?=[a-z0-9]*[a-z])(?=[a-z0-9]*\d)([a-z0-9]+)\s*$/i;
+
+/**
+ * O pacote completo, o formato mais comum de entrega dele:
+ *
+ *   rrtt9321  密码  pdmtm5fk  耀西与不可思议的图鉴
+ *   ↑ conta         ↑ senha   ↑ nome do jogo
+ *
+ * 密码 = "senha". É o marcador que torna isto inequívoco — sem inferência
+ * nenhuma, diferente da senha solta acima.
+ *
+ * Uma mensagem pode trazer VÁRIOS pacotes (ele mandou 100 contas de uma vez em
+ * 19/08), então a extração devolve lista.
+ */
+function extrairPacotes(texto) {
+  const fora = [];
+  // Conta e senha são alfanuméricos; o que vem depois, até a próxima conta ou o
+  // fim, é o nome do jogo. `[^\s]` nos dois campos porque a Taobao separa com
+  // tabulação, não espaço.
+  const re = /([a-z0-9]{4,20})\s*密码\s*([a-z0-9]{4,20})\s*([^\n]*?)(?=[a-z0-9]{4,20}\s*密码|$)/gi;
+  let m;
+  while ((m = re.exec(texto)) !== null) {
+    fora.push({
+      conta: m[1],
+      senha: m[2],
+      jogo: (m[3] || '').trim(),
+    });
+  }
+  return fora;
+}
+
+/**
  * @typedef {object} Classificacao
- * @property {'codigo'|'problema'} tipo
+ * @property {'codigo'|'senha'|'pacote'|'ignorar'|'problema'} tipo
  * @property {string|null} codigo  o código, quando tipo==='codigo'
+ * @property {string|null} senha   a senha, quando tipo==='senha'
+ * @property {Array<{conta:string,senha:string,jogo:string}>} [pacotes]  quando tipo==='pacote'
  * @property {string} original
  */
 
 /**
  * @param {string} texto  a mensagem crua do fornecedor
  * @returns {Classificacao}
+ *
+ * A ORDEM DOS TESTES É A REGRA. Cada passo só é alcançado porque o anterior
+ * não casou, e trocar dois de lugar muda o resultado:
+ *
+ *  1. RUÍDO primeiro. O card de produto carrega `¥8.00起` e `元`, então se
+ *     NAO_E_CODIGO viesse antes ele viraria "problema" — uma decisão para o
+ *     operador sobre um anúncio que a loja disparou sozinha.
+ *  2. NAO_E_CODIGO antes de tudo que extrai. É o que impede data, horário,
+ *     preço e número de pedido de 19 dígitos de virarem código.
+ *  3. Pacote antes de senha solta. O pacote CONTÉM uma senha; sem esta ordem,
+ *     a linha inteira nunca casaria com nada e cairia em "problema".
  */
 function classificar(texto) {
   const bruto = String(texto || '').trim();
+  const base = { codigo: null, senha: null, original: bruto };
+
+  if (RUIDO.some((re) => re.test(bruto))) {
+    return { ...base, tipo: 'ignorar' };
+  }
+
+  const pacotes = extrairPacotes(bruto);
+  if (pacotes.length) {
+    return { ...base, tipo: 'pacote', pacotes };
+  }
 
   if (NAO_E_CODIGO.some((re) => re.test(bruto))) {
-    return { tipo: 'problema', codigo: null, original: bruto };
+    return { ...base, tipo: 'problema' };
   }
 
   const m = bruto.match(CODIGO_PURO);
   if (m) {
-    return { tipo: 'codigo', codigo: m[1], original: bruto };
+    return { ...base, tipo: 'codigo', codigo: m[1] };
   }
 
-  return { tipo: 'problema', codigo: null, original: bruto };
+  const s = bruto.match(SENHA_SOLTA);
+  if (s) {
+    return { ...base, tipo: 'senha', senha: s[1] };
+  }
+
+  return { ...base, tipo: 'problema' };
 }
 
 /**

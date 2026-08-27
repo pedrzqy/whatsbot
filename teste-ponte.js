@@ -95,6 +95,67 @@ t('código com texto junto vira problema', codigo.classificar('你的code是3948
 t('3 dígitos é curto demais', codigo.classificar('394').tipo === 'problema');
 t('9 dígitos é longo demais', codigo.classificar('123456789').tipo === 'problema');
 
+// ── Classificação: ruído, senha e pacote ───────────────────
+//
+// Saiu do estudo de 14 dias do chat (588 mensagens). Das 251 respostas dele,
+// só 28% eram o código de dígitos que o sistema conhecia. Os outros três tipos
+// abaixo somam 21% e caíam todos em "problema" — 8% viravam uma aprovação no
+// WhatsApp do operador sobre coisa nenhuma, e 13% eram entrega concluída
+// tratada como falha.
+bloco('classificar: ruído, senha e pacote');
+
+// A ORDEM é o projeto. Estes primeiros protegem o caso principal de ser
+// roubado pelas regras novas.
+t('código de 6 dígitos continua código', codigo.classificar('394860').tipo === 'codigo');
+t('e o de 4 também', codigo.classificar('1234').tipo === 'codigo');
+t('preço continua problema', codigo.classificar('¥8.00').tipo === 'problema');
+t('data continua problema', codigo.classificar('2026-08-14').tipo === 'problema');
+t('horário continua problema', codigo.classificar('19:39').tipo === 'problema');
+t('nº de pedido continua problema', codigo.classificar('3316356987038022191').tipo === 'problema');
+
+// Ruído: mensagem que a loja dispara sozinha. Não pede decisão de ninguém.
+t(
+  'card de produto é ruído',
+  codigo.classificar('亲，为您推荐以下商品 ns switch游戏 塞尔达传说 ¥ 8 .00起').tipo === 'ignorar',
+);
+t(
+  'pesquisa de satisfação é ruído',
+  codigo.classificar('您对客服的服务满意吗 很不满 不满 一般 满意').tipo === 'ignorar',
+);
+t('confirmação seca é ruído', codigo.classificar('好的').tipo === 'ignorar');
+// O card carrega ¥ e 元, então se NAO_E_CODIGO viesse antes ele viraria
+// "problema" — uma decisão para o operador sobre um anúncio automático.
+t(
+  'e o card com dígitos dentro NÃO vira código',
+  codigo.classificar('亲，为您推荐 销量2000+ ¥ 394860 起').tipo === 'ignorar',
+);
+// Mas a mesma palavra dentro de uma frase real é resposta, não ruído.
+t(
+  'frase que começa com 好的 não é ruído',
+  codigo.classificar('好的，您先玩其他游戏，2-4小时后在登陆').tipo !== 'ignorar',
+);
+
+// Pacote: o formato mais comum de entrega dele. 密码 = "senha" — é o marcador
+// que torna isto inequívoco, sem inferência nenhuma.
+const pac = codigo.classificar('rrtt9321\t密码\tpdmtm5fk\t耀西与不可思议的图鉴');
+t('pacote é reconhecido', pac.tipo === 'pacote', pac.tipo);
+t('  com a conta', pac.pacotes?.[0]?.conta === 'rrtt9321', pac.pacotes?.[0]?.conta);
+t('  com a senha', pac.pacotes?.[0]?.senha === 'pdmtm5fk', pac.pacotes?.[0]?.senha);
+t('  e com o jogo', /耀西/.test(pac.pacotes?.[0]?.jogo || ''), pac.pacotes?.[0]?.jogo);
+
+// Ele mandou 100 contas numa mensagem só em 19/08. A extração devolve lista.
+const varios = codigo.classificar(
+  'aass9945 密码 ujuu3wjs 数码宝贝 ffgg2184 密码 n7dbspnc 斯普拉遁',
+);
+t('vários pacotes numa mensagem', varios.pacotes?.length === 2, String(varios.pacotes?.length));
+
+// Senha solta: alfanumérico com letra E dígito. É inferência, e por isso ela
+// não é entregue sozinha ao cliente — vai ao operador com o texto pronto.
+t('senha solta é senha', codigo.classificar('z23trzqx').tipo === 'senha');
+t('  e vem extraída', codigo.classificar('3xuvwwgy').senha === '3xuvwwgy');
+t('só letras não é senha', codigo.classificar('abcdefgh').tipo === 'problema');
+t('chinês não é senha', codigo.classificar('这个账号不存在').tipo === 'problema');
+
 // ── Validar o usuário que o cliente mandou ──────────────────
 bloco('validar usuário do cliente');
 t('usuário real (rrrtsr223)', codigo.validarUsuario('rrrtsr223').valido === true);
