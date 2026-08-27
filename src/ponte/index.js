@@ -27,6 +27,7 @@ const cfg = require('./config');
 const fila = require('./fila');
 const limites = require('./limites');
 const codigo = require('./codigo');
+const repertorio = require('./repertorio');
 const tradutor = require('./tradutor');
 const janela = require('./janela');
 const midia = require('./midia');
@@ -197,28 +198,49 @@ async function pedirCodigo(from, nome, usuarioBruto, imagemPath = null) {
   return { aceito: true, mensagem: j.aberta ? j.avisoCliente : marca.assinar(j.avisoCliente) };
 }
 
-/** Cria a tarefa do braço. Sem tradução: usuário é alfanumérico. */
-async function despachar(atendimento) {
-  if (!atendimento.usuario) {
+/**
+ * Cria a tarefa do braço.
+ *
+ * Dois tipos hoje, e o mesmo caminho para os dois:
+ *
+ *   pedir_codigo         — foto + usuário. O de sempre.
+ *   responder_fornecedor — uma linha do repertório, em `textoZh`.
+ *
+ * Tudo o que vem depois — `agendadaPara` (a janela dele), `tentativas`,
+ * `aguardando_aprovacao`, `#ok`/`#nao`, `/proxima`, `/resultado`, `#destravar`
+ * — é o mesmo para os dois e não precisou de nada novo. É o motivo de a Fase 5
+ * ser pequena aqui dentro: a máquina já existia, faltava o tipo.
+ *
+ * @param {object} atendimento
+ * @param {{tipo?:string, textoZh?:string, semFoto?:boolean}} [opcoes]
+ */
+async function despachar(atendimento, opcoes = {}) {
+  const tipo = opcoes.tipo || 'pedir_codigo';
+  const respondendo = tipo === 'responder_fornecedor';
+
+  if (!respondendo && !atendimento.usuario) {
     await alertar(`⚠️ Atendimento de *${atendimento.nome}* sem usuário definido. Pulei.`);
     return;
   }
 
-  // Filtro de SAÍDA, ligado antes de haver o que filtrar.
+  // Filtro de SAÍDA, no texto que de fato vai sair.
   //
-  // Hoje o único texto que atravessa é o usuário alfanumérico, então isto não
-  // muda nada — e é exatamente por isso que é a hora de ligar. Quando a Fase 5
-  // fizer sair texto de verdade, o filtro já vai estar no caminho, testado, em
-  // vez de ser lembrado depois que um telefone de cliente tiver passado.
-  //
-  // `validarUsuario` já barra espaço, @ e acento, então uma diferença aqui
-  // significa que a validação afrouxou ou que algo entrou por outro caminho.
-  // Nesse caso não sai nada: o operador decide.
-  const saida = politica.paraFornecedor(atendimento.usuario);
-  if (saida.texto !== atendimento.usuario || saida.flags.length) {
+  // Até a Fase 4 o único texto que atravessava era o usuário alfanumérico, e o
+  // filtro foi ligado ali justamente para já estar no caminho quando saísse
+  // texto de verdade. Agora sai: `textoZh` é uma linha do repertório com o
+  // usuário ou o nome do jogo preenchidos, e é exatamente aí que um telefone ou
+  // um preço em real entrariam por descuido de quem editar o repertório.
+  const bruto = respondendo ? String(opcoes.textoZh || '') : atendimento.usuario;
+  if (!bruto.trim()) {
+    await alertar(`⚠️ Ia mandar uma resposta vazia para o outro lado. Não mandei.`);
+    return;
+  }
+
+  const saida = politica.paraFornecedor(bruto);
+  if (saida.texto !== bruto || saida.flags.length) {
     await alertar(
-      `⚠️ Não mandei o pedido de *${atendimento.nome}*: o usuário \`${atendimento.usuario}\`` +
-        ` tem dado que não pode sair daqui.\n\nConfere com ele e refaz.`,
+      `⚠️ Não mandei nada no atendimento de *${atendimento.nome}*: o texto tinha dado que não ` +
+        `pode sair daqui.\n\nConfere e refaz.`,
     );
     console.warn(`[ponte] envio barrado por política: ${saida.flags.join(', ')}`);
     return;
@@ -227,9 +249,14 @@ async function despachar(atendimento) {
   const tarefa = {
     id: proximoId(),
     atendimentoId: atendimento.id,
-    tipo: 'pedir_codigo',
+    tipo,
     usuario: atendimento.usuario,
-    imagemPath: atendimento.imagemPendente || null,
+    // `textoZh` estava no typedef desde o começo e nunca tinha sido usado.
+    textoZh: respondendo ? saida.texto : null,
+    // Resposta não leva foto: a foto é do print da tela do cliente e só faz
+    // sentido no pedido de código. Mandá-la de novo aqui seria o mesmo print
+    // pela segunda vez no chat dele.
+    imagemPath: respondendo ? null : atendimento.imagemPendente || null,
     estado: modoAtual() === 'copiloto' ? 'aguardando_aprovacao' : 'pendente',
     agendadaPara: janela.estado().proximaAbertura.getTime(),
     tentativas: 0,
@@ -237,26 +264,35 @@ async function despachar(atendimento) {
   };
 
   dados.tarefas.push(tarefa);
-  atendimento.imagemPendente = null;
+  if (!respondendo) atendimento.imagemPendente = null;
 
   // O lado do cliente no histórico. Sem os dois lados, o contexto que o
   // tradutor recebe é meia conversa — e meia conversa às vezes é pior que
   // nenhuma, porque parece completa.
-  fila.registrar(atendimento.id, 'cliente', atendimento.usuario, atendimento.usuario);
+  fila.registrar(atendimento.id, 'cliente', bruto, bruto);
 
   persistAgora();
 
   if (modoAtual() === 'copiloto') {
+    // A aprovação de uma RESPOSTA precisa dizer o que vai sair, em português.
+    // Chinês não pode aparecer aqui (sai pelo número comercial) e o operador
+    // não teria como conferir mesmo. O rótulo da linha do repertório é o que
+    // ele lê para decidir.
     await alertar(
-      `📋 *Ponte — liberar envio*\n\n` +
-        `Cliente: *${atendimento.nome}*\n` +
-        `Usuário: \`${tarefa.usuario}\`\n` +
-        `Foto: ${tarefa.imagemPath ? 'sim' : 'NÃO'}\n\n` +
-        // "ao sistema" e não a outra palavra. O limparAlerta já trocava isto na
-        // saída — dava para ver no WhatsApp — mas depender do filtro para uma
-        // string fixa que a gente escreve é usar a rede de segurança como se
-        // fosse o piso.
-        `*#ok ${tarefa.id}* para mandar ao sistema · *#nao ${tarefa.id}* para descartar`,
+      respondendo
+        ? `📋 *Ponte — liberar resposta*\n\n` +
+            `Cliente: *${atendimento.nome}*\n` +
+            `Vou responder: _${opcoes.rotulo || 'resposta do repertório'}_\n\n` +
+            `*#ok ${tarefa.id}* para mandar · *#nao ${tarefa.id}* para descartar`
+        : `📋 *Ponte — liberar envio*\n\n` +
+            `Cliente: *${atendimento.nome}*\n` +
+            `Usuário: \`${tarefa.usuario}\`\n` +
+            `Foto: ${tarefa.imagemPath ? 'sim' : 'NÃO'}\n\n` +
+            // "ao sistema" e não a outra palavra. O limparAlerta já trocava
+            // isto na saída — dava para ver no WhatsApp — mas depender do
+            // filtro para uma string fixa que a gente escreve é usar a rede de
+            // segurança como se fosse o piso.
+            `*#ok ${tarefa.id}* para mandar ao sistema · *#nao ${tarefa.id}* para descartar`,
     );
   }
 
@@ -360,6 +396,18 @@ async function receberDoFornecedor(entrada) {
     }
   }
 
+  // ── O repertório ────────────────────────────────────────
+  //
+  // Antes de traduzir e chamar uma pessoa: dá para responder isto sozinho,
+  // com uma linha que o dono escreveu e aprovou? A tentativa vem cedo porque
+  // as perguntas dele são repetitivas — "manda o usuário", "o aparelho está
+  // aí?" — e cada uma dessas virava uma decisão no WhatsApp do operador.
+  //
+  // O que decide NÃO responder é o freio de turnos: passou do teto, o
+  // ping-pong provavelmente travou, e mais uma resposta automática só afunda.
+  const respondeu = await tentarResponder(at, entrada.texto);
+  if (respondeu) return;
+
   // Não é código: é problema. Traduz só para o operador entender e decidir.
   //
   // Marcador sintético do braço ("respondeu com uma imagem") já vem em
@@ -457,6 +505,137 @@ async function receberDoFornecedor(entrada) {
       (avisos.length ? `\n\n⚠️ ${avisos.join(' ')}` : ''),
     entrada.printPath,
   );
+}
+
+/**
+ * O jogo do pedido, em chinês, para a linha `qual_jogo` do repertório.
+ *
+ * Devolve null com facilidade, e isso é o certo: sem o nome do jogo a linha
+ * não fica disponível, o repertório não casa e o operador assume. Chutar um
+ * jogo para o fornecedor é pedir a conta errada.
+ *
+ * @returns {Promise<string|null>}
+ */
+async function jogoDoPedido(atendimento) {
+  try {
+    // require aqui dentro: vendas → tools → ponte fecharia um ciclo no topo.
+    const pedidos = await require('../vendas').pedidosDoTelefone(atendimento.from);
+    const itens = pedidos[0]?.items || pedidos[0]?.order_items || [];
+    const nome = itens[0]?.product_name || itens[0]?.name || itens[0]?.product?.name;
+    if (!nome) return null;
+
+    // `tradutor.paraFornecedor` estava pronto, testado, com glossário
+    // comercial, e nunca tinha sido chamado — era a direção de ida que
+    // faltava. Aqui ele traduz UM nome de produto, não uma frase livre.
+    const { traducao, confianca } = await tradutor.paraFornecedor(nome, atendimento.historico || []);
+    const zh = String(traducao || '').trim();
+
+    // Confiança baixa não sai. Nome de jogo traduzido errado faz o fornecedor
+    // separar outro título, e isso só aparece quando o cliente reclama.
+    if (!zh || confianca === 'baixa') return null;
+    return zh;
+  } catch (err) {
+    console.warn('[ponte] não consegui identificar o jogo do pedido:', err.message);
+    return null;
+  }
+}
+
+/**
+ * Tenta responder ao fornecedor com uma linha do repertório.
+ *
+ * @returns {Promise<boolean>} true se resolveu (respondeu ou decidiu não
+ *   responder de propósito). false devolve o caso ao caminho humano.
+ *
+ * A ordem das travas é a regra:
+ *
+ *  1. O freio de turnos vem PRIMEIRO. Passou do teto, nada automático sai —
+ *     nem uma linha do repertório. Seis idas e vindas sem resolver significa
+ *     que a conversa saiu do trilho, e é aí que a resposta automática mais
+ *     atrapalha.
+ *  2. Padrão determinístico antes do modelo. O que ele já escreveu antes casa
+ *     de graça, sem token e sem alucinação.
+ *  3. Slot que não dá para preencher derruba a linha. Melhor congelar do que
+ *     mandar `{jogo}` literal.
+ *  4. `politica.paraFornecedor` na saída, dentro do despachar.
+ */
+async function tentarResponder(atendimento, textoDele) {
+  if (!cfg.repertorioLigado) return false;
+
+  // 1. O freio.
+  if ((atendimento.turnos || 0) >= cfg.fila.maxTurnos) {
+    console.log(`[ponte] ${atendimento.turnos} turnos — não respondo mais sozinho`);
+    return false;
+  }
+
+  // 2. Escolhe a linha. Padrão primeiro; o modelo só para o que sobrou.
+  let linha = repertorio.porPadrao(textoDele);
+  if (!linha) {
+    linha = await escolherComModelo(textoDele);
+    if (!linha) return false; // fora do repertório: congela e chama o operador
+  }
+
+  // Linha que existe para NÃO responder. O "稍等" dele não pede resposta —
+  // pede que o cliente saiba que está andando.
+  if (linha.resposta === null) {
+    if (linha.avisarCliente) {
+      try {
+        await sender.send(atendimento.from, linha.avisarCliente);
+      } catch (err) {
+        console.error('[ponte] não avisei o cliente:', err.message);
+      }
+    }
+    fila.registrar(atendimento.id, 'vendedor', textoDele, `(${linha.id})`);
+    console.log(`[ponte] repertório: ${linha.id} — não respondo, avisei o cliente`);
+    return true;
+  }
+
+  // 3. Preenche os marcadores. Falta um, a linha não vale.
+  const contexto = { usuario: atendimento.usuario };
+  if ((linha.precisa || []).includes('jogo')) {
+    contexto.jogo = await jogoDoPedido(atendimento);
+  }
+
+  const { texto, faltou } = repertorio.preencher(linha, contexto);
+  if (!texto) {
+    console.log(`[ponte] repertório: ${linha.id} sem ${faltou.join(', ')} — deixo para o operador`);
+    return false;
+  }
+
+  fila.registrar(atendimento.id, 'vendedor', textoDele, `(${linha.id})`);
+  await despachar(atendimento, {
+    tipo: 'responder_fornecedor',
+    textoZh: texto,
+    rotulo: linha.situacao,
+  });
+  console.log(`[ponte] repertório: respondendo com "${linha.id}"`);
+  return true;
+}
+
+/**
+ * Pergunta ao modelo qual linha do repertório descreve a mensagem dele.
+ *
+ * O modelo devolve UM NÚMERO e nada mais. Não existe caminho por onde algo
+ * gerado chegue ao fornecedor: o que sai é sempre uma linha de repertorio.js.
+ *
+ * E o prompt não recebe NADA do cliente — nem nome, nem telefone, nem e-mail,
+ * nem o pedido. Só a mensagem dele e a lista de situações. É a trava mais
+ * barata que existe: dado que não entra não vaza.
+ */
+async function escolherComModelo(textoDele) {
+  try {
+    const msg = await require('../ai').chat(
+      [{ role: 'user', content: repertorio.montarPrompt(textoDele) }],
+      { maxTokens: 2000 },
+    );
+    const linha = repertorio.lerEscolha(msg.content);
+    if (!linha) console.log('[ponte] repertório: nada casou — deixo para o operador');
+    return linha;
+  } catch (err) {
+    // Modelo fora do ar não pode virar resposta errada ao fornecedor. Sem
+    // escolha, o caso segue para o humano, que é o comportamento de sempre.
+    console.warn('[ponte] repertório: não consegui classificar:', err.message);
+    return null;
+  }
 }
 
 /** Entrega o código ao cliente, encerra a vez e chama o próximo. */
@@ -671,6 +850,9 @@ function proximaTarefa() {
     id: t.id,
     tipo: t.tipo,
     usuario: t.usuario,
+    // Só no tipo responder_fornecedor. Vai como null nos outros para o braço
+    // não ter como mandar texto num fluxo que não pede texto.
+    textoZh: t.tipo === 'responder_fornecedor' ? t.textoZh || null : null,
     imagem: t.imagemPath || null,
     tentativa: t.tentativas,
   };
@@ -923,6 +1105,7 @@ function atendimentoLigado() {
 
 module.exports = {
   modoAtual,
+  despachar,
   operadorEmTeste,
   atendimentoLigado,
   pedirCodigo,

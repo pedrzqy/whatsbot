@@ -9,7 +9,7 @@
     "start": "node src/index.js",
     "login": "node src/login.js",
     "inspecionar": "node src/inspecionar.js",
-    "teste": "node teste-marca.js && node teste-tela.js"
+    "teste": "node teste-marca.js && node teste-tela.js && node teste-tarefa.js"
   },
   "engines": {
     "node": ">=20"

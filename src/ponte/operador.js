@@ -22,6 +22,7 @@ const limites = require('./limites');
 const janela = require('./janela');
 const ponte = require('./index');
 const politica = require('./politica');
+const tradutor = require('./tradutor');
 const sender = require('../sender');
 const nerix = require('../nerix');
 const evolution = require('../evolution');
@@ -40,6 +41,7 @@ const AJUDA = [
   '*#ok <id>* — libera um envio',
   '*#enviar <id>* — manda a resposta ao cliente',
   '*#editar <id> <texto>* — corrige antes de mandar',
+  '*#responder <id> <texto>* — fala com o outro lado (escreva em português)',
   '*#nao <id>* — descarta',
   '*#limpar* — descarta o que espera aprovação',
   '*#limpar fila* — encerra TODOS os atendimentos e avisa cada cliente',
@@ -62,7 +64,7 @@ const min = (ms) => Math.round(ms / 60000);
 function ehComando(from, texto) {
   if (!cfg.ativa || !cfg.operador.numeros.length) return false;
   if (!cfg.operador.ehOperador(from)) return false;
-  return /^#(fila|status|vendas|historico|liberar|ok|enviar|editar|nao|não|pular|ajuda|sms|taobao|teste|limpar|destravar|atender|auto|recarregar)\b/i.test(
+  return /^#(fila|status|vendas|historico|liberar|ok|enviar|editar|responder|nao|não|pular|ajuda|sms|taobao|teste|limpar|destravar|atender|auto|recarregar)\b/i.test(
     String(texto || '').trim(),
   );
 }
@@ -965,6 +967,65 @@ async function executar(texto, de = '') {
       `✅ Enviado para *${ap.cliente}*. Vez encerrada, próximo promovido.` +
       (mexeu ? `\n\n_Tirei o que não podia sair. O cliente leu:_\n${final}` : '')
     );
+  }
+
+  // ── #responder <id> <texto> — fala com o outro lado ────
+  //
+  // Espelho do #enviar, com destino do outro lado. É o caminho manual para
+  // quando o repertório não cobre — e ele tem que existir, senão a única saída
+  // fora do repertório seria o operador abrir o navegador e digitar lá.
+  //
+  // O operador escreve em PORTUGUÊS. Quem traduz é o tradutor, que tem
+  // glossário comercial e estava pronto e nunca chamado nesta direção. Pedir
+  // que ele escreva em chinês seria pedir o que ele não sabe fazer, e é assim
+  // que sai um preço errado.
+  if (cmd === 'responder') {
+    if (!id) return 'Faltou o id. Use *#responder <id> <o que dizer, em português>*.';
+    if (!argumento.trim()) return `Faltou o texto. Use *#responder ${id} <o que dizer>*.`;
+
+    const ap = dados.aprovacoes.find((a) => a.id === id);
+    const at = ap ? fila.porId(ap.atendimentoId) : fila.porId(id);
+    if (!at) return `Não achei o atendimento \`${id}\`. Veja os pendentes com *#fila*.`;
+
+    // Filtro de saída ANTES de traduzir. Um telefone ou um preço em real que o
+    // operador escreveu sem pensar não pode nem chegar ao tradutor — traduzido,
+    // ele fica mais difícil de reconhecer no que sai.
+    const seguro = politica.paraFornecedor(argumento.trim());
+    if (seguro.flags.length) {
+      return (
+        `Não mandei: esse texto tem ${seguro.flags.join(', ').replace(/_/g, ' ')}.\n` +
+        `Reescreve sem isso — do outro lado ninguém pode ver dado do cliente nem preço em real.`
+      );
+    }
+
+    let zh;
+    try {
+      const r = await tradutor.paraFornecedor(seguro.texto, at.historico || []);
+      zh = String(r.traducao || '').trim();
+      if (!zh) throw new Error('tradução vazia');
+    } catch (err) {
+      console.error('[ponte/operador] tradução falhou:', err.message);
+      return 'Não consegui preparar a mensagem agora. Tenta de novo em um minuto.';
+    }
+
+    const tarefa = await ponte.despachar(at, {
+      tipo: 'responder_fornecedor',
+      textoZh: zh,
+      rotulo: seguro.texto,
+    });
+    if (!tarefa) return 'Não consegui criar o envio. Confere o *#fila*.';
+
+    // Some a aprovação: ela existia para pedir uma decisão, e a decisão foi
+    // esta. Deixá-la na lista faria o #fila continuar cobrando uma resposta já
+    // dada.
+    if (ap) {
+      dados.aprovacoes = dados.aprovacoes.filter((a) => a.id !== ap.id);
+      persistAgora();
+    }
+
+    return tarefa.estado === 'aguardando_aprovacao'
+      ? `Preparei sua resposta para *${at.nome}*. Confirma com *#ok ${tarefa.id}*.`
+      : `✅ Sua resposta vai sair no atendimento de *${at.nome}*.`;
   }
 
   // ── #nao — descarta ────────────────────────────────────

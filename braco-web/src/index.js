@@ -21,7 +21,12 @@ const http = require('http');
 const https = require('https');
 const axios = require('axios');
 const cfg = require('./config');
-const { abrir } = require('./navegador');
+// navegador.js SOB DEMANDA: ele arrasta o playwright, e o playwright só
+// existe dentro da imagem do container. Com o require no topo, o teste não
+// consegue nem carregar este arquivo na máquina de quem desenvolve -- e a
+// suite inteira deste projeto é feita para rodar sem instalar nada pesado.
+// Quem chama é só o main(), que em teste nunca roda.
+const abrir = (...a) => require('./navegador').abrir(...a);
 const { Chat, BloqueioDetectado, SeletorNaoEncontrado, NO_CHAT } = require('./chat');
 const humaniza = require('./humaniza');
 
@@ -256,6 +261,19 @@ async function executarTarefa(chat, tarefa, titulo) {
     return null; // explícito: sem marca, não há o que ler
   }
 
+  // Tipo novo: responder uma pergunta do outro lado, em vez de pedir código.
+  //
+  // A sequência é mais curta de propósito — abrir, marcar, mandar o texto. Sem
+  // foto: a foto é o print da tela do CLIENTE e só faz sentido no pedido de
+  // código; mandá-la aqui seria o mesmo print pela segunda vez no chat dele.
+  //
+  // O `default` do switch é o fluxo antigo, e não um erro: uma tarefa sem tipo
+  // é uma tarefa criada por uma versão anterior do bot, e os dois serviços são
+  // deployados separado. Ela precisa continuar saindo.
+  if (tarefa.tipo === 'responder_fornecedor') {
+    return executarResposta(chat, tarefa, titulo);
+  }
+
   await evento('info', 'executando', `usuário ${tarefa.usuario} (tentativa ${tarefa.tentativa})`);
   await chat.abrirConversa(titulo);
 
@@ -328,6 +346,47 @@ async function executarTarefa(chat, tarefa, titulo) {
   } finally {
     if (temp && fs.existsSync(temp)) fs.unlinkSync(temp);
   }
+}
+
+/**
+ * Manda UMA linha do repertório e volta.
+ *
+ * O texto vem pronto do bot: escolhido de uma lista fechada, com os campos
+ * preenchidos e já filtrado por política de saída. Aqui não se monta nada — o
+ * braço só digita o que recebeu, e é justamente isso que mantém a superfície
+ * de dano dentro do repertório.
+ *
+ * Devolve a marca como o fluxo antigo: depois de responder, a resposta DELE é
+ * o que interessa, e sem marca o braço não saberia o que já era velho.
+ */
+async function executarResposta(chat, tarefa, titulo) {
+  const texto = String(tarefa.textoZh || '').trim();
+  if (!texto) {
+    // Nada a mandar. Reportar como falha em vez de reportar sucesso: sucesso
+    // silencioso deixaria o cliente esperando as 4h do timeout por uma resposta
+    // que nunca foi digitada.
+    await evento('error', 'resposta_vazia', 'a tarefa de resposta veio sem texto');
+    await api.post('/resultado', { id: tarefa.id, ok: false, erro: 'resposta vazia', fatal: true });
+    return null;
+  }
+
+  await evento('info', 'executando', `resposta (tentativa ${tarefa.tentativa})`);
+  await chat.abrirConversa(titulo);
+
+  // MARCA antes do envio, igual ao outro fluxo: tudo além disto é resposta.
+  const marca = await chat.marca();
+
+  // Sem try/catch de "envio parcial" aqui, e é por uma diferença real: no
+  // pedido de código a foto sai antes do usuário, então uma falha no meio
+  // deixa metade enviada e repetir manda o print duas vezes. Aqui é uma
+  // mensagem só — falhar significa que nada saiu, e repetir é seguro. O erro
+  // sobe e o laço de fora trata como qualquer outro.
+  await chat.enviarTexto(texto);
+  humaniza.registrarEnvio();
+
+  await api.post('/resultado', { id: tarefa.id, ok: true });
+  await evento('info', 'respondido', `corte ${marca.ate || 'sem data'}`);
+  return marca;
 }
 
 async function lerRespostas(chat, marca) {
@@ -840,7 +899,16 @@ async function main() {
   console.log('[braço] encerrado.');
 }
 
-main().catch((e) => {
-  console.error('[fatal]', e);
-  process.exit(1);
-});
+// Só sobe o braço quando ESTE arquivo é o programa.
+//
+// O entrypoint roda `node src/index.js`, então em produção nada muda. O que
+// muda é que o teste consegue requerer o módulo para exercitar executarTarefa
+// sem abrir um navegador — antes, um require aqui subia o braço inteiro.
+if (require.main === module) {
+  main().catch((e) => {
+    console.error('[fatal]', e);
+    process.exit(1);
+  });
+}
+
+module.exports = { executarTarefa, executarResposta };

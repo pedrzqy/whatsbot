@@ -48,6 +48,18 @@ module.exports = {
     maxTurnos: num(process.env.PONTE_MAX_TURNOS, 6),
   },
 
+  // Responder ao outro lado sozinho, escolhendo uma linha do repertório.
+  //
+  // Nasce DESLIGADO, e a decisão é essa mesmo: é a única parte do sistema que
+  // escreve para fora sem uma pessoa ter lido. Ligar é uma variável no painel,
+  // desligar também — e desligado o comportamento é o de sempre, tudo vira
+  // decisão do operador.
+  //
+  // Mesmo ligado, no modo copiloto (o padrão) cada resposta ainda espera um
+  // #ok: são duas chaves diferentes, e as duas precisam estar abertas para
+  // algo sair sem gente.
+  repertorioLigado: process.env.PONTE_REPERTORIO === 'true',
+
   limites: {
     // Camada 1 — anti-flood por cliente.
     clientePorHora: num(process.env.PONTE_LIM_CLIENTE_HORA, 5),
