@@ -220,11 +220,21 @@ const ai = require('./src/ai');
   bloco('a chamada de verdade, com o fetch dublado');
 
   process.env.ANTHROPIC_API_KEY = 'chave-de-mentira';
+
+  // UM duble so para o arquivo inteiro, com o comportamento trocavel.
+  //
+  // O SDK da Anthropic captura o `fetch` no momento em que o cliente e criado,
+  // e o cliente e criado uma vez so. Instalar um duble novo depois disso nao
+  // alcanca nada: as chamadas continuam indo para o primeiro, e o bloco seguinte
+  // media o array errado -- que foi exatamente o que aconteceu aqui.
   const fetchReal = globalThis.fetch;
+  let responder = null;
+  globalThis.fetch = async (url, init) => responder(url, init);
+
   const requisicoes = [];
   let rodada = 0;
 
-  globalThis.fetch = async (url, init) => {
+  responder = async (url, init) => {
     const corpo = JSON.parse(init.body);
     requisicoes.push({ url: String(url), corpo, headers: init.headers });
     rodada += 1;
@@ -261,7 +271,6 @@ const ai = require('./src/ai');
   const resposta = await ai.reply('5541900002222', 'quanto custa zelda?', 'Ana');
 
   nerixE2E.listProducts = listProdutosReal;
-  globalThis.fetch = fetchReal;
 
   t('a resposta chega ao cliente', resposta === 'O Zelda ta R$ 49,90 👍', resposta);
   t('  e foram duas voltas (ferramenta + resposta)', requisicoes.length === 2, String(requisicoes.length));
@@ -314,6 +323,177 @@ const ai = require('./src/ai');
     hist.slice(0, 120) || '(vazio)');
 
   delete process.env.ANTHROPIC_API_KEY;
+
+  // ── O cliente manda foto: o modelo ENXERGA ─────────────────
+  //
+  // Antes a imagem só existia para a ponte — o modelo nunca via nada. O cliente
+  // printava a tela de erro, a IA respondia no escuro e transferia para o
+  // operador: um atendimento inteiro gasto num dado que estava ali.
+  bloco('a foto chega ao modelo');
+
+  const PIXEL =
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+  const comFoto = claude.converterMensagens([
+    { role: 'system', content: 'sys' },
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: '(cliente: Ana)\nolha o erro que deu' },
+        { type: 'image_url', image_url: { url: `data:image/png;base64,${PIXEL}` } },
+      ],
+    },
+  ]);
+
+  const blocos = comFoto.messages[0].content;
+  t('o turno do cliente vira blocos', Array.isArray(blocos), typeof blocos);
+  t('  com o texto', blocos?.[0]?.type === 'text' && /olha o erro/.test(blocos[0].text),
+    JSON.stringify(blocos?.[0]).slice(0, 60));
+  t('  e a imagem no formato da Anthropic',
+    blocos?.[1]?.type === 'image' && blocos[1].source?.type === 'base64',
+    JSON.stringify(blocos?.[1]?.source?.media_type));
+  t('  com o media_type lido do data URI', blocos?.[1]?.source?.media_type === 'image/png',
+    blocos?.[1]?.source?.media_type);
+  t('  e o base64 sem o prefixo', blocos?.[1]?.source?.data === PIXEL,
+    String(blocos?.[1]?.source?.data).slice(0, 20));
+
+  // Sem esta conversão, String(content) num array daria "[object Object]" — o
+  // modelo receberia isso como a mensagem do cliente e responderia a respeito.
+  t('nunca vira "[object Object]"',
+    !JSON.stringify(comFoto.messages).includes('object Object'),
+    JSON.stringify(comFoto.messages).slice(0, 80));
+
+  // Link externo NÃO passa: a única fonte de imagem aqui é o download que o
+  // próprio bot fez, e buscar URL de fora seria outra coisa.
+  const comLinkExterno = claude.converterMensagens([
+    { role: 'system', content: 'sys' },
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: 'olha' },
+        { type: 'image_url', image_url: { url: 'https://algum-site.com/foto.png' } },
+      ],
+    },
+  ]);
+  t('link externo de imagem é descartado',
+    !JSON.stringify(comLinkExterno.messages).includes('algum-site'),
+    JSON.stringify(comLinkExterno.messages));
+  t('  mas o texto do cliente sobrevive',
+    comLinkExterno.messages[0].content.some((b) => b.type === 'text'));
+
+  // ── A foto NÃO pode ficar no histórico em disco ──
+  //
+  // Foto de celular em base64 passa de 500 KB. Guardada, ela seria REENVIADA em
+  // toda mensagem seguinte daquele contato, depois do trecho cacheado, no preço
+  // cheio. Uma conversa de cinco turnos custaria cinco fotos.
+  bloco('a foto não fica no histórico');
+
+  const aiFoto = require('./src/ai');
+  aiFoto.clearHistory('5541977770001');
+
+  process.env.ANTHROPIC_API_KEY = 'chave-de-mentira';
+  const corposEnviados = [];
+  responder = async (url, init) => {
+    corposEnviados.push(JSON.parse(init.body));
+    return new Response(
+      JSON.stringify({
+        id: 'm', type: 'message', role: 'assistant', model: 'claude-opus-5',
+        content: [{ type: 'text', text: 'Vi aqui, e um erro de ativacao 👍' }],
+        stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 5 },
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
+  };
+
+  await aiFoto.reply('5541977770001', 'olha o erro', 'Ana', {
+    imagemBase64: { base64: PIXEL, mimetype: 'image/png' },
+  });
+  // Segunda mensagem, sem foto: é aqui que o custo se repetiria.
+  await aiFoto.reply('5541977770001', 'e agora?', 'Ana');
+  delete process.env.ANTHROPIC_API_KEY;
+
+  t('a 1ª chamada leva a foto',
+    JSON.stringify(corposEnviados[0]).includes(PIXEL), 'foto enviada');
+  t('a 2ª chamada NÃO releva a foto',
+    !JSON.stringify(corposEnviados[1]).includes(PIXEL),
+    corposEnviados[1] ? 'sem a foto' : 'nao houve 2a chamada');
+  t('  mas o modelo lembra que houve uma',
+    /mandou uma foto/.test(JSON.stringify(corposEnviados[1])),
+    JSON.stringify(corposEnviados[1]?.messages?.[0]).slice(0, 90));
+
+  const histFoto = require('path').join(process.env.PONTE_DATA_DIR, 'histories.json');
+  const conteudoHist = require('fs').existsSync(histFoto)
+    ? require('fs').readFileSync(histFoto, 'utf8') : '';
+  t('e o disco não guarda o base64', !conteudoHist.includes(PIXEL),
+    `${Math.round(conteudoHist.length / 1024)} KB de histórico`);
+
+  // ── Áudio vira texto ───────────────────────────────────────
+  //
+  // audioMessage não era extraído em lugar nenhum: `text` chegava vazio e o
+  // cliente falava com uma parede. Com a IA ligada era pior — o bot mandava ao
+  // modelo "(o cliente mandou uma foto sem escrever nada)" e a IA respondia
+  // sobre uma foto que não existe.
+  bloco('áudio vira texto');
+
+  const transcricao = require('./src/transcricao');
+
+  t('sem chave configurada, não tenta', transcricao.disponivel() === false);
+  const semChaveAudio = await transcricao.transcrever('AAAA', 'audio/ogg', 5);
+  t('  e devolve motivo em vez de estourar', semChaveAudio.motivo === 'sem_chave',
+    JSON.stringify(semChaveAudio));
+
+  process.env.TRANSCRICAO_API_KEY = 'chave-falsa';
+  t('com chave, fica disponível', transcricao.disponivel() === true);
+
+  // Áudio comprido nem é baixado: a duração já vem no webhook, e baixar para
+  // descartar é pagar o download à toa.
+  const comprido = await transcricao.transcrever('AAAA', 'audio/ogg', 9999);
+  t('áudio comprido é recusado antes de sair', comprido.motivo === 'longo_demais',
+    JSON.stringify(comprido));
+
+  const respondedorAntes = responder;
+  let enviadoAoWhisper = null;
+  responder = async (url, init) => {
+    enviadoAoWhisper = { url: String(url), form: init.body };
+    return new Response(JSON.stringify({ text: 'oi, comprei ontem e nao chegou' }), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    });
+  };
+  const ouvido = await transcricao.transcrever(
+    Buffer.from('audio-de-mentira').toString('base64'), 'audio/ogg; codecs=opus', 6,
+  );
+  responder = respondedorAntes;
+
+  t('transcreve', ouvido.texto === 'oi, comprei ontem e nao chegou', ouvido.texto);
+  t('  usando a chave que já está paga na cascata',
+    /groq\.com/.test(enviadoAoWhisper?.url || ''), enviadoAoWhisper?.url);
+  // O nome do arquivo importa: o Whisper decide o decodificador pela extensão,
+  // e o áudio do WhatsApp é sempre opus dentro de ogg.
+  const arquivo = enviadoAoWhisper?.form?.get('file');
+  t('  com a extensão certa no nome', String(arquivo?.name || '').endsWith('.ogg'), arquivo?.name);
+  t('  e em português fixo', enviadoAoWhisper?.form?.get('language') === 'pt');
+
+  // API fora do ar não pode virar exceção: exceção não tem saída, o motivo tem.
+  responder = async () => new Response('rate limited', { status: 429 });
+  const recusado = await transcricao.transcrever(Buffer.from('x').toString('base64'), 'audio/ogg', 3);
+  responder = respondedorAntes;
+  t('API recusando não estoura', recusado.texto === null && recusado.motivo === 'api_recusou',
+    JSON.stringify(recusado));
+
+  // O que o cliente lê quando não deu para ouvir. Ele precisa saber o que
+  // fazer — cair no menu com "não entendi" depois de um áudio faz ele achar
+  // que o bot ignorou.
+  for (const motivo of ['sem_chave', 'longo_demais', 'api_recusou', 'falhou']) {
+    const d = transcricao.desculpa(motivo);
+    t(`a desculpa de "${motivo}" pede por escrito`, /escrev|palavras/i.test(d), d);
+    // A lista de vocabulario proibido vem do politica.js, que e a fonte unica.
+    t(`  e não admite defeito nem entrega a origem`,
+      !/erro|falha|sistema|problema/i.test(d) &&
+        !/fornecedor|taobao|vendedor/i.test(d) &&
+        !require('./src/ponte/politica').vocabularioProibido().test(d),
+      d);
+  }
+  delete process.env.TRANSCRICAO_API_KEY;
 
   // ── Sem chave, o módulo se desliga ────────────────────────
   //

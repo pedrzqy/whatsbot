@@ -298,10 +298,16 @@ function onIncomingMessage(msg) {
 }
 
 async function handleMessage(msg) {
-  const { from, text, pushName, imagem } = msg;
+  const { from, text, pushName, imagem, imagemBase64, veioDeAudio } = msg;
   const trimmed = (text || '').trim();
   const lower = trimmed.toLowerCase();
-  console.log(`[msg] de ${from} (${pushName || '?'}): ${trimmed}${imagem ? ' [+foto]' : ''}`);
+  // O log diz de ONDE veio o texto. Transcricao erra, e quando algo sai
+  // estranho a primeira pergunta e sempre "o cliente disse isso mesmo?" -- sem
+  // esta marca nao ha como saber que a frase veio de um audio.
+  console.log(
+    `[msg] de ${from} (${pushName || '?'}): ${trimmed}` +
+      `${imagem || imagemBase64 ? ' [+foto]' : ''}${veioDeAudio ? ' [audio]' : ''}`,
+  );
 
   // ─── 0) Comandos do operador da ponte (só do número configurado) ───
   // Vem antes de tudo: quando a Taobao pede verificação, o operador precisa
@@ -557,7 +563,7 @@ async function handleMessage(msg) {
   }
   // Foto sem legenda ainda é mensagem: o cliente manda a imagem do produto e
   // pergunta depois.
-  if (!trimmed && !imagem) return;
+  if (!trimmed && !imagem && !imagemBase64) return;
 
   // ─── 3.2) Código do pedido + e-mail na mensagem → consulta DIRETA ───
   //
@@ -598,7 +604,7 @@ async function handleMessage(msg) {
   // IA só quando ligada de propósito (BOT_IA=true).
   try {
     const texto = trimmed || '(o cliente mandou uma foto sem escrever nada)';
-    const answer = await ai.reply(from, texto, pushName, { imagem });
+    const answer = await ai.reply(from, texto, pushName, { imagem, imagemBase64 });
     await sender.send(from, answer);
   } catch (err) {
     console.error('[ai] erro ao responder:', err.response?.data || err.message);

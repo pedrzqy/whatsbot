@@ -10,6 +10,7 @@ const sender = require('./sender');
 const ponte = require('./ponte');
 const vendas = require('./vendas');
 const bracoRouter = require('./ponte/braco');
+const transcricao = require('./transcricao');
 
 const app = express();
 // 12mb: a foto do cliente chega em base64 pela rota do braço, e base64 infla ~33%.
@@ -91,23 +92,76 @@ app.post('/webhooks/evolution', async (req, res) => {
     }
 
     // IMAGEM (só no 1-a-1, depois do desvio de grupos): a Evolution entrega
-    // apenas os metadados no webhook e o binário é baixado sob demanda. Só
-    // baixamos com a ponte ativa — não vale pagar o download em toda foto que
-    // chega no atendimento normal de vendas.
+    // apenas os metadados no webhook e o binário é baixado sob demanda.
+    //
+    // Baixa quando a ponte está ativa (o print da tela do cliente) OU quando a
+    // IA está ligada (ela ENXERGA a imagem). Antes era só a ponte, e o efeito
+    // era o modelo cego: o cliente printava a tela de erro do Steam, a IA
+    // respondia no escuro e transferia para o operador — um atendimento inteiro
+    // gasto num dado que estava ali e ninguém olhou.
     let imagem = null;
-    if (message.imageMessage && ponte.ativa()) {
+    let imagemBase64 = null;
+    if (message.imageMessage && (ponte.ativa() || config.iaLigada)) {
       try {
         const midia = await evolution.getBase64FromMediaMessage(data);
-        imagem = await ponte.salvarImagem(midia.base64, midia.mimetype);
+        // O caminho em disco é o que a ponte manda para o outro lado; o base64
+        // é o que o modelo enxerga. São usos diferentes do mesmo download.
+        if (ponte.ativa()) imagem = await ponte.salvarImagem(midia.base64, midia.mimetype);
+        if (config.iaLigada) {
+          imagemBase64 = { base64: midia.base64, mimetype: midia.mimetype || 'image/jpeg' };
+        }
       } catch (err) {
         console.error('[webhooks/evolution] falha ao baixar imagem:', err.response?.status || err.message);
       }
     }
 
+    // ÁUDIO. Este formato não era extraído em lugar nenhum: `text` chegava
+    // vazio e o cliente falava com uma parede. Transcrever aqui, na porta, faz
+    // o áudio virar uma mensagem de texto comum — e todo o resto do bot (menu,
+    // ponte, IA, recepção) funciona sem saber que houve áudio.
+    let textoFinal = text;
+    let audioFalhou = null;
+    const audio = message.audioMessage;
+    if (!textoFinal && audio) {
+      if (!transcricao.disponivel()) {
+        audioFalhou = 'sem_chave';
+      } else if (audio.seconds && audio.seconds > transcricao.MAX_SEGUNDOS) {
+        // Nem baixa: a duração já vem no webhook, e baixar para descartar é
+        // pagar o download à toa.
+        audioFalhou = 'longo_demais';
+      } else {
+        try {
+          const midia = await evolution.getBase64FromMediaMessage(data);
+          const r = await transcricao.transcrever(midia.base64, midia.mimetype, audio.seconds);
+          if (r.texto) textoFinal = r.texto;
+          else audioFalhou = r.motivo;
+        } catch (err) {
+          console.error('[webhooks/evolution] falha ao baixar áudio:', err.response?.status || err.message);
+          audioFalhou = 'falhou';
+        }
+      }
+    }
+
+    const de = (key.remoteJid || '').replace('@s.whatsapp.net', '');
+
+    // Não deu para ouvir: o cliente precisa saber, e precisa saber o que fazer.
+    // Cair no menu com "não entendi" depois de um áudio é o pior desfecho —
+    // ele acha que o bot ignorou.
+    if (audioFalhou) {
+      console.warn(`[webhooks/evolution] áudio de ${de} não virou texto: ${audioFalhou}`);
+      await sender.send(de, transcricao.desculpa(audioFalhou)).catch(() => {});
+      return;
+    }
+
     await handlers.onIncomingMessage({
-      from: (key.remoteJid || '').replace('@s.whatsapp.net', ''),
-      text,
+      from: de,
+      text: textoFinal,
       imagem,
+      imagemBase64,
+      // Marca que a mensagem NASCEU como áudio. O bot responde por escrito de
+      // qualquer jeito, mas quem lê o log precisa saber de onde veio o texto —
+      // transcrição erra, e "o cliente disse isso?" é a primeira pergunta.
+      veioDeAudio: Boolean(audio),
       pushName: data.pushName,
       raw: body,
     });

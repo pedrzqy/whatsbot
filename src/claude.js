@@ -227,6 +227,36 @@ function converterMensagens(entrada) {
       continue;
     }
 
+    // Turno do cliente. Pode ser texto puro ou texto + foto.
+    //
+    // A foto chega no formato OpenAI (`image_url` com data URI), que é o do
+    // resto do bot, e vira o bloco `image` da Anthropic aqui — é o mesmo
+    // trabalho de borda que as ferramentas já fazem. Sem esta conversão, um
+    // `String(m.content)` num array daria "[object Object]": o modelo receberia
+    // isso como a mensagem do cliente e responderia a respeito.
+    if (Array.isArray(m.content)) {
+      const blocos = [];
+      for (const b of m.content) {
+        if (b.type === 'text' && String(b.text || '').trim()) {
+          blocos.push({ type: 'text', text: b.text });
+        } else if (b.type === 'image_url') {
+          const url = String(b.image_url?.url || '');
+          const casou = url.match(/^data:([^;]+);base64,(.+)$/s);
+          // Só data URI. Link externo seria a Anthropic buscando uma URL que
+          // veio de fora — e aqui a única fonte de imagem é o download que o
+          // próprio bot fez da Evolution.
+          if (casou) {
+            blocos.push({
+              type: 'image',
+              source: { type: 'base64', media_type: casou[1], data: casou[2] },
+            });
+          }
+        }
+      }
+      if (blocos.length) fora.push({ role: 'user', content: blocos });
+      continue;
+    }
+
     const texto = String(m.content || '').trim();
     if (texto) fora.push({ role: 'user', content: texto });
   }

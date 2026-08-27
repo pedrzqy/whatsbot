@@ -142,9 +142,33 @@ function pushHistory(from, novas) {
     // O começo é onde estão status, valor e chave; o resto é cauda.
     if (m.role === 'tool' && typeof m.content === 'string' && m.content.length > TOOL_NO_HISTORICO) {
       entry.messages.push({ ...m, content: m.content.slice(0, TOOL_NO_HISTORICO) + '…' });
-    } else {
-      entry.messages.push(m);
+      continue;
     }
+
+    // A FOTO não fica no histórico, só a lembrança de que ela existiu.
+    //
+    // Uma foto de celular em base64 passa de 500 KB. Guardá-la significaria
+    // gravar isso no histories.json e REENVIAR em toda mensagem seguinte
+    // daquele contato — depois do trecho cacheado, no preço cheio, para o
+    // modelo reexaminar uma imagem que ele já descreveu. Uma conversa de cinco
+    // turnos custaria o preço de cinco fotos.
+    //
+    // O marcador preserva o que importa: o modelo continua sabendo que houve
+    // uma foto e o que ele concluiu dela está na resposta que veio depois.
+    if (Array.isArray(m.content)) {
+      const texto = m.content
+        .filter((b) => b.type === 'text')
+        .map((b) => b.text)
+        .join('\n');
+      const temFoto = m.content.some((b) => b.type === 'image_url' || b.type === 'image');
+      entry.messages.push({
+        ...m,
+        content: texto + (temFoto ? '\n[o cliente mandou uma foto aqui]' : ''),
+      });
+      continue;
+    }
+
+    entry.messages.push(m);
   }
 
   entry.messages = podarTurnos(entry.messages, config.llm.maxHistory);
@@ -244,6 +268,13 @@ async function buildSystemPrompt() {
     `- EMPURRE o combo sempre que o cliente quiser 2+ jogos: mostre a economia e mande o link.\n` +
     `CONSOLE (Switch 1 x Switch 2): respeite o console que o cliente disser. Jogo de Switch 2 NÃO roda no Switch 1 — ` +
     `NÃO ofereça jogo/combo de Switch 2 pra quem falou Switch 1 (e vice-versa). Na dúvida, pergunte qual console ele tem.\n\n` +
+
+    `FOTO: o cliente pode mandar print de tela (erro de ativação, tela de login, comprovante). Você ENXERGA a ` +
+    `imagem — leia o que está escrito nela e use, sem pedir para ele digitar o que já dá para ver. Se a foto ` +
+    `estiver ilegível ou não tiver a ver com a conversa, diga e peça outra. Nunca invente o que não conseguiu ler.\n\n` +
+
+    `ÁUDIO: mensagem de voz do cliente chega aqui já em texto. Ela pode ter erro de transcrição — se a frase não ` +
+    `fizer sentido, confirme o que ele quis dizer em vez de responder ao pé da letra. Responda sempre por escrito.\n\n` +
 
     `FORMATAÇÃO WhatsApp — mantenha LEVE e natural, NÃO carregado: negrito é UM asterisco só (*assim*), NUNCA dois ` +
     `(**assim** aparece quebrado no WhatsApp). Use com PARCIMÔNIA (só no ponto mais importante, tipo o preço). ` +
@@ -405,10 +436,30 @@ async function reply(from, userText, pushName, extra = {}) {
   const system = await buildSystemPrompt();
   const history = getHistory(from);
 
+  // A foto do cliente entra no turno DELE, não como um dado à parte.
+  //
+  // Antes a imagem só existia para a ponte: o modelo nunca via nada. O cliente
+  // printava a tela de erro do Steam, a IA respondia no escuro e transferia
+  // para o operador — um atendimento inteiro gasto num dado que estava ali.
+  //
+  // Formato OpenAI (`image_url` com data URI) porque é o do resto do arquivo: o
+  // claude.js converte na borda dele, e a cascata entende este formato direto.
+  const marca = marcaDoCliente(contact?.name || pushName);
+  const img = extra.imagemBase64;
+  const conteudoDoTurno = img
+    ? [
+        { type: 'text', text: marca + userText },
+        {
+          type: 'image_url',
+          image_url: { url: `data:${img.mimetype || 'image/jpeg'};base64,${img.base64}` },
+        },
+      ]
+    : marca + userText;
+
   const messages = [
     { role: 'system', content: system },
     ...history,
-    { role: 'user', content: marcaDoCliente(contact?.name || pushName) + userText },
+    { role: 'user', content: conteudoDoTurno },
   ];
 
   // Onde a troca DESTE turno começa. É o que vai para o histórico no fim:
