@@ -74,41 +74,28 @@ const config = {
     codeUrl: process.env.STORE_CODE_URL || 'https://codigons.online/',
   },
 
-  // ── LLM: COMBO de provedores em CASCATA (todos compatíveis com OpenAI) ──
-  // Ordem = melhor qualidade/velocidade primeiro; rede de segurança por último.
-  // Se um trava (rate limit / erro), cai automaticamente no próximo. Só entram os que têm chave.
-  // (Nomes GROQ_*/FALLBACK_* antigos mantidos por compatibilidade.)
+  // ── O modelo ───────────────────────────────────────────
+  //
+  // Havia aqui uma CASCATA de seis provedores (Gemini, Cerebras, Groq, Mistral,
+  // Cohere, OpenRouter) como rede de seguranca. Foi removida: na pratica ela era
+  // o contrario de uma rede -- cada provedor fora do ar custava ate 40 SEGUNDOS
+  // de "digitando..." antes de o proximo ser tentado, e o log de producao
+  // mostrava dois deles ja mortos (503 e 402, cota vencida). O cliente esperava
+  // minutos para receber o que o menu entrega na hora.
+  //
+  // A rede de verdade e o menu. O que sobrou aqui e o que nao depende de
+  // provedor: tamanho do historico, teto de tokens e o prazo.
+  //
+  // As chaves GEMINI_API_KEY e companhia podem sair do Environment -- MENOS a
+  // da Groq, que o transcricao.js ainda usa para o audio do cliente virar
+  // texto. Isso e Whisper, nao e chat, e nao tem nada a ver com a cascata.
   llm: {
-    temperature: Number(process.env.LLM_TEMPERATURE || 0.6),
     maxTokens: Number(process.env.LLM_MAX_TOKENS || 600),
     // Nº de trocas (usuário+assistente) mantidas no histórico por contato.
     maxHistory: Number(process.env.LLM_MAX_HISTORY || 4),
-    // Prazo TOTAL para a IA responder, contando a cascata inteira e as idas e
-    // vindas de ferramenta.
-    //
-    // Sem ele: 6 provedores × 40s de timeout × até 4 passos de ferramenta. No
-    // pior caso o cliente fica olhando "digitando..." por MINUTOS e desiste —
-    // e ninguém nunca saberia, porque nada nesse caminho registra desistência.
+    // Prazo TOTAL para a IA responder, contando as idas e vindas de ferramenta.
     // Estourado, o atendimento cai no menu, que responde na hora.
     deadlineMs: Number(process.env.LLM_DEADLINE_MS || 25000),
-    providers: [
-      llmProvider('Gemini',
-        process.env.GEMINI_API_URL || 'https://generativelanguage.googleapis.com/v1beta/openai',
-        process.env.GEMINI_API_KEY || process.env.GROQ_API_KEY,
-        process.env.GEMINI_MODEL || 'gemini-flash-latest',
-        process.env.GEMINI_REASONING_EFFORT ?? process.env.GROQ_REASONING_EFFORT ?? 'none'),
-      llmProvider('Cerebras', 'https://api.cerebras.ai/v1',
-        process.env.CEREBRAS_API_KEY, process.env.CEREBRAS_MODEL || 'gpt-oss-120b'),
-      llmProvider('Groq', 'https://api.groq.com/openai/v1',
-        process.env.GROQ_FALLBACK_API_KEY || process.env.FALLBACK_API_KEY,
-        process.env.GROQ_FALLBACK_MODEL || process.env.FALLBACK_MODEL || 'llama-3.1-8b-instant'),
-      llmProvider('Mistral', 'https://api.mistral.ai/v1',
-        process.env.MISTRAL_API_KEY, process.env.MISTRAL_MODEL || 'mistral-small-latest'),
-      llmProvider('Cohere', 'https://api.cohere.ai/compatibility/v1',
-        process.env.COHERE_API_KEY, process.env.COHERE_MODEL || 'command-r-08-2024'),
-      llmProvider('OpenRouter', 'https://openrouter.ai/api/v1',
-        process.env.OPENROUTER_API_KEY, process.env.OPENROUTER_MODEL || 'tencent/hy3:free'),
-    ].filter(Boolean),
   },
 
   webhook: {

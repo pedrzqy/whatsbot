@@ -147,7 +147,8 @@ servidor e **Deploy** depois:
 
 | Variável | Para quê |
 |---|---|
-| `ANTHROPIC_API_KEY` | A chave da IA. Sem ela o atendimento não quebra: continua funcionando pela configuração reserva. |
+| `ANTHROPIC_API_KEY` | A chave da IA. **Sem ela a conversa livre não funciona** e o cliente recebe o menu — que responde na hora e resolve a maior parte. |
+| `GROQ_FALLBACK_API_KEY` | Só para o áudio virar texto. Não apague: sem ela, quem manda mensagem de voz deixa de ser entendido. |
 | `NERIX_API_KEY` | A chave da loja. |
 | `EVOLUTION_API_KEY` | A chave do WhatsApp. |
 | `ATENDENTE_INICIO_HORA` / `ATENDENTE_FIM_HORA` | Seu horário. O atendimento roda 24h de qualquer jeito; isso só muda o que ele **promete** — fora do horário ele diz quando você responde, em vez de "em instantes". |

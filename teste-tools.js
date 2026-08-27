@@ -29,34 +29,26 @@ process.env.PONTE_OPERADOR_NUMERO = '5541999999999';
 process.env.PONTE_BRACO_KEY = 'teste';
 process.env.PONTE_DATA_DIR = require('path').join(require('os').tmpdir(), 'phaze-teste-tools');
 
-// Duas chaves FALSAS só para existirem dois provedores na cascata. Sem chave
-// nenhuma a lista de provedores nasce vazia e o teste do prazo não teria o que
-// exercitar — ele passaria por não chamar ninguém, que é o desfecho errado
-// pelo motivo errado.
-process.env.GEMINI_API_KEY = 'teste-falso-1';
-process.env.CEREBRAS_API_KEY = 'teste-falso-2';
-
+// Duble do fetch, instalado ANTES de requerer o ai.js.
+//
+// A cascata de seis provedores foi removida -- ela custava ate 40s por provedor
+// fora do ar, e o log de producao mostrava dois ja mortos (503 e 402). Sobrou
+// uma camada so (Claude) e o menu embaixo, entao o que se testa aqui e o PRAZO:
+// que ele desiste na hora certa em vez de deixar o cliente esperando.
 const fs = require('fs');
 fs.rmSync(process.env.PONTE_DATA_DIR, { recursive: true, force: true });
 
-// Dublê do cliente HTTP do ai.js, instalado ANTES de requerer o módulo: os
-// clientes axios são criados uma vez, na carga. Registra o que cada tentativa
-// recebeu (é assim que se confere o timeout por tentativa) e falha sempre, para
-// a cascata andar até o fim.
-const axiosMod = require('axios');
-const postagens = [];
-const criarReal = axiosMod.create;
-axiosMod.create = () => ({
-  post: async (url, body, opts) => {
-    postagens.push({ url, body, opts });
-    const e = new Error('provedor de mentira');
-    e.response = { status: 503 };
-    throw e;
-  },
-});
+process.env.ANTHROPIC_API_KEY = 'chave-de-mentira';
+const chamadasAoModelo = [];
+const fetchReal = globalThis.fetch;
+globalThis.fetch = async (url, init) => {
+  chamadasAoModelo.push({ url: String(url), init });
+  return new Response(JSON.stringify({ type: 'error', error: { message: 'fora do ar' } }), {
+    status: 503,
+    headers: { 'content-type': 'application/json' },
+  });
+};
 require('./src/ai');
-axiosMod.create = criarReal;
-const totalProvedores = require('./src/config').llm.providers.length;
 
 const nerix = require('./src/nerix');
 const tools = require('./src/tools');
@@ -836,42 +828,64 @@ nerix.checkPayment = async (codigo) => {
   // 6 provedores × 40s de timeout × 4 passos de ferramenta = minutos de
   // "digitando..." antes de o cliente receber qualquer coisa. E nenhum desses
   // minutos aparece em lugar nenhum: quem desiste é o cliente, calado.
-  bloco('a IA desiste no prazo, não em minutos');
+  bloco('a IA desiste no prazo, nao em minutos');
 
   const ai = require('./src/ai');
-  t('há provedor configurado para o teste', postagens !== null);
 
-  // Prazo já vencido: nem tenta. É o caso do último passo de ferramenta, que
-  // começa quando o orçamento de tempo já acabou.
-  postagens.length = 0;
+  // Prazo ja vencido: NEM TENTA. E o caso do ultimo passo de ferramenta, que
+  // comeca quando o orcamento de tempo ja acabou -- e uma tentativa que vai
+  // levar 40s para dar no mesmo lugar (o menu) e so espera somada.
+  chamadasAoModelo.length = 0;
   let erroPrazo = null;
   try {
     await ai.chat([{ role: 'user', content: 'oi' }], { deadline: Date.now() - 1 });
   } catch (err) {
     erroPrazo = err;
   }
-  t('prazo vencido nem chama o provedor', postagens.length === 0, String(postagens.length));
+  t('prazo vencido nem chama o modelo', chamadasAoModelo.length === 0,
+    String(chamadasAoModelo.length));
   t('  e o erro diz que foi prazo', erroPrazo?.prazoEsgotado === true, erroPrazo?.name);
 
-  // Prazo curto: o timeout de CADA tentativa encolhe para caber. Sem isto, o
-  // último provedor da cascata começaria uma tentativa de 40s faltando 2s.
-  postagens.length = 0;
-  try {
-    await ai.chat([{ role: 'user', content: 'oi' }], { deadline: Date.now() + 5000 });
-  } catch { /* todos os dublês falham de propósito */ }
-  t('tentou os provedores', postagens.length >= 1, String(postagens.length));
-  t('  com o timeout encurtado para caber no prazo',
-    postagens.every((p) => (p.opts?.timeout ?? 40000) <= 5000),
-    JSON.stringify(postagens.map((p) => p.opts?.timeout)));
-
-  // E a cascata continua sendo cascata: com prazo folgado, um provedor que cai
-  // passa a vez para o próximo.
-  postagens.length = 0;
+  // Com prazo, tenta -- e UMA vez so.
+  //
+  // E a trava que este bloco existe para manter: modelo fora do ar nao pode
+  // virar uma FILA de tentativas. Era assim que o cliente esperava minutos por
+  // uma resposta que ia acabar sendo o menu de qualquer jeito.
+  chamadasAoModelo.length = 0;
+  let erroFalha = null;
   try {
     await ai.chat([{ role: 'user', content: 'oi' }], { deadline: Date.now() + 60000 });
-  } catch { /* idem */ }
-  t('com prazo folgado tenta todos os provedores', postagens.length === totalProvedores,
-    `${postagens.length} de ${totalProvedores}`);
+  } catch (err) {
+    erroFalha = err;
+  }
+  t('com prazo, tenta o modelo', chamadasAoModelo.length >= 1,
+    `${chamadasAoModelo.length} chamada(s)`);
+  // No maximo DUAS: a chamada e uma repeticao.
+  //
+  // O padrao do SDK e 2 repeticoes -- tres chamadas, com espera entre elas --,
+  // e isso e a mesma doenca da cascata que foi removida: o cliente olhando
+  // "digitando..." enquanto o sistema insiste sozinho, para entregar o menu do
+  // mesmo jeito. Uma repeticao cobre a piscada de verdade; a segunda e espera
+  // pura.
+  t('  e insiste no maximo uma vez', chamadasAoModelo.length <= 2,
+    `${chamadasAoModelo.length} chamada(s)`);
+  t('  o erro sobe para o handlers cair no menu', Boolean(erroFalha), erroFalha?.name);
+
+  // Sem chave nenhuma: falha na hora, sem nem abrir conexao.
+  const chaveAntes = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = '';
+  chamadasAoModelo.length = 0;
+  let erroSemChave = null;
+  try {
+    await ai.chat([{ role: 'user', content: 'oi' }], { deadline: Date.now() + 60000 });
+  } catch (err) {
+    erroSemChave = err;
+  }
+  t('sem chave nao vai a rede', chamadasAoModelo.length === 0, String(chamadasAoModelo.length));
+  t('  e falha na hora', Boolean(erroSemChave), erroSemChave?.message);
+  process.env.ANTHROPIC_API_KEY = chaveAntes;
+
+  globalThis.fetch = fetchReal;
 
   console.log('\n' + (falhas ? falhas + ' FALHA(S)' : 'todos os testes passaram'));
   process.exit(falhas ? 1 : 0);

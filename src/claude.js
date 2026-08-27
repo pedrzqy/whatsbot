@@ -69,9 +69,25 @@ const TETO_DIA = Number(process.env.BOT_CLAUDE_MAX_DIA) || 400;
  */
 let contador = { dia: null, n: 0, cacheLido: 0, cacheGravado: 0, entrada: 0 };
 
+/**
+ * Quantas vezes o SDK tenta de novo sozinho antes de desistir.
+ *
+ * O padrão do SDK é 2 — ou seja, TRÊS chamadas para cada falha, com espera
+ * entre elas. Isso é razoável num script; num atendimento é a mesma doença da
+ * cascata de seis provedores que foi removida: o cliente olhando "digitando..."
+ * enquanto o sistema insiste sozinho, para acabar entregando o menu do mesmo
+ * jeito.
+ *
+ * Uma tentativa a mais cobre a piscada de verdade (um 529 de sobrecarga passa
+ * em segundos); a segunda já é espera pura. Quem manda no total continua sendo
+ * o prazo, e o menu está logo embaixo.
+ */
+const TENTATIVAS = Number(process.env.BOT_CLAUDE_TENTATIVAS ?? 1);
+
 let cliente = null;
 function obterCliente() {
-  if (!cliente) cliente = new Anthropic(); // lê ANTHROPIC_API_KEY do ambiente
+  // lê ANTHROPIC_API_KEY do ambiente
+  if (!cliente) cliente = new Anthropic({ maxRetries: TENTATIVAS });
   return cliente;
 }
 

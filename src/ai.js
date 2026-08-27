@@ -1,17 +1,18 @@
 'use strict';
 
 /**
- * Integração com a Groq (inferência de LLM, compatível com OpenAI).
- * Docs: https://console.groq.com/docs
- * Base: https://api.groq.com/openai/v1  ·  Auth: Bearer GROQ_API_KEY
+ * O cerebro do atendimento: monta o prompt, guarda o historico e chama o modelo.
  *
- * Responsável pelas respostas inteligentes do bot: mantém um histórico
- * curto por contato e conversa com o cliente na persona da loja.
+ * Quem fala com a API e o claude.js; aqui mora tudo que independe de QUAL
+ * modelo responde -- persona, historico por contato, laco de ferramentas, prazo
+ * e teto por cliente.
+ *
+ * Uma camada so. Havia uma cascata de seis provedores compativeis com OpenAI
+ * embaixo, e ela saiu: ver o comentario do chat().
  */
 
 const fs = require('fs');
 const path = require('path');
-const axios = require('axios');
 const config = require('./config');
 const welcome = require('./welcome');
 const tools = require('./tools');
@@ -19,26 +20,11 @@ const knowledge = require('./knowledge');
 const store = require('./store');
 const claude = require('./claude');
 
-// COMBO de provedores em cascata: um cliente HTTP por provedor com chave.
-const providers = config.llm.providers.map((p) => ({
-  ...p,
-  client: axios.create({
-    baseURL: p.url,
-    timeout: 40000,
-    headers: { Authorization: `Bearer ${p.apiKey}`, 'Content-Type': 'application/json' },
-  }),
-}));
-// Uma linha só, com as duas camadas na ordem em que são tentadas. Antes o log
-// dizia só a cascata, e não havia como saber pelo console se o Claude estava
-// ligado — a única pista seria a fatura no fim do mês.
+// Uma camada so, e o menu embaixo. A cascata de seis provedores foi removida:
+// ver o comentario do chat().
 console.log(
-  '[ai] camadas:',
-  [
-    claude.disponivel() ? `Claude(${claude.MODELO})` : null,
-    providers.map((p) => `${p.name}(${p.model})`).join(' → ') || null,
-  ]
-    .filter(Boolean)
-    .join('  →  ') || 'NENHUMA',
+  '[ai] cerebro:',
+  claude.disponivel() ? `Claude(${claude.MODELO})` : 'NENHUM (cai direto no menu)',
 );
 
 // ─── Histórico de conversa (por contato), persistido em arquivo ──────
@@ -322,47 +308,9 @@ async function buildSystemPrompt() {
   );
 }
 
-// ─── Recuperação do bug "tool_use_failed" do Groq/Llama ──────────────
-// Às vezes o modelo emite a chamada de função como texto no formato
-// <function=nome{...json...}</function> em vez do tool_calls estruturado.
-// Recuperamos essa chamada para não quebrar o atendimento.
-function recoverToolCalls(err) {
-  const gen = err.response?.data?.error?.failed_generation;
-  if (!gen) return null;
-  const re = /<function=([a-zA-Z0-9_]+)\s*(\{[\s\S]*?\})\s*<\/function>/g;
-  const calls = [];
-  let m;
-  let i = 0;
-  while ((m = re.exec(gen))) {
-    calls.push({ id: `rec_${i++}`, type: 'function', function: { name: m[1], arguments: m[2] } });
-  }
-  return calls.length ? calls : null;
-}
-
 /** Chama o modelo com as ferramentas do bot (o chat() já faz o fallback em cascata). */
 function callWithTools(messages, deadline) {
   return chat(messages, { tools: tools.definitions, deadline });
-}
-
-// ─── Chamada de baixo nível (combo de provedores em cascata) ─────────
-/** Faz a chamada em um provedor específico do combo. */
-async function callProvider(provider, messages, opts) {
-  const { data } = await provider.client.post(
-    '/chat/completions',
-    {
-      model: opts.model || provider.model,
-      messages,
-      temperature: opts.temperature ?? config.llm.temperature,
-      max_tokens: opts.maxTokens ?? config.llm.maxTokens,
-      ...(provider.reasoningEffort ? { reasoning_effort: provider.reasoningEffort } : {}),
-      ...(opts.tools ? { tools: opts.tools, tool_choice: opts.toolChoice || 'auto' } : {}),
-    },
-    // Timeout POR TENTATIVA, encurtado para caber no que sobra do prazo total.
-    // Sem isto, o timeout de 40s do cliente axios vale sempre: o último
-    // provedor da cascata começaria uma tentativa de 40s faltando 2s de prazo.
-    opts.timeoutMs ? { timeout: opts.timeoutMs } : {},
-  );
-  return data.choices?.[0]?.message || { content: '' };
 }
 
 /** Erro de prazo estourado. Tipado para o chamador saber que é hora do menu. */
@@ -375,66 +323,38 @@ class PrazoEsgotado extends Error {
 }
 
 /**
- * Chama o modelo tentando os provedores do COMBO em ordem. Se um falha (rate limit
- * ou qualquer erro), cai automaticamente no próximo. Recupera o bug tool_use_failed do Groq.
+ * Chama o Claude. E so ele.
  *
- * `opts.deadline` é um instante ABSOLUTO, não uma duração, e é isso que faz o
- * prazo valer para o atendimento inteiro. O reply() chama isto até 4 vezes (uma
- * por ida e volta de ferramenta); com uma duração, cada chamada ganharia o prazo
+ * Havia uma CASCATA de seis provedores embaixo -- Gemini, Cerebras, Groq,
+ * Mistral, Cohere, OpenRouter -- como rede de seguranca. Ela foi removida
+ * porque na pratica era o contrario de uma rede: cada provedor fora do ar
+ * custava ate 40 SEGUNDOS de "digitando..." antes de o proximo ser tentado, e o
+ * log de producao mostrava dois deles ja mortos (Gemini 503, Cerebras 402 --
+ * cota vencida). Com seis, o pior caso era o cliente esperando minutos para
+ * receber a mesma coisa que o menu entrega instantaneamente.
+ *
+ * A rede de verdade e o MENU: ele responde na hora, nao custa token, nao
+ * alucina e funciona com tudo fora do ar. Duas camadas, nao tres.
+ *
+ * `opts.deadline` e um instante ABSOLUTO, nao uma duracao, e e isso que faz o
+ * prazo valer para o atendimento inteiro. O reply() chama isto ate 4 vezes (uma
+ * por ida e volta de ferramenta); com uma duracao, cada chamada ganharia o prazo
  * cheio de novo e o total voltaria a ser minutos.
  */
 async function chat(messages, opts = {}) {
   const limite = opts.deadline || Date.now() + config.llm.deadlineMs;
-  let lastErr;
 
-  // ── Camada 1: Claude ──────────────────────────────────────
-  //
-  // Ele não entra na cascata como mais um provedor: ele vem ANTES dela, e a
-  // cascata inteira passa a ser a rede embaixo. São três camadas, não duas —
-  // Claude, cascata, e o menu lá no handlers quando tudo cai.
-  //
-  // A conversão de formato mora toda no claude.js, então daqui para baixo nada
-  // sabe quem respondeu.
-  if (claude.disponivel()) {
-    try {
-      return await claude.chat(messages, { ...opts, deadline: limite });
-    } catch (err) {
-      lastErr = err;
-      console.warn(`[ai] Claude indisponível (${err.status || err.message}) → cascata`);
-    }
+  if (!claude.disponivel()) {
+    // Sem chave, nem tenta: falhar na hora leva o cliente ao menu em
+    // milissegundos, e o menu responde. Uma tentativa que vai falhar é só
+    // espera somada ao mesmo desfecho.
+    throw new Error('ANTHROPIC_API_KEY não configurada');
   }
 
-  // ── Camada 2: a cascata que já estava paga ────────────────
-  for (const p of providers) {
-    const resta = limite - Date.now();
-    // Menos de 2s não dá para nenhum modelo responder: tentar só atrasaria a
-    // queda no menu, que é o que o cliente vai receber de qualquer jeito.
-    if (resta < 2000) {
-      console.warn(`[ai] prazo esgotado antes de ${p.name} — desisto da cascata`);
-      throw new PrazoEsgotado();
-    }
+  const resta = limite - Date.now();
+  if (resta < 2000) throw new PrazoEsgotado();
 
-    try {
-      return await callProvider(p, messages, { ...opts, timeoutMs: Math.min(40000, resta) });
-    } catch (err) {
-      lastErr = err;
-      const recovered = recoverToolCalls(err); // Groq: chamada de ferramenta malformada
-      if (recovered) return { role: 'assistant', content: null, tool_calls: recovered };
-      if (providers.length > 1) {
-        // O status separado do resto: 400 é a NOSSA requisição malformada (e vai
-        // falhar igual nos outros), 401 é chave, 429 é cota, timeout é rede.
-        // Todos apareciam como a mesma linha, e a diferença é o que decide se o
-        // conserto é código, painel ou esperar.
-        const status = err.response?.status;
-        console.warn(
-          `[ai] ${p.name} indisponível (${status || err.code || err.message})` +
-            `${status === 400 ? ' — requisição recusada, provavelmente vai falhar em todos' : ''} → próximo`,
-        );
-      }
-    }
-  }
-
-  throw lastErr || new Error('nenhum provedor de LLM disponível');
+  return claude.chat(messages, { ...opts, deadline: limite });
 }
 
 /**
