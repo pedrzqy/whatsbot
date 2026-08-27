@@ -243,6 +243,16 @@ async function acaoDoMenu(acao, { from, pushName }) {
   if (acao === 'atendente') {
     store.saveContact(from, { paused: true, menuNode: null, modoIA: false });
     console.log(`[handoff] ${from} -> atendente (pelo menu)`);
+
+    // Este caminho está no ar HOJE e era mudo: gravava `paused` e mandava
+    // "já estou chamando um atendente" sem chamar atendente nenhum. O cliente
+    // lia a promessa e ficava esperando alguém que não foi avisado.
+    await ponte.alertarHandoff({
+      nome: store.getContact(from)?.name || pushName || 'cliente',
+      from,
+      motivo: 'escolheu falar com atendente no menu',
+    });
+
     await sender.send(
       from,
       'Certo! Já estou chamando um atendente pra continuar com você 🧑‍💼\n\n' +
@@ -580,7 +590,18 @@ async function handleMessage(msg) {
     await sender.send(from, answer);
   } catch (err) {
     console.error('[ai] erro ao responder:', err.response?.data || err.message);
-    await sender.send(from, variator.error());
+
+    // O menu é a REDE, não uma mensagem de desculpa.
+    //
+    // `variator.error()` deixava o cliente sem saída: ele lia "tive um
+    // probleminha", mandava a mesma coisa de novo, e caía no mesmo erro. Com o
+    // menu ele tem oito caminhos que funcionam sem LLM nenhuma — e é justamente
+    // quando a IA cai que ele mais precisa deles.
+    //
+    // modoIA:false junto, senão a mensagem seguinte pula o menu e volta para a
+    // IA que acabou de falhar.
+    store.saveContact(from, { menuNode: 'main', modoIA: false });
+    await enviarMenu(from, 'main', variator.pick(NAO_ENTENDI));
   }
 }
 

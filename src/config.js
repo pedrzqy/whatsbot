@@ -83,6 +83,14 @@ const config = {
     maxTokens: Number(process.env.LLM_MAX_TOKENS || 600),
     // Nº de trocas (usuário+assistente) mantidas no histórico por contato.
     maxHistory: Number(process.env.LLM_MAX_HISTORY || 4),
+    // Prazo TOTAL para a IA responder, contando a cascata inteira e as idas e
+    // vindas de ferramenta.
+    //
+    // Sem ele: 6 provedores × 40s de timeout × até 4 passos de ferramenta. No
+    // pior caso o cliente fica olhando "digitando..." por MINUTOS e desiste —
+    // e ninguém nunca saberia, porque nada nesse caminho registra desistência.
+    // Estourado, o atendimento cai no menu, que responde na hora.
+    deadlineMs: Number(process.env.LLM_DEADLINE_MS || 25000),
     providers: [
       llmProvider('Gemini',
         process.env.GEMINI_API_URL || 'https://generativelanguage.googleapis.com/v1beta/openai',

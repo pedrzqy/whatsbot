@@ -11,7 +11,12 @@
 const fs = require('fs');
 const path = require('path');
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
+// PONTE_DATA_DIR, igual a estado.js e vendas.js. Este arquivo era o único dos
+// três que não honrava a variável, e o efeito é silencioso: qualquer teste que
+// encoste em handlers.js chama saveContact e grava no contacts.json de
+// PRODUÇÃO. Rodar a suíte no servidor reescrevia quem já tinha sido saudado —
+// e clientes antigos voltavam a receber a mensagem de boas-vindas.
+const DATA_DIR = process.env.PONTE_DATA_DIR || path.join(__dirname, '..', 'data');
 const FILE = path.join(DATA_DIR, 'contacts.json');
 
 /** @type {Record<string, {firstSeen:number,lastSeen:number,greetedAt:number,name?:string}>} */

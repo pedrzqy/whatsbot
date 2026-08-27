@@ -5,15 +5,31 @@
  *
  * Segurança:
  *  - NÃO existe ferramenta que liste todos os pedidos da loja (a chave é admin
- *    e isso vazaria dados de outros clientes). O cliente só acessa o PRÓPRIO
- *    pedido informando número + e-mail, que a API da Nerix valida.
- *  - Chaves/licenças (product_key) só aparecem após essa validação de e-mail.
+ *    e isso vazaria dados de outros clientes).
+ *  - O cliente chega ao PRÓPRIO pedido por dois caminhos, e cada um tem a sua
+ *    prova de que o pedido é dele:
+ *      meus_pedidos    → o número de WhatsApp de quem está falando. Vem do
+ *                        `ctx`, nunca de argumento: o remetente é autenticado
+ *                        pelo próprio WhatsApp e o modelo não tem como forjá-lo.
+ *      consultar_pedido→ código + e-mail, validados pela API da Nerix. É o
+ *                        caminho de quem comprou informando outro telefone.
+ *  - Chaves/licenças (product_key) só aparecem depois de uma dessas duas provas.
  */
 
 const nerix = require('./nerix');
 const config = require('./config');
 const store = require('./store');
 const ponte = require('./ponte');
+
+/**
+ * vendas.js é carregado SOB DEMANDA, não no topo, para quebrar um ciclo:
+ *   tools.js → vendas.js → tools.js
+ * `vendas.js` importa `formatOrder` daqui. Com o require no topo, carregar
+ * tools.js primeiro entregaria a vendas.js um `tools` ainda vazio e o
+ * `formatOrder` de lá viraria undefined — quebrando o aviso de venda, que não
+ * tem nada a ver com esta ferramenta. Mesma solução do carregarAi() no tradutor.
+ */
+const carregarVendas = () => require('./vendas');
 
 /** Monta o link direto do produto no site (rota /package/:slug da Nerix). */
 function productLink(slug) {
@@ -87,6 +103,19 @@ const definitions = [
         },
         required: ['codigo', 'email'],
       },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'meus_pedidos',
+      description:
+        'Lista os pedidos do cliente com quem você está falando AGORA, pelo número de WhatsApp dele. ' +
+        'Não pede nada: nem código, nem e-mail. É a PRIMEIRA coisa a usar em "cadê meu pedido", ' +
+        '"não recebi o jogo", "meu Pix caiu?", "já aprovou?", "quero minha chave". ' +
+        'Só use consultar_pedido se esta não achar nada — aí sim o cliente comprou de outro número ' +
+        'e você precisa do código E do e-mail.',
+      parameters: { type: 'object', properties: {}, required: [] },
     },
   },
   {
@@ -253,9 +282,58 @@ async function execute(name, args = {}, ctx = {}) {
       const nome = (args.nome_completo || '').trim();
       if (nome.split(/\s+/).length < 2) return { erro: 'falta_sobrenome' };
       const contato = (args.contato || '').trim();
-      if (ctx.from) store.saveContact(ctx.from, { paused: true, name: nome, ...(contato ? { pedidoContato: contato } : {}) });
+      // menuNode e modoIA saem junto com o paused, igual ao handoff do menu
+      // (handlers.js). Sem limpar, o cliente que volta com #inicio cai direto
+      // na IA de novo — a mesma que ele acabou de pedir para trocar por gente.
+      if (ctx.from) {
+        store.saveContact(ctx.from, {
+          paused: true,
+          menuNode: null,
+          modoIA: false,
+          name: nome,
+          ...(contato ? { pedidoContato: contato } : {}),
+        });
+      }
       console.log(`[handoff] ${ctx.from} -> atendente (${nome})${contato ? ` | contato: ${contato}` : ''} | motivo: ${args.motivo || '-'}`);
+
+      // O alerta é o que faltava. Sem ele isto gravava `paused:true` e um
+      // console.log: o bot ficava mudo, ninguém era chamado, e o cliente
+      // esperava por um atendente que não sabia que existia um cliente.
+      await ponte.alertarHandoff({ nome, from: ctx.from, motivo: args.motivo, contato });
+
       return { transferido: true, instrucao: 'Confirme ao cliente, de forma calorosa, que um atendente humano vai continuar o atendimento em instantes.' };
+    }
+
+    if (name === 'meus_pedidos') {
+      // O telefone vem do ctx, NUNCA de args.
+      //
+      // É essa a diferença entre esta ferramenta e a consultar_pedido. O
+      // remetente do WhatsApp é autenticado pelo próprio WhatsApp: o modelo não
+      // tem como forjá-lo, e um cliente não tem como pedir o pedido de outro.
+      // Aceitar um telefone por argumento devolveria exatamente o buraco que o
+      // e-mail obrigatório existe para fechar — com a agravante de o argumento
+      // poder ser alucinado.
+      //
+      // Por isso o schema não tem propriedade nenhuma: não há o que preencher.
+      if (!ctx.from) return { erro: 'sem_telefone' };
+
+      const pedidos = await carregarVendas().pedidosDoTelefone(ctx.from);
+      if (!pedidos.length) {
+        return {
+          total: 0,
+          instrucao:
+            'Nenhum pedido neste número. Provavelmente ele comprou informando outro telefone. ' +
+            'Peça o código do pedido E o e-mail da compra e use consultar_pedido.',
+        };
+      }
+
+      // Os mais novos primeiro (pedidosDoTelefone já ordena). Três bastam:
+      // quem pergunta "cadê meu pedido" quer o último, e a lista inteira de um
+      // cliente antigo só gasta contexto e dá ao modelo mais chance de misturar
+      // um pedido com outro na resposta.
+      const out = pedidos.slice(0, 3).map(formatOrder);
+      console.log(`[tools] ${ctx.from} tem ${pedidos.length} pedido(s) — devolvi ${out.length}`);
+      return { total: pedidos.length, pedidos: out };
     }
 
     if (name === 'consultar_pedido') {

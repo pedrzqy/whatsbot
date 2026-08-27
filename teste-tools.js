@@ -15,8 +15,34 @@ process.env.PONTE_OPERADOR_NUMERO = '5541999999999';
 process.env.PONTE_BRACO_KEY = 'teste';
 process.env.PONTE_DATA_DIR = require('path').join(require('os').tmpdir(), 'phaze-teste-tools');
 
+// Duas chaves FALSAS só para existirem dois provedores na cascata. Sem chave
+// nenhuma a lista de provedores nasce vazia e o teste do prazo não teria o que
+// exercitar — ele passaria por não chamar ninguém, que é o desfecho errado
+// pelo motivo errado.
+process.env.GEMINI_API_KEY = 'teste-falso-1';
+process.env.CEREBRAS_API_KEY = 'teste-falso-2';
+
 const fs = require('fs');
 fs.rmSync(process.env.PONTE_DATA_DIR, { recursive: true, force: true });
+
+// Dublê do cliente HTTP do ai.js, instalado ANTES de requerer o módulo: os
+// clientes axios são criados uma vez, na carga. Registra o que cada tentativa
+// recebeu (é assim que se confere o timeout por tentativa) e falha sempre, para
+// a cascata andar até o fim.
+const axiosMod = require('axios');
+const postagens = [];
+const criarReal = axiosMod.create;
+axiosMod.create = () => ({
+  post: async (url, body, opts) => {
+    postagens.push({ url, body, opts });
+    const e = new Error('provedor de mentira');
+    e.response = { status: 503 };
+    throw e;
+  },
+});
+require('./src/ai');
+axiosMod.create = criarReal;
+const totalProvedores = require('./src/config').llm.providers.length;
 
 const nerix = require('./src/nerix');
 const tools = require('./src/tools');
@@ -180,11 +206,26 @@ nerix.checkPayment = async (codigo) => {
   t('não existe ferramenta de listar pedidos',
     !nomes.some((n) => /listar_pedidos|todos_pedidos|list_orders/i.test(n)), nomes.join(', '));
 
-  // Toda ferramenta que fala de pedido tem de exigir o e-mail.
+  // Toda ferramenta que fala de pedido precisa de UMA PROVA de que o pedido é
+  // de quem está perguntando. Só existem duas provas aceitas, e a regra aqui é
+  // que não pode existir uma terceira:
+  //
+  //   1. o e-mail obrigatório, que a Nerix confere contra o pedido; ou
+  //   2. o telefone do remetente do WhatsApp — e aí a ferramenta não pode ter
+  //      parâmetro NENHUM, porque qualquer campo de identidade no schema seria
+  //      preenchível pelo modelo, e um argumento alucinado leria o pedido de
+  //      outra pessoa.
+  //
+  // Antes esta checagem era só "exige e-mail". Ela estava certa quando havia um
+  // caminho só; o que ela protege é a prova, não o campo.
   for (const d of tools.definitions) {
     if (!/pedido|order/i.test(d.function.name)) continue;
     const req = d.function.parameters?.required || [];
-    t(`${d.function.name} exige e-mail`, req.includes('email'), req.join(','));
+    const props = Object.keys(d.function.parameters?.properties || {});
+    const porEmail = req.includes('email');
+    const porRemetente = props.length === 0;
+    t(`${d.function.name} tem prova de posse`, porEmail || porRemetente,
+      porEmail ? 'e-mail' : `campos: ${props.join(',') || 'nenhum'}`);
   }
 
   // ── Menu: resposta pronta, IA só num ramo ───────────────────
@@ -432,6 +473,175 @@ nerix.checkPayment = async (codigo) => {
   // escolha de opção e o cliente nunca consegue pedir esses títulos.
   t('“3” seria opção de menu válida', Boolean(menu.resolve('main', '3')));
   t('e “23” não resolve como opção', menu.resolve('main', '23') === null);
+
+  // ── Consulta pelo telefone de quem está falando ─────────────
+  //
+  // O cliente está falando PELO número que cadastrou no checkout: o dado já
+  // está na mão. Exigir código + e-mail de quem já se identificou pelo WhatsApp
+  // era mandar ele procurar um UUID no e-mail antes de saber se o Pix caiu.
+  //
+  // A prova de posse aqui é o remetente do WhatsApp, autenticado pelo próprio
+  // WhatsApp. É por isso que ela não pode vir por argumento.
+  bloco('meus_pedidos — o telefone é a prova');
+
+  const nerixMod2 = require('./src/nerix');
+  const listOrdersReal = nerixMod2.listOrders;
+  const buscas = [];
+
+  const PEDIDO_DELE = {
+    order_number: 'PED-1',
+    status: 'paid',
+    total: 49.9,
+    customer_phone: '5541988887777',
+    created_at: '2026-08-20T10:00:00Z',
+    items: [{ product_name: 'Hollow Knight', quantity: 1, product_key: 'CHAVE-DELE' }],
+  };
+  const PEDIDO_DE_OUTRO = {
+    order_number: 'PED-2',
+    status: 'paid',
+    total: 99.9,
+    customer_phone: '5541977776666',
+    created_at: '2026-08-21T10:00:00Z',
+    items: [{ product_name: 'Zelda', quantity: 1, product_key: 'CHAVE-DE-OUTRO' }],
+  };
+
+  // A API devolve os DOIS de propósito: o filtro que vale é o local
+  // (vendas.js), não o `search` mandado na chamada. Uma API que ignorasse o
+  // parâmetro devolveria a loja inteira, e sem o filtro local o cliente leria
+  // o pedido, o valor e a CHAVE de outra pessoa.
+  nerixMod2.listOrders = async (params) => {
+    buscas.push(params);
+    return { data: [PEDIDO_DELE, PEDIDO_DE_OUTRO] };
+  };
+
+  const meus = await tools.execute('meus_pedidos', {}, { from: '5541988887777' });
+  t('acha o pedido pelo telefone', meus.total === 1, JSON.stringify(meus.total));
+  t('  e é o pedido certo', meus.pedidos?.[0]?.codigo === 'PED-1', meus.pedidos?.[0]?.codigo);
+  t('  com a chave dele', /CHAVE-DELE/.test(JSON.stringify(meus)));
+  // O teste que importa: a chave de OUTRO cliente não pode aparecer.
+  t('  e NUNCA o pedido de outro cliente',
+    !JSON.stringify(meus).includes('CHAVE-DE-OUTRO') && !JSON.stringify(meus).includes('PED-2'),
+    JSON.stringify(meus));
+
+  // O modelo pode alucinar qualquer argumento. Se um telefone por argumento
+  // valesse, bastaria ele inventar um para ler o pedido de outra pessoa.
+  const forjado = await tools.execute(
+    'meus_pedidos',
+    { telefone: '5541977776666', from: '5541977776666' },
+    { from: '5541988887777' },
+  );
+  t('argumento de telefone é ignorado', forjado.pedidos?.[0]?.codigo === 'PED-1',
+    forjado.pedidos?.[0]?.codigo);
+  t('  e o schema nem tem onde recebê-lo',
+    Object.keys(tools.definitions.find((d) => d.function.name === 'meus_pedidos')
+      .function.parameters.properties).length === 0);
+
+  // Sem ctx.from não há prova nenhuma — não pode cair no caminho de listar.
+  const semCtx = await tools.execute('meus_pedidos', {}, {});
+  t('sem telefone no contexto não consulta', semCtx.erro === 'sem_telefone', JSON.stringify(semCtx));
+
+  // Quem comprou informando outro telefone continua tendo caminho: o antigo.
+  const semNada = await tools.execute('meus_pedidos', {}, { from: '5541911110000' });
+  t('não achou nada devolve total 0', semNada.total === 0, JSON.stringify(semNada.total));
+  t('  e manda pedir código e e-mail', /consultar_pedido/.test(semNada.instrucao || ''),
+    semNada.instrucao);
+
+  nerixMod2.listOrders = listOrdersReal;
+
+  // ── O handoff tem que chamar alguém ─────────────────────────
+  //
+  // Gravava `paused:true` e um console.log. Só. O bot ficava mudo, ninguém era
+  // avisado, e o cliente esperava um atendente que não sabia que existia um
+  // cliente. O caminho do menu (handlers.js) fazia a mesma coisa.
+  bloco('falar_com_atendente avisa o operador');
+
+  const sendReal = senderMod.send;
+  const alertas = [];
+  senderMod.send = async (para, texto) => { alertas.push({ para, texto: String(texto) }); };
+
+  const CLI = '5541966665555';
+  storeMod.saveContact(CLI, { menuNode: 'main', modoIA: true });
+
+  const handoff = await tools.execute(
+    'falar_com_atendente',
+    { nome_completo: 'Ana Silva', motivo: 'a chave nao funcionou', contato: 'ana@exemplo.com' },
+    { from: CLI },
+  );
+  senderMod.send = sendReal;
+
+  t('transfere', handoff.transferido === true);
+  t('  e alerta o operador', alertas.some((a) => a.para === '5541999999999'),
+    JSON.stringify(alertas.map((a) => a.para)));
+
+  const alerta = alertas.map((a) => a.texto).join('\n');
+  t('  com o nome do cliente', /Ana Silva/.test(alerta), alerta);
+  t('  com o telefone dele', new RegExp(CLI).test(alerta));
+  t('  e com o motivo', /chave nao funcionou/.test(alerta));
+  // Regra 1: o alerta sai pelo mesmo número comercial que fala com o cliente.
+  t('  sem vocabulário proibido',
+    !/\bbra[çc]o|rob[ôo]|\bbots?\b|autom[aá]tic\w*|taobao|fornecedor/i.test(alerta),
+    alerta);
+
+  // Sem limpar os dois, o cliente que volta com #inicio cai direto na IA de
+  // novo — a mesma que ele acabou de pedir para trocar por gente.
+  const depois = storeMod.getContact(CLI);
+  t('  e pausa o contato', depois?.paused === true);
+  t('  limpando o menuNode', !depois?.menuNode, String(depois?.menuNode));
+  t('  e o modoIA', depois?.modoIA === false, String(depois?.modoIA));
+
+  // Motivo é texto do MODELO indo para o WhatsApp: não pode virar parede.
+  senderMod.send = async (para, texto) => { alertas.push({ para, texto: String(texto) }); };
+  alertas.length = 0;
+  await tools.execute(
+    'falar_com_atendente',
+    { nome_completo: 'Beto Souza', motivo: 'x'.repeat(900) },
+    { from: '5541966664444' },
+  );
+  senderMod.send = sendReal;
+  t('motivo enorme é cortado', (alertas[0]?.texto || '').length < 400,
+    String((alertas[0]?.texto || '').length) + ' caracteres');
+
+  // ── A cascata desiste no prazo ──────────────────────────────
+  //
+  // 6 provedores × 40s de timeout × 4 passos de ferramenta = minutos de
+  // "digitando..." antes de o cliente receber qualquer coisa. E nenhum desses
+  // minutos aparece em lugar nenhum: quem desiste é o cliente, calado.
+  bloco('a IA desiste no prazo, não em minutos');
+
+  const ai = require('./src/ai');
+  t('há provedor configurado para o teste', postagens !== null);
+
+  // Prazo já vencido: nem tenta. É o caso do último passo de ferramenta, que
+  // começa quando o orçamento de tempo já acabou.
+  postagens.length = 0;
+  let erroPrazo = null;
+  try {
+    await ai.chat([{ role: 'user', content: 'oi' }], { deadline: Date.now() - 1 });
+  } catch (err) {
+    erroPrazo = err;
+  }
+  t('prazo vencido nem chama o provedor', postagens.length === 0, String(postagens.length));
+  t('  e o erro diz que foi prazo', erroPrazo?.prazoEsgotado === true, erroPrazo?.name);
+
+  // Prazo curto: o timeout de CADA tentativa encolhe para caber. Sem isto, o
+  // último provedor da cascata começaria uma tentativa de 40s faltando 2s.
+  postagens.length = 0;
+  try {
+    await ai.chat([{ role: 'user', content: 'oi' }], { deadline: Date.now() + 5000 });
+  } catch { /* todos os dublês falham de propósito */ }
+  t('tentou os provedores', postagens.length >= 1, String(postagens.length));
+  t('  com o timeout encurtado para caber no prazo',
+    postagens.every((p) => (p.opts?.timeout ?? 40000) <= 5000),
+    JSON.stringify(postagens.map((p) => p.opts?.timeout)));
+
+  // E a cascata continua sendo cascata: com prazo folgado, um provedor que cai
+  // passa a vez para o próximo.
+  postagens.length = 0;
+  try {
+    await ai.chat([{ role: 'user', content: 'oi' }], { deadline: Date.now() + 60000 });
+  } catch { /* idem */ }
+  t('com prazo folgado tenta todos os provedores', postagens.length === totalProvedores,
+    `${postagens.length} de ${totalProvedores}`);
 
   console.log('\n' + (falhas ? falhas + ' FALHA(S)' : 'todos os testes passaram'));
   process.exit(falhas ? 1 : 0);

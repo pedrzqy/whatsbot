@@ -239,6 +239,36 @@ async function despachar(atendimento) {
   return tarefa;
 }
 
+/**
+ * Cliente saiu do atendimento sozinho e quer uma pessoa. Avisa o operador.
+ *
+ * Existe porque havia TRÊS caminhos de handoff e cada um decidia sozinho se
+ * avisava alguém: o menu não avisava, a ferramenta da IA não avisava, e só o
+ * caminho de "conta o problema" avisava. O sintoma é sempre o mesmo e sempre
+ * mudo — o contato fica `paused`, o bot cala a boca, e o cliente espera um
+ * atendente que ninguém chamou.
+ *
+ * O formato é o dos outros alertas: quem é em cima, o que quer embaixo. O
+ * telefone vai junto porque é por ele que o operador responde.
+ *
+ * @param {{nome?:string, from:string, motivo?:string, contato?:string}} p
+ */
+async function alertarHandoff({ nome, from, motivo, contato }) {
+  // O motivo pode vir do MODELO (args.motivo do falar_com_atendente), então é
+  // texto de terceiro indo para o WhatsApp. O limparAlerta cuida do vocabulário;
+  // o corte aqui cuida do tamanho, para uma resposta longa não empurrar o
+  // telefone para fora da tela do celular.
+  const porque = String(motivo || '').replace(/\s+/g, ' ').trim().slice(0, 160);
+
+  const linhas = [
+    `Cliente: *${nome || 'sem nome'}* · ${String(from).replace(/@.*/, '')}`,
+    `🧑‍💼 Pediu atendimento${porque ? ` — ${porque}` : ''}`,
+  ];
+  if (contato) linhas.push(`📞 contato que ele deixou: ${contato}`);
+
+  await alertar(linhas.join('\n'));
+}
+
 // ============================================================
 // SENTIDO 2 — fornecedor responde
 // ============================================================
@@ -831,6 +861,7 @@ module.exports = {
   bloqueioDetectado,
   promoverProximo,
   alertar,
+  alertarHandoff,
   iniciar,
   tick,
   ativa,
