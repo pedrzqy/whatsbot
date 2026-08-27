@@ -20,12 +20,32 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const rand = (min, max) => Math.floor(min + Math.random() * (max - min));
 
 /**
- * Ajusta a formatação pro padrão do WhatsApp. Principal: negrito é UM asterisco
- * (*assim*), não dois. Modelos de IA às vezes soltam **markdown** — colapsamos
- * qualquer sequência de 2+ asteriscos num só pra não aparecer literal no chat.
+ * Ajusta a formatação pro padrão do WhatsApp.
+ *
+ * Duas coisas, e as duas são a mesma ideia: consertar na PORTA o que o modelo
+ * escreve por hábito, em vez de torcer para que ele lembre da regra.
+ *
+ * 1. Negrito é UM asterisco (*assim*), não dois. Modelo solta **markdown** e
+ *    ele aparece literal no chat.
+ *
+ * 2. TRAVESSÃO. Ninguém digita "—" no WhatsApp: não está no teclado do
+ *    celular. Ele é a assinatura mais óbvia de texto gerado, e o cliente
+ *    percebe antes de saber por quê. Vira vírgula, que é o que uma pessoa
+ *    escreveria no mesmo lugar — em português a pausa do travessão é quase
+ *    sempre apositiva, e a vírgula ocupa o mesmo papel sem chamar atenção.
+ *
+ * O travessão no COMEÇO da linha é outro caso: ali ele é marca de fala, e o
+ * que uma pessoa faria é simplesmente não usar. Some.
  */
 function normalizeWhatsApp(text) {
-  return String(text == null ? '' : text).replace(/\*{2,}/g, '*');
+  return String(text == null ? '' : text)
+    .replace(/\*{2,}/g, '*')
+    // Começo de linha: some junto com o espaço que vem depois.
+    .replace(/^[ \t]*[—–][ \t]*/gm, '')
+    // No meio da frase: vira vírgula. O espaço antes some para não ficar " ,".
+    .replace(/\s*[—–]\s*/g, ', ')
+    // "R$ 49,90, , o link" acontece quando já havia vírgula antes do travessão.
+    .replace(/,\s*,/g, ',');
 }
 
 /** @type {Array<{number:string,text:string,opts:object,resolve:Function,reject:Function}>} */
@@ -203,4 +223,9 @@ async function processJob(job) {
   lastContactSendAt.set(number, t);
 }
 
-module.exports = { send, typingDurationMs, registrarEnvioDoBot, foiDoBot };
+module.exports = { send, typingDurationMs, registrarEnvioDoBot, foiDoBot,
+  // Exportada para o teste: e ela que tira o travessao e o markdown do
+  // que sai, e sem alcanca-la o teste dublaria justamente a funcao que
+  // deveria estar medindo.
+  normalizeWhatsApp,
+};

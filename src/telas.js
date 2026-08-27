@@ -75,7 +75,7 @@ const TELAS = [
     // curto demais faz ele voltar irritado antes de o problema ter chance de
     // se resolver sozinho.
     resposta:
-      'Esse é do lado da Nintendo — os servidores estão reiniciando 🔧\n\n' +
+      'Esse é do lado da Nintendo: os servidores estão reiniciando 🔧\n\n' +
       'Costuma voltar sozinho em até *2 horas*. Tenta de novo depois desse ' +
       'tempo que deve estar funcionando 👍',
     depois: 'nenhuma',
@@ -137,7 +137,7 @@ function paraOPrompt() {
   const pedeCodigo = TELAS.find((t) => t.depois === 'codigo');
 
   return (
-    'TELAS DE ERRO QUE O CLIENTE FOTOGRAFA — você conhece estas, e a resposta ' +
+    'TELAS DE ERRO QUE O CLIENTE FOTOGRAFA. Você conhece estas, e a resposta ' +
     'de cada uma já está pronta. Use o texto indicado, com as suas palavras, ' +
     'mas SEM mudar o passo a passo nem inventar solução nova:\n' +
     linhas.join('\n') +

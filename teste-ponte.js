@@ -2592,6 +2592,72 @@ const OP = '5541999999999';
   cfgT.iaLigada = iaAntesT;
   cfgT.autoReply = autoAntesT;
 
+  // ── Travessão não sai daqui ────────────────────────────────
+  //
+  // Ninguém digita "—" no WhatsApp: não está no teclado do celular. É a marca
+  // mais óbvia de texto de máquina, e o cliente percebe antes de saber por quê.
+  //
+  // O conserto tem três camadas, porque o problema tem três origens: os textos
+  // que a gente escreve, o prompt (o modelo IMITA o estilo que lê) e a resposta
+  // gerada. A terceira é a maior — e é a única que nenhuma revisão de código
+  // alcança, por isso a rede final fica na porta de saída.
+  bloco('nada de travessão no que sai');
+
+  // A funcao de normalizacao DIRETO, e nao pelo send().
+  //
+  // O send() esta dublado no topo deste arquivo (para nao falar com a Evolution
+  // de verdade), entao chamar por ele mediria o duble em vez do filtro. E o
+  // filtro e justamente o que esta sendo testado.
+  const { normalizeWhatsApp } = require('./src/sender');
+
+  // A trava principal: a rede esta na PORTA, entao vale para tudo, inclusive o
+  // que o modelo gerar amanha -- que e o que nenhuma revisao de codigo alcanca.
+  for (const [caso, entrada, esperado] of [
+    ['no meio da frase', 'Voltou o servidor — pode tentar de novo', 'Voltou o servidor, pode tentar de novo'],
+    ['com preco junto', 'Zelda — R$ 49,90', 'Zelda, R$ 49,90'],
+    ['no comeco da linha', '— Bom dia!', 'Bom dia!'],
+    ['travessao curto', 'Chegou – confere ai', 'Chegou, confere ai'],
+    ['dois seguidos', 'A — B — C', 'A, B, C'],
+  ]) {
+    const r = normalizeWhatsApp(entrada);
+    t(`${caso}: sai sem travessao`, !/[—–]/.test(r), r);
+    t(`  e vira texto de gente`, r === esperado, r);
+  }
+
+  // Nao pode inventar virgula onde nao havia travessao.
+  t('texto limpo passa intacto',
+    normalizeWhatsApp('Tudo certo, sem travessao nenhum aqui.') === 'Tudo certo, sem travessao nenhum aqui.');
+
+  // Virgula que ja existia antes do travessao nao vira virgula dupla.
+  t('nao deixa virgula dupla',
+    !/,\s*,/.test(normalizeWhatsApp('Preco: R$ 49,90, — e o link vai junto')),
+    normalizeWhatsApp('Preco: R$ 49,90, — e o link vai junto'));
+
+  // O markdown do modelo continua sendo consertado junto.
+  t('e o asterisco duplo continua virando um',
+    normalizeWhatsApp('olha o **preco**') === 'olha o *preco*');
+
+  // ── O prompt também ──
+  //
+  // O modelo escreve no estilo que lê. Um prompt cheio de travessão ensina ele
+  // a usar travessão, e aí a instrução para não usar briga com o exemplo — e o
+  // exemplo costuma ganhar.
+  const promptTr = await require('./src/ai').buildSystemPrompt();
+  // O único permitido é o que aparece DENTRO da regra de formatação, como
+  // exemplo do que não fazer.
+  const semExemplo = promptTr.replace(/FORMATA[ÇC][ÃA]O WhatsApp[^\n]*/g, '');
+  t('o prompt não escreve com travessão', !/—/.test(semExemplo),
+    (semExemplo.match(/[^\n]{0,50}—[^\n]{0,50}/) || [''])[0] || 'limpo');
+  t('  e manda o modelo não usar', /NUNCA use travess[ãa]o/i.test(promptTr));
+
+  // ── Os textos fixos ──
+  const telasTr = require('./src/telas');
+  for (const tela of telasTr.TELAS) {
+    const texto = (tela.resposta || '') + (tela.seInsistir || '');
+    t(`a resposta de "${tela.id}" não tem travessão`, !/[—–]/.test(texto),
+      (texto.match(/[^\n]{0,40}[—–][^\n]{0,40}/) || [''])[0] || 'limpo');
+  }
+
   // ── Com a IA ligada: o que muda e o que NÃO pode mudar ─────
   //
   // Este bloco existe porque BOT_IA=true troca o caminho principal do

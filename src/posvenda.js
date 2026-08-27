@@ -50,7 +50,7 @@ const VALIDADE_MS = 3 * DIA;
 /**
  * Uma pergunta aberta, e não "está tudo certo?".
  *
- * "Tudo certo?" convida a um "sim" automático de quem nem tentou ainda — e o
+ * "Tudo certo?" convida a um "sim" automático de quem nem tentou ainda , e o
  * silêncio depois disso parece confirmação. "Conseguiu ativar" é específico o
  * bastante para quem travou responder na hora.
  */
@@ -102,7 +102,7 @@ async function conferirEntregas(agora = Date.now()) {
 
     // Marca ANTES de enviar. Se o envio falhar, o pior caso é uma pergunta que
     // não foi feita; se marcasse depois, uma falha no meio faria a pergunta
-    // sair de novo na varredura seguinte — e de novo, e de novo.
+    // sair de novo na varredura seguinte , e de novo, e de novo.
     if (!vendas.marcar(codigo, 'conferido')) continue;
 
     try {
@@ -126,7 +126,7 @@ async function conferirEntregas(agora = Date.now()) {
  *
  * É a única coisa do bot que fala com quem NÃO puxou conversa. Mensagem em
  * massa partindo de um número comercial é exatamente o padrão que faz o
- * WhatsApp derrubar o número — e derrubar o número custa o atendimento
+ * WhatsApp derrubar o número , e derrubar o número custa o atendimento
  * inteiro, não só a campanha.
  *
  * Por isso, mesmo ligado, ele é conservador em quatro eixos ao mesmo tempo:
@@ -159,7 +159,7 @@ async function reativar(agora = Date.now()) {
   //
   // Quem sumiu há 40 dias ainda lembra da loja; quem sumiu há dois anos é
   // quase mensagem fria de novo. Com teto por dia, a ordem decide quem é
-  // alcançado — e alcançar os mais quentes primeiro é o que faz diferença.
+  // alcançado , e alcançar os mais quentes primeiro é o que faz diferença.
   candidatos.sort((a, b) => b.contato.lastSeen - a.contato.lastSeen);
 
   let feitos = 0;
@@ -184,7 +184,7 @@ async function reativar(agora = Date.now()) {
  *
  * Sem preço, sem "promoção imperdível", sem urgência inventada: quem sumiu há
  * dois meses não volta por causa de um desconto numa mensagem que não pediu, e
- * o texto de propaganda é o que faz a pessoa denunciar como spam — que é o
+ * o texto de propaganda é o que faz a pessoa denunciar como spam , que é o
  * caminho mais rápido para o número cair.
  */
 function textoDeReativacao(nome) {
@@ -215,7 +215,7 @@ function iniciar({ intervaloMs = HORA } = {}) {
   // unref: não segura o processo no SIGTERM, igual ao ciclo do vendas.js.
   timer.unref();
   console.log(
-    `[posvenda] ligado — conferir: ${config.posvenda.conferirLigado}, ` +
+    `[posvenda] ligado , conferir: ${config.posvenda.conferirLigado}, ` +
       `reativar: ${config.posvenda.reativarLigado}`,
   );
 }
