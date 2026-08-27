@@ -25,6 +25,7 @@ const sender = require('./sender');
 const vendas = require('./vendas');
 const recovery = require('./recovery');
 const marca = require('./ponte/marca');
+const chaves = require('./chaves');
 
 const HORA = 3600_000;
 const DIA = 24 * HORA;
@@ -67,7 +68,7 @@ function textoDaConferencia(nome) {
  * @returns {Promise<number>} quantos foram perguntados
  */
 async function conferirEntregas(agora = Date.now()) {
-  if (!config.posvenda.conferirLigado) return 0;
+  if (!chaves.ligada('conferir')) return 0;
   if (recovery.isQuietHour(agora)) return 0;
 
   const pedidos = vendas._dados().pedidos || {};
@@ -138,7 +139,7 @@ async function conferirEntregas(agora = Date.now()) {
  */
 async function reativar(agora = Date.now()) {
   const cfg = config.posvenda;
-  if (!cfg.reativarLigado) return 0;
+  if (!chaves.ligada('reativar')) return 0;
   if (recovery.isQuietHour(agora)) return 0;
 
   const sumidoHa = cfg.reativarDias * DIA;

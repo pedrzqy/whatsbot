@@ -142,6 +142,13 @@ const config = {
   // coisa. Estourado, ele cai no menu — que responde na hora e não custa nada.
   iaPorClienteHora: Number(process.env.LLM_MAX_POR_CLIENTE_HORA || 20),
 
+  // Fechar a compra na conversa e mandar o Pix.
+  //
+  // LIGADO: a falha e segura -- se a loja recusar o pedido, o bot manda o link
+  // do site, que e o comportamento de sempre. O interruptor existe para poder
+  // matar isso em segundos pelo #admin se algo sair estranho, sem deploy.
+  venderNoChat: process.env.BOT_VENDER_NO_CHAT !== 'false',
+
   // ── Depois da entrega ──────────────────────────────────────────────
   posvenda: {
     // Perguntar se a ativacao deu certo. LIGADO: e uma pergunta a quem acabou

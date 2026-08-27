@@ -24,6 +24,7 @@ const ponte = require('./ponte');
 const menu = require('./menu');
 const tools = require('./tools');
 const expediente = require('./expediente');
+const chaves = require('./chaves');
 // O mesmo registro da ponte: o arquivo e "o que o bot fez", e quem for
 // analisar quer os dois lados juntos -- quanto o atendimento resolveu e
 // quanto a ponte resolveu. Dois arquivos seriam duas analises pela metade.
@@ -148,7 +149,7 @@ async function acaoDoMenu(acao, { from, pushName }) {
     // Antes esta opção marcava modoIA e convidava o cliente a escrever — mas
     // sem IA não havia ninguém para ler, e a mensagem seguinte caía no
     // fallback. O cliente contava o problema e recebia o menu de volta.
-    if (!config.iaLigada) {
+    if (!chaves.ligada('ia')) {
       store.saveContact(from, { aguardandoProblema: true, menuNode: null, modoIA: false });
       await sender.send(
         from,
@@ -594,7 +595,10 @@ async function handleMessage(msg) {
   // resposta de LLM foi o que fazia o mesmo "#menu" voltar diferente a cada
   // envio — e o que abria espaço para prometer prazo e garantia que a loja não
   // pratica.
-  if (!config.iaLigada) {
+  // Pelo painel (#admin), nao direto do Environment: assim o dono liga e
+  // desliga pelo WhatsApp, na hora, sem deploy. A variavel continua sendo
+  // o padrao de fabrica -- ver src/chaves.js.
+  if (!chaves.ligada('ia')) {
     // LIMPA o modoIA junto — este era o bug que prendia o cliente em laço.
     //
     // As opções 6 e 7 marcavam modoIA:true para a conversa seguir livre. Com a

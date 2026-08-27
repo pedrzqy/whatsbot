@@ -34,6 +34,37 @@ telefone e o motivo.
 
 ## Os comandos, por situação
 
+### Ligar e desligar qualquer coisa
+
+Digite **`#admin`**. Ele mostra tudo com uma marca do lado:
+
+```
+⚙️ Painel
+
+1. ✅ Atendimento
+2. ⛔ Conversa livre
+3. ✅ Vender pelo chat
+4. ✅ Códigos de segurança
+5. ✅ Pedir sua aprovação
+6. ⛔ Responder o outro lado sozinho
+7. ✅ Perguntar se ativou
+8. ⛔ Chamar quem sumiu
+```
+
+| Comando | O que faz |
+|---|---|
+| `#admin` | A lista acima. |
+| `#admin 6` | Explica o que a 6 faz, e avisa do risco **antes** de você ligar. |
+| `#admin 6 on` | Liga. |
+| `#admin 6 off` | Desliga. |
+| `#admin 6 padrao` | Volta ao que está configurado no servidor. |
+
+**Vale na hora.** Não precisa mexer no Easypanel, não precisa Deploy, e a sua
+escolha sobrevive a deploy e a reinicialização.
+
+> **Antes de ligar a 6 ou a 8**, leia o aviso que o `#admin 6` mostra. São as
+> duas que falam para fora sem você ver.
+
 ### "Está tudo funcionando?"
 
 | Comando | O que faz |
@@ -78,14 +109,15 @@ comandos abaixo usam esse número.
 | `#limpar fila` | Encerra **todos** os atendimentos e avisa cada cliente. |
 | `#recarregar` | Recarrega a tela do navegador e reabre a conversa. |
 
-### Ligar e desligar
+### Atalhos antigos
 
-| Comando | O que faz |
+Continuam funcionando, e fazem a mesma coisa que o `#admin`:
+
+| Atalho | Igual a |
 |---|---|
-| `#atender off` | Para de responder cliente. `#atender on` volta. |
-| `#atender` | Só mostra se está ligado ou não. |
-| `#auto on` | O envio para o outro lado sai **sem** pedir seu `#ok`. |
-| `#auto off` | Volta a pedir aprovação em tudo. **É o modo recomendado.** |
+| `#atender on` / `#atender off` | `#admin 1 on` / `#admin 1 off` |
+| `#auto off` | `#admin 5 on` (volta a pedir sua aprovação — **é o recomendado**) |
+| `#auto on` | `#admin 5 off` (o envio sai sem o seu `#ok`) |
 
 ### Testar
 
@@ -108,19 +140,21 @@ digitar.
 
 ---
 
-## As chaves do painel (Easypanel → whatsbot → Environment)
+## O que ainda mora no Easypanel
 
-Mudar qualquer uma delas exige **Deploy** depois.
+Quase tudo se liga e desliga pelo **`#admin`**. Só estas exigem o painel do
+servidor e **Deploy** depois:
 
 | Variável | Para quê |
 |---|---|
-| `BOT_IA=true` | Liga a IA como atendimento principal. Com `false`, quem responde é o menu. **Reverter é trocar para `false` — sem deploy, vale na hora.** |
-| `ANTHROPIC_API_KEY` | A chave da IA. Sem ela o bot não quebra: continua atendendo pela configuração reserva. |
-| `PONTE_ATIVA=true` | Liga a busca de código de segurança com o outro lado. |
-| `PONTE_REPERTORIO=true` | Deixa o bot responder o outro lado sozinho, só com frases que você escreveu. **Nasce desligado — deixe assim até olhar o `#casos` por uma semana.** |
-| `POSVENDA_REATIVAR=true` | Manda mensagem para quem comprou e sumiu. **Nasce desligado, e eu recomendo deixar assim:** é a única coisa que fala com quem não puxou conversa, e mensagem em massa é como se perde o número. |
-| `ATENDENTE_INICIO_HORA` / `ATENDENTE_FIM_HORA` | Seu horário. O bot atende 24h de qualquer jeito; isso só muda o que ele **promete** — fora do horário ele diz quando você responde, em vez de "em instantes". |
+| `ANTHROPIC_API_KEY` | A chave da IA. Sem ela o atendimento não quebra: continua funcionando pela configuração reserva. |
+| `NERIX_API_KEY` | A chave da loja. |
+| `EVOLUTION_API_KEY` | A chave do WhatsApp. |
+| `ATENDENTE_INICIO_HORA` / `ATENDENTE_FIM_HORA` | Seu horário. O atendimento roda 24h de qualquer jeito; isso só muda o que ele **promete** — fora do horário ele diz quando você responde, em vez de "em instantes". |
 | `PONTE_SELLER_JANELAS` | O horário em que o outro lado costuma responder. |
+
+Segredo continua no painel de propósito: ligar e desligar função é decisão do
+dia a dia, guardar chave é outra coisa.
 
 > **Atenção:** se a variável já existe no Environment, o valor dela **vence** o
 > que está escrito no código. Mudar só o código não faz nada.
@@ -133,7 +167,9 @@ Mudar qualquer uma delas exige **Deploy** depois.
 2. Se o cliente estiver travado, peça para ele digitar **`#inicio`**.
 3. Se a fila estiver parada, **`#fila`** mostra o porquê e **`#destravar`** ou
    **`#pular`** resolvem.
-4. Para desligar tudo rápido: **`#atender off`**.
+4. Para desligar tudo rápido: **`#admin 1 off`** (ou `#atender off`).
+5. Para desligar só a parte que está dando problema: **`#admin`** e desliga
+   o número dela.
 
 O bot nunca diz ao cliente que teve erro, nem que existe um fornecedor, nem que
 é um robô. Se você escrever isso num `#editar` ou `#responder`, ele tira antes

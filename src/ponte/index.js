@@ -573,7 +573,7 @@ async function jogoDoPedido(atendimento) {
  *  4. `politica.paraFornecedor` na saída, dentro do despachar.
  */
 async function tentarResponder(atendimento, textoDele) {
-  if (!cfg.repertorioLigado) return false;
+  if (!require('../chaves').ligada('repertorio')) return false;
 
   // 1. O freio.
   if ((atendimento.turnos || 0) >= cfg.fila.maxTurnos) {
@@ -1120,15 +1120,23 @@ function operadorEmTeste(from) {
  * aprovar um a um costuma ser tomada no meio de um atendimento.
  */
 function modoAtual() {
-  return dados.modo === 'autopiloto' || dados.modo === 'copiloto' ? dados.modo : cfg.modo;
+  // Uma fonte so, compartilhada com o #admin.
+  //
+  // O #auto gravava em `dados.modo` e o painel leria outra coisa -- os dois
+  // mostrariam estados diferentes da MESMA chave, que e o tipo de divergencia
+  // que faz o operador desligar algo achando que desligou outra.
+  //
+  // `dados.modo` continua sendo lido para nao perder a escolha de quem ja usou
+  // o #auto antes desta versao.
+  if (dados.modo === 'autopiloto' || dados.modo === 'copiloto') return dados.modo;
+  return require('../chaves').ligada('aprovacao') ? 'copiloto' : 'autopiloto';
 }
 
 function atendimentoLigado() {
+  // `dados.botLigado` primeiro, pelo mesmo motivo do modoAtual: nao perder a
+  // escolha de quem ja usou o #atender antes do painel existir.
   if (dados.botLigado === true || dados.botLigado === false) return dados.botLigado;
-  // config RAIZ, não o da ponte: `cfg` aqui é ./config (ponte/config.js), que
-  // não tem autoReply — usar ele devolvia undefined, e undefined não é false.
-  // O bot seguiria respondendo com a variável desligada.
-  return require('../config').autoReply;
+  return require('../chaves').ligada('atendimento');
 }
 
 module.exports = {

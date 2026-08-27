@@ -34,6 +34,7 @@ const { dados, persistAgora, emTeste, marcarTeste, contarIgnorados } = require('
 const AJUDA = [
   '*Comandos*',
   '',
+  '*#admin* — painel: liga e desliga cada função',
   '*#status* — testa tudo e diz o que está errado',
   '*#fila* — quem está sendo atendido e quem espera',
   '*#vendas* — vendas de hoje, faturamento e o que falta entregar',
@@ -67,7 +68,7 @@ const min = (ms) => Math.round(ms / 60000);
 function ehComando(from, texto) {
   if (!cfg.ativa || !cfg.operador.numeros.length) return false;
   if (!cfg.operador.ehOperador(from)) return false;
-  return /^#(fila|status|vendas|historico|liberar|ok|enviar|editar|responder|casos|analisar|nao|não|pular|ajuda|sms|taobao|teste|limpar|destravar|atender|auto|recarregar)\b/i.test(
+  return /^#(fila|status|vendas|historico|liberar|ok|enviar|editar|responder|casos|analisar|admin|nao|não|pular|ajuda|sms|taobao|teste|limpar|destravar|atender|auto|recarregar)\b/i.test(
     String(texto || '').trim(),
   );
 }
@@ -912,6 +913,92 @@ async function executar(texto, de = '') {
     }
 
     linhas.push('', `_O arquivo está em \`${hermes.ARQUIVO}\`._`);
+    return linhas.join('\n');
+  }
+
+  // ── #admin — o painel ──────────────────────────────────
+  //
+  // Ligar e desligar coisa exigia abrir o Easypanel, achar a variável, editar e
+  // dar Deploy — dois minutos de bot fora do ar por causa de um `false` virando
+  // `true`. E o dono não é técnico: na prática ele não mexia, e as travas que
+  // nasceram desligadas ficavam desligadas para sempre porque ligá-las dava
+  // trabalho demais.
+  //
+  // Por NÚMERO e não por nome: ele digita isso no celular, no meio de outra
+  // coisa. `#admin 6 on` sai numa tacada; `#admin repertorio on` obriga a
+  // lembrar a grafia, e errar devolve "não achei".
+  if (cmd === 'admin') {
+    const chaves = require('../chaves');
+    const alvo = (id || '').trim();
+    const acao = (palavras[0] || '').trim().toLowerCase();
+
+    // ── #admin — a lista ──
+    if (!alvo) {
+      const linhas = ['⚙️ *Painel*', ''];
+      for (const c of chaves.situacao()) {
+        linhas.push(`*${c.numero}.* ${c.ligada ? '✅' : '⛔'} ${c.nome}`);
+      }
+      linhas.push(
+        '',
+        '*#admin 2* — o que é a 2',
+        '*#admin 2 on* — liga · *#admin 2 off* — desliga',
+        '',
+        '_Vale na hora, sem precisar mexer no painel do servidor._',
+      );
+      return linhas.join('\n');
+    }
+
+    const c = chaves.achar(alvo);
+    if (!c) {
+      return `Não achei a opção \`${alvo}\`. Manda *#admin* para ver a lista.`;
+    }
+    const numero = chaves.CATALOGO.indexOf(c) + 1;
+
+    // ── #admin 2 — explica ──
+    if (!acao) {
+      const estado = chaves.ligada(c.id);
+      const linhas = [
+        `*${numero}. ${c.nome}* — ${estado ? '✅ ligado' : '⛔ desligado'}`,
+        '',
+        c.explica,
+      ];
+      if (c.cuidado) linhas.push('', `⚠️ ${c.cuidado}`);
+      linhas.push(
+        '',
+        estado ? `Para desligar: *#admin ${numero} off*` : `Para ligar: *#admin ${numero} on*`,
+      );
+      // Só aparece quando ele já mexeu: dizer "está no padrão" numa chave que
+      // ninguém tocou é informação sobre nada.
+      if (chaves.foiMexida(c.id)) {
+        linhas.push(`_Voltar ao padrão de fábrica: *#admin ${numero} padrao*_`);
+      }
+      return linhas.join('\n');
+    }
+
+    // ── #admin 2 on|off|padrao ──
+    let valor;
+    if (/^(on|liga|ligar|sim|1)$/.test(acao)) valor = true;
+    else if (/^(off|desliga|desligar|nao|não|0)$/.test(acao)) valor = false;
+    else if (/^(padrao|padrão|reset)$/.test(acao)) valor = null;
+    else return `Não entendi "${acao}". Use *#admin ${numero} on* ou *#admin ${numero} off*.`;
+
+    const antes = chaves.ligada(c.id);
+    const r = chaves.definir(c.id, valor);
+    if (!r.ok) return `Não achei a opção \`${alvo}\`.`;
+
+    if (antes === r.ligada && valor !== null) {
+      return `*${c.nome}* já estava ${r.ligada ? 'ligado' : 'desligado'}. Nada mudou.`;
+    }
+
+    const linhas = [
+      `${r.ligada ? '✅' : '⛔'} *${c.nome}* ${r.ligada ? 'LIGADO' : 'DESLIGADO'}.`,
+      '',
+      c.explica,
+    ];
+    // O aviso aparece ao LIGAR algo de risco alto, que é quando ele importa.
+    // Ao desligar, o risco some — repetir o aviso ali seria ruído.
+    if (c.cuidado && r.ligada) linhas.push('', `⚠️ ${c.cuidado}`);
+    linhas.push('', `_Já está valendo. Para voltar: *#admin ${numero} ${r.ligada ? 'off' : 'on'}*._`);
     return linhas.join('\n');
   }
 

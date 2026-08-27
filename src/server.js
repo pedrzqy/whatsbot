@@ -12,6 +12,7 @@ const vendas = require('./vendas');
 const bracoRouter = require('./ponte/braco');
 const transcricao = require('./transcricao');
 const posvenda = require('./posvenda');
+const chaves = require('./chaves');
 
 const app = express();
 // 12mb: a foto do cliente chega em base64 pela rota do braço, e base64 infla ~33%.
@@ -102,13 +103,13 @@ app.post('/webhooks/evolution', async (req, res) => {
     // gasto num dado que estava ali e ninguém olhou.
     let imagem = null;
     let imagemBase64 = null;
-    if (message.imageMessage && (ponte.ativa() || config.iaLigada)) {
+    if (message.imageMessage && (ponte.ativa() || chaves.ligada('ia'))) {
       try {
         const midia = await evolution.getBase64FromMediaMessage(data);
         // O caminho em disco é o que a ponte manda para o outro lado; o base64
         // é o que o modelo enxerga. São usos diferentes do mesmo download.
         if (ponte.ativa()) imagem = await ponte.salvarImagem(midia.base64, midia.mimetype);
-        if (config.iaLigada) {
+        if (chaves.ligada('ia')) {
           imagemBase64 = { base64: midia.base64, mimetype: midia.mimetype || 'image/jpeg' };
         }
       } catch (err) {

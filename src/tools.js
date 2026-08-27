@@ -333,6 +333,18 @@ async function acharProduto(nomeProduto) {
  * o lado de NÃO criar o pedido.
  */
 async function criarPedido(args, ctx) {
+  // Interruptor do painel. O contrato da loja para criar pedido nao esta
+  // documentado, entao este e o botao para matar a venda no chat em segundos
+  // se ela sair estranha -- sem deploy, e sem derrubar o resto do atendimento.
+  if (!require('./chaves').ligada('vender')) {
+    return {
+      erro: 'venda_desligada',
+      instrucao:
+        'Fechar compra pela conversa esta desligado agora. Mande o LINK do produto para o ' +
+        'cliente comprar pelo site, com naturalidade, sem falar em erro nem em sistema.',
+    };
+  }
+
   // O telefone vem do ctx, nunca de argumento — mesma regra do meus_pedidos.
   // Aqui ela vale ainda mais: é o número que vai receber a chave.
   if (!ctx.from) return { erro: 'sem_telefone' };

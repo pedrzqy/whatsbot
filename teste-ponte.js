@@ -2042,6 +2042,127 @@ const OP = '5541999999999';
   fsH.rmSync(registroH.FILE, { force: true });
   fsH.rmSync(hermes.ARQUIVO, { force: true });
 
+  // ── O painel do dono ───────────────────────────────────────
+  //
+  // Ligar e desligar coisa exigia abrir o Easypanel, achar a variável, editar e
+  // dar Deploy. O dono não é técnico: na prática ele não mexia, e as travas que
+  // nasceram desligadas ficavam desligadas para sempre porque ligá-las dava
+  // trabalho demais.
+  bloco('#admin — o painel');
+
+  const chavesMod = require('./src/chaves');
+  const estadoAdm = require('./src/ponte/estado');
+  estadoAdm.dados.chaves = {};
+
+  const lista = await operador.executar('#admin', OP);
+  t('lista todas as funções', chavesMod.CATALOGO.every((c) => lista.includes(c.nome)),
+    lista.split('\n')[2]);
+  t('  com o estado de cada uma', /✅|⛔/.test(lista));
+  t('  e ensina como mexer', /#admin 2 on/.test(lista), lista.split('\n').slice(-3)[0]);
+  // Sai pelo número comercial, como tudo.
+  t('  sem vocabulário proibido', !AUTOMACAO.test(lista) && !politica.temCJK(lista),
+    (lista.match(AUTOMACAO) || [''])[0] || 'limpo');
+
+  // ── Ligar e desligar, pelo NÚMERO ──
+  //
+  // Por número e não por nome: ele digita no celular, no meio de outra coisa.
+  // `#admin 6 on` sai numa tacada; o nome obriga a lembrar a grafia.
+  const antesDaMudanca = chavesMod.ligada('conferir');
+  const desligou = await operador.executar('#admin 7 off', OP);
+  t('desliga pelo número', chavesMod.ligada('conferir') === false, desligou.split('\n')[0]);
+  t('  e confirma o que mudou', /DESLIGADO/.test(desligou), desligou.split('\n')[0]);
+  t('  dizendo como voltar', /#admin 7 on/.test(desligou), desligou.split('\n').pop());
+
+  // A mudança tem que VALER, e não só aparecer na tela.
+  const posvendaAdm = require('./src/posvenda');
+  t('e a função para de verdade', (await posvendaAdm.conferirEntregas()) === 0);
+
+  await operador.executar('#admin 7 on', OP);
+  t('volta a ligar', chavesMod.ligada('conferir') === true);
+
+  // Pelo nome também funciona, para quem preferir.
+  await operador.executar('#admin conferir off', OP);
+  t('aceita o nome além do número', chavesMod.ligada('conferir') === false);
+  await operador.executar('#admin conferir on', OP);
+
+  // ── Sobrevive a restart ──
+  //
+  // É a razão de gravar no estado e não em memória: um deploy no meio da
+  // semana não pode desfazer o que o dono decidiu na segunda.
+  await operador.executar('#admin 7 off', OP);
+  t('a escolha fica gravada no estado', estadoAdm.dados.chaves.conferir === false,
+    JSON.stringify(estadoAdm.dados.chaves));
+  await operador.executar('#admin 7 padrao', OP);
+  t('e "padrao" apaga a escolha', estadoAdm.dados.chaves.conferir === undefined,
+    JSON.stringify(estadoAdm.dados.chaves));
+  t('  voltando ao valor do painel do servidor',
+    chavesMod.ligada('conferir') === antesDaMudanca, String(chavesMod.ligada('conferir')));
+
+  // ── Explicar antes de mexer ──
+  const explica = await operador.executar('#admin 6', OP);
+  t('explica o que a função faz', explica.length > 60, explica.split('\n')[0]);
+  // O aviso do que é arriscado tem que aparecer ANTES de ligar, não depois.
+  t('  e avisa do risco antes de ligar', /⚠️/.test(explica), explica);
+  t('  sem vocabulário proibido', !AUTOMACAO.test(explica) && !politica.temCJK(explica),
+    (explica.match(AUTOMACAO) || [''])[0] || 'limpo');
+
+  // ── O que não pode acontecer ──
+  const naoExiste = await operador.executar('#admin 99 on', OP);
+  t('número que não existe não quebra', /não achei/i.test(naoExiste), naoExiste);
+  t('  e nada foi ligado', Object.keys(estadoAdm.dados.chaves).length === 0,
+    JSON.stringify(estadoAdm.dados.chaves));
+
+  const acaoEstranha = await operador.executar('#admin 7 talvez', OP);
+  t('ação que não é on/off não muda nada', /não entendi/i.test(acaoEstranha), acaoEstranha);
+
+  const jaEstava = await operador.executar('#admin 7 on', OP);
+  const deNovo = await operador.executar('#admin 7 on', OP);
+  t('ligar o que já estava ligado avisa em vez de fingir',
+    /já estava/i.test(deNovo), deNovo);
+
+  // ── O painel e os comandos antigos falam da MESMA chave ──
+  //
+  // O #auto gravava em `dados.modo` e o painel leria outra coisa: os dois
+  // mostrariam estados diferentes da mesma coisa, e é assim que o operador
+  // desliga algo achando que desligou outra.
+  const ponteAdm = require('./src/ponte');
+  estadoAdm.dados.modo = null;
+  estadoAdm.dados.chaves = {};
+
+  await operador.executar('#admin 5 off', OP); // "pedir sua aprovação" off
+  t('desligar a aprovação pelo painel vira autopiloto',
+    ponteAdm.modoAtual() === 'autopiloto', ponteAdm.modoAtual());
+  await operador.executar('#admin 5 on', OP);
+  t('  e ligar volta para copiloto', ponteAdm.modoAtual() === 'copiloto', ponteAdm.modoAtual());
+
+  estadoAdm.dados.botLigado = null;
+  estadoAdm.dados.chaves = {};
+  await operador.executar('#admin 1 off', OP);
+  t('desligar o atendimento pelo painel vale',
+    ponteAdm.atendimentoLigado() === false, String(ponteAdm.atendimentoLigado()));
+  await operador.executar('#admin 1 on', OP);
+
+  // ── A venda respeita o interruptor ──
+  //
+  // O contrato da loja para criar pedido não está documentado: este é o botão
+  // para matar a venda no chat em segundos se ela sair estranha.
+  estadoAdm.dados.chaves = {};
+  await operador.executar('#admin 3 off', OP);
+  const vendaDesligada = await tools.execute(
+    'criar_pedido',
+    { produto: 'x', preco_informado: 'R$ 1.00', nome_completo: 'Ana Silva', email: 'a@b.com' },
+    { from: '5541900001111' },
+  );
+  t('venda desligada não cria pedido', vendaDesligada.erro === 'venda_desligada',
+    vendaDesligada.erro);
+  t('  e manda o cliente para o site', /LINK|site/i.test(vendaDesligada.instrucao || ''),
+    vendaDesligada.instrucao);
+  t('  sem admitir defeito', /sem falar em erro/i.test(vendaDesligada.instrucao || ''));
+
+  estadoAdm.dados.chaves = {};
+  estadoAdm.dados.modo = null;
+  estadoAdm.dados.botLigado = null;
+
   // ── Com a IA ligada: o que muda e o que NÃO pode mudar ─────
   //
   // Este bloco existe porque BOT_IA=true troca o caminho principal do

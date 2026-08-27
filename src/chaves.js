@@ -1,0 +1,182 @@
+'use strict';
+
+/**
+ * As chaves do bot — ligar e desligar pelo WhatsApp, sem deploy.
+ *
+ * Antes disto, mudar qualquer comportamento significava abrir o Easypanel,
+ * achar a variável, editar e dar Deploy — dois minutos de bot fora do ar por
+ * causa de um `false` virando `true`. E o dono não é técnico: na prática ele
+ * simplesmente não mexia, e as travas de segurança que nasceram desligadas
+ * ficavam desligadas para sempre porque ligá-las dava trabalho demais.
+ *
+ * O padrão já existia em dois lugares — `dados.botLigado` (#atender) e
+ * `dados.modo` (#auto), que vencem a variável de ambiente. Aqui ele vira geral:
+ *
+ *   valor gravado no estado  →  se não houver, o padrão do Environment
+ *
+ * O estado mora no volume, então a escolha sobrevive a deploy e a restart. E a
+ * variável continua sendo o padrão de fábrica: apagar a chave gravada devolve o
+ * comportamento configurado no painel.
+ *
+ * O que NÃO entra aqui: chave de API. Ligar e desligar comportamento é decisão
+ * de operação; guardar segredo é outra coisa, e continua no Environment.
+ */
+
+const config = require('./config');
+const cfgPonte = require('./ponte/config');
+const { dados, persistAgora } = require('./ponte/estado');
+
+/**
+ * O catálogo. A ORDEM é o número que o operador digita (#admin 3 off), então
+ * ela não pode mudar sem avisar — ele decora a posição, não o nome.
+ *
+ *   id      nome curto, usado no log e no comando por extenso
+ *   nome    o que o dono lê
+ *   explica uma frase sobre o que muda quando desliga
+ *   padrao  função que devolve o padrão do Environment
+ *   risco   'baixo' | 'medio' | 'alto' — o que a confirmação usa
+ *   cuidado o que ele precisa saber ANTES de ligar (só nos de risco alto)
+ */
+const CATALOGO = [
+  {
+    id: 'atendimento',
+    nome: 'Atendimento',
+    explica: 'Responder mensagem de cliente. Desligado, a mensagem chega e ninguém responde.',
+    padrao: () => config.autoReply,
+    risco: 'medio',
+  },
+  {
+    id: 'ia',
+    nome: 'Conversa livre',
+    explica:
+      'A IA responde o que o menu não cobre, com as palavras dela. ' +
+      'Desligada, quem responde é o menu numerado, com texto pronto.',
+    padrao: () => config.iaLigada,
+    risco: 'medio',
+  },
+  {
+    id: 'vender',
+    nome: 'Vender pelo chat',
+    explica:
+      'Fechar a compra na conversa e mandar o Pix. Desligado, o cliente recebe o ' +
+      'link do site, como antes.',
+    padrao: () => config.venderNoChat,
+    risco: 'medio',
+  },
+  {
+    id: 'codigos',
+    nome: 'Códigos de segurança',
+    explica: 'Buscar o código com o outro lado quando o cliente precisa.',
+    padrao: () => cfgPonte.ativa,
+    risco: 'medio',
+  },
+  {
+    id: 'aprovacao',
+    nome: 'Pedir sua aprovação',
+    explica:
+      'Nada sai para o outro lado sem o seu #ok. Desligado, sai sozinho.',
+    // Ao contrário das outras, esta vem do MODO e não de um booleano: ligada
+    // significa copiloto.
+    padrao: () => cfgPonte.modo !== 'autopiloto',
+    risco: 'alto',
+    cuidado:
+      'Desligando isso, mensagens saem para o outro lado sem você ver. ' +
+      'É o freio principal do sistema.',
+  },
+  {
+    id: 'repertorio',
+    nome: 'Responder o outro lado sozinho',
+    explica:
+      'As perguntas repetidas dele são respondidas com uma frase que você ' +
+      'escreveu. Fora da lista, o atendimento chama você.',
+    padrao: () => cfgPonte.repertorioLigado,
+    risco: 'alto',
+    cuidado:
+      'É a única parte que escreve para fora. Só ligue depois de olhar o ' +
+      '#casos por uns dias.',
+  },
+  {
+    id: 'conferir',
+    nome: 'Perguntar se ativou',
+    explica: 'Três horas depois de entregar a chave, pergunta se deu certo.',
+    padrao: () => config.posvenda.conferirLigado,
+    risco: 'baixo',
+  },
+  {
+    id: 'reativar',
+    nome: 'Chamar quem sumiu',
+    explica: 'Manda mensagem para quem comprou, gostou e sumiu faz tempo.',
+    padrao: () => config.posvenda.reativarLigado,
+    risco: 'alto',
+    cuidado:
+      'É a única coisa que fala com quem não puxou conversa. Mensagem em ' +
+      'massa é como se perde o número do WhatsApp.',
+  },
+];
+
+const porId = (id) => CATALOGO.find((c) => c.id === id) || null;
+
+/** Aceita o número do menu (1-based) ou o nome. Devolve a chave ou null. */
+function achar(alvo) {
+  const bruto = String(alvo || '').trim().toLowerCase();
+  if (!bruto) return null;
+  if (/^\d+$/.test(bruto)) return CATALOGO[Number(bruto) - 1] || null;
+  return porId(bruto);
+}
+
+/**
+ * Está ligada?
+ *
+ * O gravado vence o padrão, e só quando é booleano de verdade: `undefined` e
+ * `null` significam "nunca mexeram nisso", que é diferente de "desligado".
+ * Foi assim que o `atendimentoLigado` já fazia, e é o que permite apagar a
+ * escolha para voltar ao padrão do painel.
+ */
+function ligada(id) {
+  const c = porId(id);
+  if (!c) return false;
+  const gravado = (dados.chaves || {})[id];
+  return typeof gravado === 'boolean' ? gravado : Boolean(c.padrao());
+}
+
+/** Alguém já mexeu nesta chave pelo WhatsApp? */
+function foiMexida(id) {
+  return typeof (dados.chaves || {})[id] === 'boolean';
+}
+
+/**
+ * Liga ou desliga. `null` apaga a escolha e volta ao padrão do Environment.
+ * @returns {{ok:boolean, chave?:object, ligada?:boolean, erro?:string}}
+ */
+function definir(alvo, valor) {
+  const c = achar(alvo);
+  if (!c) return { ok: false, erro: 'nao_achei' };
+
+  if (!dados.chaves) dados.chaves = {};
+  if (valor === null) delete dados.chaves[c.id];
+  else dados.chaves[c.id] = Boolean(valor);
+
+  // persistAgora e não persist: isto é uma decisão do operador, e um deploy
+  // logo depois não pode perdê-la no debounce de 400ms.
+  persistAgora();
+
+  const agora = ligada(c.id);
+  console.log(`[chaves] ${c.id} = ${agora}${valor === null ? ' (voltou ao padrão)' : ''}`);
+  return { ok: true, chave: c, ligada: agora };
+}
+
+/** Foto de todas, para o painel. */
+function situacao() {
+  return CATALOGO.map((c, i) => ({
+    numero: i + 1,
+    id: c.id,
+    nome: c.nome,
+    explica: c.explica,
+    risco: c.risco,
+    cuidado: c.cuidado || null,
+    ligada: ligada(c.id),
+    mexida: foiMexida(c.id),
+  }));
+}
+
+module.exports = { CATALOGO, ligada, definir, achar, situacao, foiMexida };
