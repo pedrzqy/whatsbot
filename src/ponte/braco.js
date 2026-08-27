@@ -114,7 +114,11 @@ router.post('/historico', async (req, res) => {
     return res.json({ ok: false });
   }
 
-  const arquivo = path.join(DATA_DIR, 'historico-fornecedor.json');
+  // Nome NEUTRO de propósito. Com 'fornecedor' no nome, o limparAlerta()
+  // reescrevia a palavra na mensagem e mandava o operador procurar um
+  // arquivo que não existe — o filtro fez o trabalho dele e a mensagem
+  // passou a mentir sobre o caminho.
+  const arquivo = path.join(DATA_DIR, 'historico-coleta.json');
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
     fs.writeFileSync(arquivo, JSON.stringify(mensagens, null, 2), 'utf8');
@@ -135,7 +139,7 @@ router.post('/historico', async (req, res) => {
     `📚 *Histórico exportado.*\n\n` +
       `${mensagens.length} mensagens · ${nossas} suas\n` +
       `Período: ${periodo}\n\n` +
-      `_Está salvo no servidor, em data/historico-fornecedor.json._`,
+      `_Está salvo no servidor, em data/historico-coleta.json._`,
   );
 
   res.json({ ok: true, gravadas: mensagens.length });

@@ -755,6 +755,18 @@ const OP = '5541999999999';
 
   estadoPonte.dados.historicoPedido = false;
 
+  // O nome do arquivo tem que SOBREVIVER ao filtro de vocabulário.
+  //
+  // Ele se chamava historico-fornecedor.json, e o limparAlerta() reescrevia a
+  // palavra na mensagem: o operador recebia o caminho de um arquivo que não
+  // existe. O filtro fez o trabalho dele; quem estava errado era o nome.
+  const caminhoNaMensagem = '_Está salvo no servidor, em data/historico-coleta.json._';
+  t(
+    'o caminho do arquivo passa intacto pelo filtro',
+    !politica.limparAlerta(caminhoNaMensagem).limpou,
+    politica.limparAlerta(caminhoNaMensagem).texto,
+  );
+
   // ── Vigia da coleta ────────────────────────────────────────
   //
   // O outro serviço pode morrer às 3 da manhã. Antes disto, ninguém era

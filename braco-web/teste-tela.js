@@ -216,6 +216,85 @@ t('nenhum candidato mira por posição', !CAND.some((c) => /nth-child|nth-of-typ
   // fornecedor — atividade que ninguém pediu, na conversa errada.
   t('e não desce a conversa errada', desceu2.n === 0);
 
+  // ── Histórico numa lista VIRTUALIZADA ──────────────────────
+  //
+  // O furo da primeira versão: o chat recicla os nós do DOM em vez de
+  // acumular. Rolar não aumenta a contagem de balões — ela fica parada em ~20.
+  // A versão que contava nós para saber se ainda vinha coisa nova via o número
+  // não mudar e parava na segunda rolagem, sempre com o mesmo dia na mão.
+  //
+  // Este dublê é uma lista virtualizada de verdade: 100 mensagens no total,
+  // mas só 20 visíveis por vez, e a janela anda conforme a rolagem.
+  console.log('\n--- histórico numa lista que recicla os nós ---');
+
+  const TOTAL = 100;
+  const JANELA = 20;
+  const todas = Array.from({ length: TOTAL }, (_, i) => ({
+    id: `m${i}`,
+    de: i % 3 === 0 ? 'nos' : 'coleta',
+    quando: `2026-08-${String(1 + Math.floor(i / 5)).padStart(2, '0')} 10:00:0${i % 10}`,
+    texto: `mensagem ${i}`,
+  }));
+
+  function chatVirtualizado({ alturaTela = 500 } = {}) {
+    const c = chatFalso(paginaFalsa(CHAT_URL));
+    c.prender = async () => {};
+    c.checarBloqueio = async () => {};
+
+    // Posição em "mensagens a partir do fim". 0 = fundo da lista.
+    let offset = 0;
+    c._rolarUmaTela = async () => {
+      const maximo = TOTAL - JANELA;
+      if (offset >= maximo) return 0; // topo
+      offset = Math.min(maximo, offset + JANELA / 2); // meia tela por vez
+      return offset >= maximo ? 0 : alturaTela;
+    };
+    // SEMPRE 20 itens — é isto que a versão antiga interpretava como "acabou".
+    c._coletarVisiveis = async () => {
+      const fim = TOTAL - offset;
+      return todas.slice(Math.max(0, fim - JANELA), fim);
+    };
+    return c;
+  }
+
+  const chatV = chatVirtualizado();
+  const hist = await chatV.lerHistorico({ maxRolagens: 40 });
+
+  t('acumula além da janela visível', hist.length === TOTAL, `${hist.length} de ${TOTAL}`);
+  t('não para na segunda rolagem', hist.length > JANELA * 2, `${hist.length}`);
+  t('traz os dois lados', hist.some((m) => m.de === 'nos') && hist.some((m) => m.de === 'coleta'));
+  t('sem duplicata', new Set(hist.map((m) => m.id)).size === hist.length);
+
+  // Ordem cronológica: as leituras vieram de trás para frente, então sem
+  // ordenar a conversa sai em blocos invertidos e não dá para seguir o fio.
+  const datas = hist.map((m) => m.quando);
+  t(
+    'em ordem cronológica',
+    datas.every((d, i) => i === 0 || datas[i - 1] <= d),
+    `${datas[0]} … ${datas[datas.length - 1]}`,
+  );
+
+  console.log('\n--- histórico quando o chat não rola ---');
+
+  const chatSemRolagem = chatVirtualizado();
+  chatSemRolagem._rolarUmaTela = async () => null; // não achou container
+  const so20 = await chatSemRolagem.lerHistorico({ maxRolagens: 40 });
+  // Sem container não há o que fazer, mas o que estava na tela tem que voltar:
+  // devolver vazio perderia a única coisa que dava para ler.
+  t('devolve pelo menos o que estava visível', so20.length === JANELA, `${so20.length}`);
+
+  console.log('\n--- histórico que chega ao fim sozinho ---');
+
+  const chatCurto = chatVirtualizado();
+  let voltas = 0;
+  chatCurto._rolarUmaTela = async () => { voltas++; return 0; }; // já no topo
+  chatCurto._coletarVisiveis = async () => todas.slice(0, JANELA); // nunca muda
+  await chatCurto.lerHistorico({ maxRolagens: 40 });
+  // Topo + nada novo tem que parar rápido. Sem isso o braço rolaria 40 vezes
+  // uma lista que acabou — 40 requisições à Taobao por nada.
+  t('para cedo quando não vem mais nada', voltas <= 4, `${voltas} rolagem(ns)`);
+
+
   console.log('');
   if (falhas) {
     console.log(`${falhas} falha(s).`);
