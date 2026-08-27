@@ -204,6 +204,26 @@ async function despachar(atendimento) {
     return;
   }
 
+  // Filtro de SAÍDA, ligado antes de haver o que filtrar.
+  //
+  // Hoje o único texto que atravessa é o usuário alfanumérico, então isto não
+  // muda nada — e é exatamente por isso que é a hora de ligar. Quando a Fase 5
+  // fizer sair texto de verdade, o filtro já vai estar no caminho, testado, em
+  // vez de ser lembrado depois que um telefone de cliente tiver passado.
+  //
+  // `validarUsuario` já barra espaço, @ e acento, então uma diferença aqui
+  // significa que a validação afrouxou ou que algo entrou por outro caminho.
+  // Nesse caso não sai nada: o operador decide.
+  const saida = politica.paraFornecedor(atendimento.usuario);
+  if (saida.texto !== atendimento.usuario || saida.flags.length) {
+    await alertar(
+      `⚠️ Não mandei o pedido de *${atendimento.nome}*: o usuário \`${atendimento.usuario}\`` +
+        ` tem dado que não pode sair daqui.\n\nConfere com ele e refaz.`,
+    );
+    console.warn(`[ponte] envio barrado por política: ${saida.flags.join(', ')}`);
+    return;
+  }
+
   const tarefa = {
     id: proximoId(),
     atendimentoId: atendimento.id,
@@ -218,6 +238,12 @@ async function despachar(atendimento) {
 
   dados.tarefas.push(tarefa);
   atendimento.imagemPendente = null;
+
+  // O lado do cliente no histórico. Sem os dois lados, o contexto que o
+  // tradutor recebe é meia conversa — e meia conversa às vezes é pior que
+  // nenhuma, porque parece completa.
+  fila.registrar(atendimento.id, 'cliente', atendimento.usuario, atendimento.usuario);
+
   persistAgora();
 
   if (modoAtual() === 'copiloto') {
@@ -350,16 +376,44 @@ async function receberDoFornecedor(entrada) {
     }
   }
 
+  // Filtra ANTES de o operador ler, e não só na saída.
+  //
+  // `politica.paraCliente` existia e nunca era chamada em src/. Nada vazava por
+  // acaso: o único texto que saía era um alfanumérico. Mas o que o operador
+  // lia era a tradução CRUA — com `¥70` e link da loja de origem dentro — e o
+  // #enviar mandava exatamente aquilo. Ele aprovava sem ter como saber que
+  // estava aprovando o preço de custo.
+  //
+  // Filtrando aqui, o que ele lê é o que o cliente vai ler. O original fica em
+  // `origem` para depurar tradução ruim.
+  const seguro = politica.paraCliente(traduzido);
+
   const aprovacao = {
     id: proximoId(),
     atendimentoId: at.id,
     cliente: at.nome,
     from: at.from,
     origem: entrada.texto,
-    texto: traduzido,
+    texto: seguro.texto,
+    flags: seguro.flags,
+    precisaRevisao: seguro.precisaRevisao,
     criadoEm: Date.now(),
   };
   dados.aprovacoes.push(aprovacao);
+
+  // Histórico: o tradutor sabe consumir e ninguém alimentava.
+  //
+  // `fila.registrar` estava escrito, testado e nunca chamado, então
+  // `at.historico` era sempre [] e o tradutor traduzia cada mensagem sozinha,
+  // sem saber do que a conversa tratava. É a diferença entre traduzir "有货" e
+  // traduzir "有货" sabendo que a pergunta foi sobre estoque.
+  fila.registrar(at.id, 'vendedor', entrada.texto, seguro.texto);
+
+  // Turno contado, que também estava morto: `at.turnos` era sempre 0, o
+  // PONTE_MAX_TURNOS era config sem efeito, e o #destravar dizia "atendimento
+  // parado" para todo atendimento, inclusive os que estavam indo bem.
+  const turno = fila.contarTurno(at.id);
+
   persistAgora();
 
   // SEM o texto original.
@@ -380,8 +434,27 @@ async function receberDoFornecedor(entrada) {
   // O id sai daqui mas não some — o #fila lista toda aprovação pendente com o
   // *#enviar <id>* ao lado. Era o único lugar que exibia o id, e é por isso
   // que o #fila passa a ser o caminho para responder.
+  //
+  // `seguro.texto` e não `traduzido`: o operador tem que ler EXATAMENTE o que o
+  // cliente leria com um #enviar. Mostrar a tradução crua aqui e filtrar só na
+  // saída faria ele aprovar uma coisa e o cliente receber outra.
+  const avisos = [];
+  if (seguro.precisaRevisao) {
+    // O que ele precisa saber ANTES de digitar #enviar, em português de gente.
+    // A flag crua ("preco_cny") não diz nada a quem está no celular.
+    if (seguro.flags.includes('preco_cny')) avisos.push('Tinha um valor aqui — conferir antes.');
+    if (seguro.flags.includes('decisao_comercial')) avisos.push('Isso é decisão sua, não só tradução.');
+    if (seguro.flags.includes('sobrou_original')) avisos.push('A tradução ficou incompleta.');
+  }
+  // Passou do teto de idas e vindas: provavelmente travou e continuar mandando
+  // não resolve. É o freio que o PONTE_MAX_TURNOS prometia e nunca aplicou.
+  if (turno.estourou) {
+    avisos.push(`Já são ${turno.turnos} idas e vindas — talvez seja hora de você assumir.`);
+  }
+
   await alertar(
-    `Cliente: *${at.nome}* · usuário \`${at.usuario}\`\n💬 ${traduzido}`,
+    `Cliente: *${at.nome}* · usuário \`${at.usuario}\`\n💬 ${seguro.texto}` +
+      (avisos.length ? `\n\n⚠️ ${avisos.join(' ')}` : ''),
     entrada.printPath,
   );
 }

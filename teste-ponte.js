@@ -381,8 +381,17 @@ const PROIBIDO = /fornecedor|taobao|chin[êe]s|vendedor|parceiro/i;
 // automático/automática/automaticamente/automatizado de uma vez.
 //
 // `\bbra[çc]o` com fronteira à esquerda para não acusar "abraço".
-const AUTOMACAO =
-  /\bbra[çc]o|rob[ôo]|\bbots?\b|autom[aá]tic\w*|automatiza\w*|\bscripts?\b|taobao|fornecedor/i;
+// VEM DO politica.js, e não é mais uma cópia.
+//
+// Era uma segunda lista escrita à mão aqui, e as duas divergiram sem ninguém
+// perceber: esta tinha `\bscripts?\b` e a do filtro não — então a palavra
+// "script" saía pelo número comercial e nada barrava. O teste passava sempre,
+// porque conferia as strings QUE ELE MONTA contra a lista DELE: provava que o
+// texto estava limpo, não que o filtro pegasse alguma coisa.
+//
+// A função devolve uma cópia nova sem /g a cada chamada — regex global guarda
+// lastIndex entre chamadas e alterna true/false na mesma entrada.
+const AUTOMACAO = politica.vocabularioProibido();
 
 // NUNCA dizer ao cliente que o pedido dele vai para outra pessoa.
 //
@@ -716,6 +725,29 @@ const OP = '5541999999999';
   const destravou = await operador.executar('#destravar', OP);
   t('#destravar aponta o atendimento parado', /atendimento/i.test(destravou), destravou.split('\n')[0]);
   t('e não manda só "veja o #fila"', !/^Nenhum envio preso\. Veja/.test(destravou));
+
+  // O OUTRO ramo, que antes era inalcançável.
+  //
+  // O diagnóstico testava `!turnos` num contador que estava morto — sempre 0 —
+  // então TODO atendimento ativo era chamado de "sem nenhum envio criado",
+  // inclusive um com envio saindo naquele instante. O operador lia que o
+  // atendimento estava parado e mandava #pular em cima de um pedido em curso.
+  const filaAtiva = filaMod.ativo();
+  estadoPonte.dados.tarefas.push({
+    id: 'tarefa-em-curso',
+    atendimentoId: filaAtiva.id,
+    tipo: 'pedir_codigo',
+    usuario: 'rrtt9321',
+    estado: 'pendente',
+    tentativas: 0,
+  });
+  const comEnvio = await operador.executar('#destravar', OP);
+  t('com envio em andamento NÃO diz que está parado',
+    !/sem nenhum envio criado/.test(comEnvio), comEnvio.split('\n')[0]);
+  t('  e diz que tem um a caminho', /em andamento/i.test(comEnvio), comEnvio.split('\n')[0]);
+  t('  sem vocabulário proibido', !AUTOMACAO.test(comEnvio) && !politica.temCJK(comEnvio),
+    (comEnvio.match(AUTOMACAO) || [''])[0] || 'limpo');
+  estadoPonte.dados.tarefas = estadoPonte.dados.tarefas.filter((t2) => t2.id !== 'tarefa-em-curso');
 
   // Os clientes PRECISAM ser avisados: encerrar calado deixa gente esperando
   // para sempre uma resposta que não vem mais.
@@ -1180,6 +1212,194 @@ const OP = '5541999999999';
   tradutorMod.paraCliente = traduzReal;
   estadoPonte.dados.atendimentos = [];
   estadoPonte.dados.aprovacoes = [];
+
+  // ── A segurança da ponte no caminho vivo ───────────────────
+  //
+  // `politica.paraCliente` e `paraFornecedor` existiam, eram testadas em
+  // isolamento e NUNCA eram chamadas em src/. Nada vazava por acaso: o único
+  // texto que saía era um alfanumérico e o único que entrava ia para um humano
+  // ler. Este bloco é o que transforma esse acidente em garantia.
+  bloco('preço, link e PII no caminho vivo');
+
+  const tradutorF4 = require('./src/ponte/tradutor');
+  const traduzAntesF4 = tradutorF4.paraCliente;
+
+  /** Recebe uma resposta do fornecedor e devolve o que sobrou para o operador. */
+  async function receberDele(textoZh, traducao) {
+    estadoPonte.dados.atendimentos = [];
+    estadoPonte.dados.tarefas = [];
+    estadoPonte.dados.aprovacoes = [];
+
+    const r = await filaMod.entrar('5541944440001', 'Ana');
+    r.atendimento.usuario = 'rrtt9321';
+
+    tradutorF4.paraCliente = async () => ({ traducao, resumo: '', confianca: 'alta' });
+
+    const senderF4 = require('./src/sender');
+    const antes = senderF4.send;
+    const saiu = [];
+    senderF4.send = async (para, txt) => { saiu.push({ para, texto: String(txt) }); };
+    try {
+      await ponteMod.receberDoFornecedor({ texto: textoZh });
+    } finally {
+      senderF4.send = antes;
+    }
+    return {
+      aoOperador: saiu.filter((s) => s.para === OP).map((s) => s.texto).join('\n'),
+      aprovacao: estadoPonte.dados.aprovacoes[0],
+      atendimento: filaMod.ativo(),
+    };
+  }
+
+  /** Aprova a resposta pendente e devolve o que o CLIENTE recebeu. */
+  async function aprovar(comando) {
+    const senderF4 = require('./src/sender');
+    const antes = senderF4.send;
+    const saiu = [];
+    senderF4.send = async (para, txt) => { saiu.push({ para, texto: String(txt) }); };
+    let resposta;
+    try {
+      resposta = await operador.executar(comando, OP);
+    } finally {
+      senderF4.send = antes;
+    }
+    return {
+      aoCliente: saiu.filter((s) => s.para === '5541944440001').map((s) => s.texto).join('\n'),
+      aoOperador: resposta,
+    };
+  }
+
+  // ── Preço em yuan ──
+  // O custo em CNY é a margem da Phaze. Chegando ao cliente, ele calcula em
+  // dez segundos quanto a loja ganha.
+  const comPreco = await receberDele('这个要70元', 'esse custa 70 元');
+
+  t('o operador já lê SEM o valor cru', !/70\s*元/.test(comPreco.aoOperador), comPreco.aoOperador);
+  t('  e é avisado de que havia um valor',
+    /valor/i.test(comPreco.aoOperador), comPreco.aoOperador.split('\n').pop());
+
+  const enviouPreco = await aprovar(`#enviar ${comPreco.aprovacao.id}`);
+  t('o valem em yuan NÃO chega ao cliente',
+    !/元|¥|70\s*(元|yuan)/i.test(enviouPreco.aoCliente), enviouPreco.aoCliente);
+  t('  e o cliente recebe alguma coisa', enviouPreco.aoCliente.trim().length > 0);
+
+  // ── Link da loja de origem ──
+  const comLink = await receberDele(
+    '看 https://item.taobao.com/i.htm?id=123 有货',
+    'veja https://item.taobao.com/i.htm?id=123 tem em estoque',
+  );
+  const enviouLink = await aprovar(`#enviar ${comLink.aprovacao.id}`);
+  t('link da origem NÃO chega ao cliente',
+    !/taobao|item\.tao|https?:\/\//i.test(enviouLink.aoCliente), enviouLink.aoCliente);
+  t('  nem a palavra que entrega a origem',
+    !PROIBIDO.test(enviouLink.aoCliente) && !AUTOMACAO.test(enviouLink.aoCliente),
+    enviouLink.aoCliente);
+
+  // ── O #editar: o vazamento que existia HOJE ──
+  //
+  // É o único caminho em que texto HUMANO não revisado chega ao cliente. O
+  // operador digita no celular, olhando a tradução do outro lado, e é aí que
+  // sai um ¥70 ou um link copiado sem querer.
+  const paraEditar = await receberDele('稍等', 'aguarde um pouco');
+  const editou = await aprovar(
+    `#editar ${paraEditar.aprovacao.id} Custa ¥70 aqui, olha https://item.taobao.com/i.htm - 好的`,
+  );
+
+  t('o #editar não deixa passar o valor', !/¥|70/.test(editou.aoCliente), editou.aoCliente);
+  t('  nem o link', !/taobao|https?:\/\//i.test(editou.aoCliente), editou.aoCliente);
+  t('  nem caractere chinês', !politica.temCJK(editou.aoCliente), editou.aoCliente);
+  t('  nem vocabulário proibido', !AUTOMACAO.test(editou.aoCliente), editou.aoCliente);
+  // E o operador precisa saber que o que saiu não é o que ele digitou.
+  t('  e o operador é avisado do que foi tirado',
+    /tirei o que n[ãa]o podia sair/i.test(editou.aoOperador), editou.aoOperador);
+
+  // Texto que vira nada depois do filtro não pode sair como bolha vazia com a
+  // vez encerrada — pior que não mandar.
+  const soPreco = await receberDele('稍等', 'aguarde');
+  const vazio = await aprovar(`#editar ${soPreco.aprovacao.id} ¥70`);
+  t('texto que some no filtro não é enviado', vazio.aoCliente.trim() === '', vazio.aoCliente);
+  t('  e o operador é mandado escrever', /#editar/.test(vazio.aoOperador), vazio.aoOperador);
+
+  // ── PII do cliente não sai daqui ──
+  //
+  // Hoje só o usuário alfanumérico atravessa, então o filtro de saída não muda
+  // nada — e é por isso que é a hora de ligá-lo: quando sair texto de verdade,
+  // ele já vai estar no caminho.
+  bloco('PII do cliente não vai para o outro lado');
+
+  const saidaLimpa = politica.paraFornecedor('rrtt9321');
+  t('usuário normal passa intacto', saidaLimpa.texto === 'rrtt9321' && !saidaLimpa.flags.length,
+    JSON.stringify(saidaLimpa));
+
+  for (const [nome, sujo] of [
+    ['telefone', 'me liga 41 99999-8888'],
+    ['e-mail', 'ana@exemplo.com'],
+    ['CPF', '123.456.789-00'],
+    ['preço em real', 'paguei R$ 49,90'],
+  ]) {
+    const r = politica.paraFornecedor(sujo);
+    t(`${nome} é removido da saída`, r.texto !== sujo && r.flags.length > 0,
+      `${r.texto} · ${r.flags.join(',')}`);
+  }
+
+  // O despachar barra em vez de mandar: uma diferença aqui significa que a
+  // validação do usuário afrouxou, e o certo é o operador olhar.
+  estadoPonte.dados.atendimentos = [];
+  estadoPonte.dados.tarefas = [];
+  const comPII = await filaMod.entrar('5541944440009', 'Beto');
+  comPII.atendimento.usuario = 'ana@exemplo.com';
+  const alertasSaida = [];
+  const senderSaida = require('./src/sender');
+  const sendSaidaAntes = senderSaida.send;
+  senderSaida.send = async (para, txt) => { alertasSaida.push({ para, texto: String(txt) }); };
+  await ponteMod.promoverProximo();
+  senderSaida.send = sendSaidaAntes;
+
+  t('envio com PII no usuário é BARRADO',
+    !estadoPonte.dados.tarefas.length, `${estadoPonte.dados.tarefas.length} tarefa(s) criada(s)`);
+  t('  e o operador é avisado', alertasSaida.some((a) => a.para === OP),
+    JSON.stringify(alertasSaida.map((a) => a.para)));
+
+  // ── Histórico e turnos, os dois que estavam mortos ─────────
+  bloco('histórico enche e o turno conta');
+
+  const comHistorico = await receberDele('有货吗', 'tem em estoque?');
+  const at1 = comHistorico.atendimento;
+  t('a troca entra no histórico', (at1?.historico || []).length >= 1,
+    `${(at1?.historico || []).length} entrada(s)`);
+  t('  marcada como vinda do outro lado',
+    at1?.historico?.some((h) => h.papel === 'vendedor'),
+    JSON.stringify((at1?.historico || []).map((h) => h.papel)));
+  t('  guardando origem e tradução',
+    Boolean(at1?.historico?.[0]?.origem && at1?.historico?.[0]?.traduzido),
+    JSON.stringify(at1?.historico?.[0] || {}));
+
+  t('o turno é contado', at1?.turnos === 1, String(at1?.turnos));
+
+  // O 6º turno é o freio: passou disso, o ping-pong provavelmente travou e
+  // continuar mandando não resolve. PONTE_MAX_TURNOS era config sem efeito.
+  const senderTurnos = require('./src/sender');
+  const sendTurnosAntes = senderTurnos.send;
+  const alertasTurno = [];
+  senderTurnos.send = async (para, txt) => { alertasTurno.push({ para, texto: String(txt) }); };
+  tradutorF4.paraCliente = async () => ({ traducao: 'e ai?', resumo: '', confianca: 'alta' });
+  for (let i = 0; i < 6; i++) {
+    await ponteMod.receberDoFornecedor({ texto: '还在吗' });
+  }
+  senderTurnos.send = sendTurnosAntes;
+
+  const at2 = filaMod.porId(at1.id);
+  t('os turnos se acumulam', at2.turnos >= 6, String(at2.turnos));
+  const avisoTeto = alertasTurno.filter((a) => a.para === OP).map((a) => a.texto).join('\n');
+  t('o teto avisa o operador', /idas e vindas/i.test(avisoTeto),
+    avisoTeto.split('\n').filter((l) => /idas e vindas/i.test(l))[0] || avisoTeto.slice(-80));
+  t('  sem vocabulário proibido', !AUTOMACAO.test(avisoTeto) && !politica.temCJK(avisoTeto),
+    (avisoTeto.match(AUTOMACAO) || [''])[0] || 'limpo');
+
+  tradutorF4.paraCliente = traduzAntesF4;
+  estadoPonte.dados.atendimentos = [];
+  estadoPonte.dados.aprovacoes = [];
+  estadoPonte.dados.tarefas = [];
 
   // ── Com a IA ligada: o que muda e o que NÃO pode mudar ─────
   //

@@ -735,12 +735,41 @@ async function executar(texto, de = '') {
       // nenhuma — o pedido morreu antes de virar envio — e o que resolve é
       // #pular ou #limpar fila, não destravar.
       const s = fila.situacao();
-      const parado = s.ativo && !s.ativo.turnos;
-      if (parado) {
+      if (s.ativo) {
+        // Testa o que a frase AFIRMA: existe envio para este atendimento?
+        //
+        // Antes testava `!s.ativo.turnos`, e o contador de turnos estava morto —
+        // era sempre 0, então TODO atendimento ativo era diagnosticado como
+        // "sem nenhum envio criado", inclusive os que tinham um envio saindo
+        // naquele instante. Com o contador vivo o proxy fica errado do outro
+        // lado: turnos=0 é o estado normal de quem acabou de mandar e espera
+        // resposta. Os dois estados são diferentes e pedem coisas diferentes.
+        const emAndamento = dados.tarefas.filter(
+          (t) =>
+            t.atendimentoId === s.ativo.id &&
+            ['pendente', 'executando', 'aguardando_aprovacao'].includes(t.estado),
+        );
+        const espera = min(Date.now() - s.ativo.desde);
+
+        if (!emAndamento.length && !s.ativo.turnos) {
+          return (
+            `Nenhum envio preso — o que está parado é o *atendimento*.\n\n` +
+            `*${s.ativo.cliente}* está na vez há ${espera} min sem nenhum envio criado.\n` +
+            `*#pular* passa para o próximo · *#limpar fila* encerra todos.`
+          );
+        }
+        if (emAndamento.length) {
+          const aprovar = emAndamento.filter((t) => t.estado === 'aguardando_aprovacao');
+          return (
+            `Nenhum envio preso — tem ${emAndamento.length} em andamento para *${s.ativo.cliente}*.\n\n` +
+            (aprovar.length
+              ? `${aprovar.length} espera você: *#ok ${aprovar[0].id}*.`
+              : `Está a caminho. Na vez há ${espera} min.`)
+          );
+        }
         return (
-          `Nenhum envio preso — o que está parado é o *atendimento*.\n\n` +
-          `*${s.ativo.cliente}* está na vez há ${min(Date.now() - s.ativo.desde)} min sem nenhum envio criado.\n` +
-          `*#pular* passa para o próximo · *#limpar fila* encerra todos.`
+          `Nenhum envio preso. *${s.ativo.cliente}* já teve ${s.ativo.turnos} ida(s) e volta(s)` +
+          ` e está na vez há ${espera} min — esperando a próxima resposta.`
         );
       }
       return 'Nenhum envio preso.';
@@ -886,8 +915,36 @@ async function executar(texto, de = '') {
     if (idx === -1) return `Não achei a aprovação \`${id}\`.`;
 
     const ap = dados.aprovacoes[idx];
-    const final = cmd === 'editar' ? argumento.trim() : ap.texto;
-    if (cmd === 'editar' && !final) return 'Faltou o texto. Use *#editar <id> <texto corrigido>*.';
+    const bruto = cmd === 'editar' ? argumento.trim() : ap.texto;
+    if (cmd === 'editar' && !bruto) return 'Faltou o texto. Use *#editar <id> <texto corrigido>*.';
+
+    // A ÚLTIMA PORTA antes do cliente, e por muito tempo não houve porta nenhuma.
+    //
+    // O #editar é o caminho em que texto HUMANO não revisado chega ao cliente:
+    // o operador digita no celular, no meio de outra coisa, olhando a tradução
+    // do outro lado — e é exatamente aí que sai um `¥70`, um link da loja de
+    // origem ou um caractere chinês copiado sem querer. O #enviar tinha o mesmo
+    // buraco por outro motivo: mandava a saída crua do tradutor.
+    //
+    // paraCliente converte moeda, tira link e sinaliza decisão comercial;
+    // limparAlerta é a mesma rede que já protege todo alerta, e pega palavra
+    // proibida e caractere chinês. As duas juntas porque cobrem coisas
+    // diferentes, e nenhuma delas cobre o que a outra pega.
+    const filtrado = politica.paraCliente(bruto);
+    const { texto: final, limpou } = politica.limparAlerta(filtrado.texto);
+
+    // Sobrou só marcador. Acontece quando a mensagem INTEIRA era um preço ou um
+    // link: o filtro não devolve string vazia, devolve
+    // "[valor — confirmar com a Phaze]" sozinho. Mandar isso é pior que não
+    // mandar — o cliente recebe um colchete críptico e a vez dele é encerrada
+    // em cima disso. Os colchetes saem da conta antes de decidir.
+    const conteudoReal = final.replace(/\[[^\]]*\]/g, '').replace(/[\s\-–—·,.:;!?]/g, '');
+    if (!conteudoReal) {
+      return (
+        `Não mandei: depois de tirar o que não pode sair, sobrou só marcador.\n` +
+        `Escreva você mesmo com *#editar ${id} <texto>*.`
+      );
+    }
 
     const at = fila.porId(ap.atendimentoId);
     dados.aprovacoes.splice(idx, 1);
@@ -900,7 +957,14 @@ async function executar(texto, de = '') {
     await sender.send(at.from, final);
     await fila.concluir(at.id, 'problema_explicado');
     await ponte.promoverProximo();
-    return `✅ Enviado para *${ap.cliente}*. Vez encerrada, próximo promovido.`;
+
+    // Diz o que foi tirado. Sem isto o operador acha que mandou o que digitou,
+    // e só descobriria a diferença se o cliente respondesse estranhando.
+    const mexeu = limpou || filtrado.texto !== bruto;
+    return (
+      `✅ Enviado para *${ap.cliente}*. Vez encerrada, próximo promovido.` +
+      (mexeu ? `\n\n_Tirei o que não podia sair. O cliente leu:_\n${final}` : '')
+    );
   }
 
   // ── #nao — descarta ────────────────────────────────────

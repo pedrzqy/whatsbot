@@ -190,7 +190,29 @@ function motivoNeutro(erro) {
 // lembrar desta regra.
 // Sufixo aberto em autom[aá]tic\w*: "automaticamente" escapava de
 // autom[aá]tic[oa]s?, e foi essa palavra exata que chegou ao cliente.
-const RE_AUTOMACAO = /\bbra[çc]o|rob[ôo]|\bbots?\b|autom[aá]tic\w*|automatiza\w*|taobao|fornecedor|playwright|chrome|selenium|puppeteer/gi;
+//
+// FONTE ÚNICA da lista, e não era.
+//
+// Existiam duas cópias: esta e uma no teste-ponte.js. Elas divergiram sem
+// ninguém perceber — o teste tinha `\bscripts?\b` e este regex não, então a
+// palavra "script" saía pelo número comercial e o teste não pegava, porque o
+// teste confere as strings QUE ELE MONTA, não o filtro. E este tinha
+// playwright/chrome/selenium que o teste não tinha. Duas listas para uma regra
+// é uma lista que ninguém mantém.
+//
+// Exportada abaixo em `vocabularioProibido()`, que devolve uma cópia SEM /g:
+// regex global guarda lastIndex entre chamadas e faz `.test()` alternar
+// true/false na mesma entrada — a armadilha que o topo deste arquivo documenta.
+const FONTE_AUTOMACAO =
+  '\\bbra[çc]o|rob[ôo]|\\bbots?\\b|autom[aá]tic\\w*|automatiza\\w*|\\bscripts?\\b|' +
+  'taobao|fornecedor|playwright|chrome|selenium|puppeteer';
+
+const RE_AUTOMACAO = new RegExp(FONTE_AUTOMACAO, 'gi');
+
+/** Uma cópia nova a cada chamada, sem /g. Segura para `.test()`. */
+function vocabularioProibido() {
+  return new RegExp(FONTE_AUTOMACAO, 'i');
+}
 // Cara de stack trace: "algo.algo:", "at Objeto.func", caminho de arquivo, ms.
 const RE_TECNICO = /\b\w+\.\w+:\s|\bat\s+\w+[.:]|\/[\w./-]+\.js\b|\b\d+ms\b|\bTypeError\b|\bError:/g;
 
@@ -245,4 +267,11 @@ function limparAlerta(original) {
   return { texto, limpou: texto !== antes.trim() };
 }
 
-module.exports = { paraFornecedor, paraCliente, motivoNeutro, limparAlerta, temCJK };
+module.exports = {
+  paraFornecedor,
+  paraCliente,
+  motivoNeutro,
+  limparAlerta,
+  temCJK,
+  vocabularioProibido,
+};
