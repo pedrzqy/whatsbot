@@ -147,6 +147,23 @@ t('espera até 17:15 ≈ 75 min', naPausa.esperaMinutos === 75, naPausa.esperaMi
 t('aviso cita o horário de volta', /17h15/.test(naPausa.avisoCliente), naPausa.avisoCliente);
 t('dois intervalos configurados', janela.intervalos().length === 2);
 
+// ── O relógio não pode decidir se o teste passa ─────────────
+//
+// `janela.estado()` sem argumento lê a hora AGORA. Vários cenários abaixo
+// chamam pedirCodigo(), que consulta a janela para escolher o que dizer ao
+// cliente — e a janela configurada aqui tem um buraco das 15:30 às 17:15.
+// Rodando dentro do buraco, o cliente ouve "volta por volta das 17h15" em vez
+// da promessa, e o teste falhava. De manhã passava, à tarde não: o pior tipo
+// de teste, porque a falha não fala do código.
+//
+// A solução é estreita de propósito. Chamada COM data explícita continua
+// usando a implementação real — é assim que o bloco da janela testa os
+// horários, e ele tem que continuar valendo. Só a chamada sem argumento, que
+// significa "agora", é fixada em aberta.
+const janelaReal = janela.estado;
+janela.estado = (agora) => (agora === undefined ? { ...janelaReal(emBRT('10:00')) } : janelaReal(agora));
+
+
 // ── Recepção: detecção sem IA ───────────────────────────────
 // Crítico: com BOT_AUTOREPLY=false o handlers retorna antes da IA, então este
 // é o ÚNICO caminho pelo qual um pedido de cliente chega na ponte.
