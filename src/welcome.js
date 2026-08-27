@@ -14,16 +14,30 @@ const nerix = require('./nerix');
 const variator = require('./variator');
 
 // Cache do nome da loja (puxado da Nerix uma vez).
+//
+// Só grava quando DEU CERTO. Antes o catch também gravava, e o efeito era
+// permanente: uma instabilidade de dois segundos da loja no boot congelava
+// "nossa loja" para o processo inteiro, e o bot passava o dia se apresentando
+// assim. O sintoma não parecia um erro — parecia uma escolha de texto.
+//
+// E o nome entra no prompt que vai para o modelo, que é cacheado por prefixo:
+// dois boots com nomes diferentes são dois prefixos, e o cache do primeiro
+// nunca é aproveitado. Falhar e tentar de novo na chamada seguinte converge
+// para um nome só; gravar a falha nunca converge.
 let storeNameCache = null;
 async function getStoreName() {
   if (storeNameCache !== null) return storeNameCache;
   try {
     const store = await nerix.getStore();
-    storeNameCache = store?.name || store?.data?.name || config.welcome.storeName || 'nossa loja';
+    const nome = store?.name || store?.data?.name;
+    if (nome) {
+      storeNameCache = nome;
+      return storeNameCache;
+    }
   } catch {
-    storeNameCache = config.welcome.storeName || 'nossa loja';
+    // cai no fallback abaixo, SEM gravar
   }
-  return storeNameCache;
+  return config.welcome.storeName || 'nossa loja';
 }
 
 /**

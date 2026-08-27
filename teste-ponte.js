@@ -22,6 +22,16 @@ const DATA_TESTE = pathMod.join(os.tmpdir(), 'phaze-teste-ponte');
 fsMod.rmSync(DATA_TESTE, { recursive: true, force: true });
 process.env.PONTE_DATA_DIR = DATA_TESTE;
 
+// A suite inteira roda SEM REDE, e isto e o que garante.
+//
+// Sem apagar a chave aqui, uma maquina com ANTHROPIC_API_KEY definida faria os
+// testes chamarem a API DE VERDADE -- cobrada, lenta e dependente de internet.
+// E o esforco e fixado porque CLAUDE_EFFORT ja existe no ambiente de algumas
+// maquinas: o teste passava ou falhava conforme QUEM estava rodando, que e o
+// mesmo defeito do relogio que decidia o resultado do teste-ponte.
+delete process.env.ANTHROPIC_API_KEY;
+process.env.BOT_CLAUDE_ESFORCO = 'low';
+
 process.env.PONTE_ATIVA = 'true';
 process.env.PONTE_OPERADOR_NUMERO = '5541999999999';
 process.env.PONTE_BRACO_KEY = 'teste';

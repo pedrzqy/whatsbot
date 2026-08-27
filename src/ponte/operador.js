@@ -429,6 +429,38 @@ async function executar(texto, de = '') {
       linhas.push(`✅ Coleta ativa (há ${Math.round(idade / 1000)}s)`);
     }
 
+    // 4.5) Quem está atendendo, e a que preço.
+    //
+    // Duas perguntas que não tinham resposta em lugar nenhum: se a IA está
+    // respondendo ou se é o menu, e se o cache está pegando. A segunda decide a
+    // fatura — com cache o trecho fixo custa 10%, sem cache custa tudo — e um
+    // invalidador silencioso não dá erro, só zera a leitura. A descoberta seria
+    // no fim do mês.
+    //
+    // "Respostas" e não "Atendimento": logo abaixo já existe uma linha
+    // "Atendimento ligado", que fala de outra coisa — se a ponte está aceitando
+    // pedido. Duas linhas com a mesma palavra e sentidos diferentes são piores
+    // que nenhuma. E nada de nome de tecnologia: isto sai pelo número comercial.
+    const claude = require('../claude');
+    if (!require('../config').iaLigada) {
+      linhas.push('💬 Respostas — pelo menu, texto pronto');
+    } else if (!claude.disponivel()) {
+      linhas.push('💬 Respostas — conversa livre, na configuração reserva');
+    } else {
+      const u = claude.uso();
+      linhas.push(
+        `💬 Respostas — conversa livre · ${u.chamadas}/${u.teto} hoje` +
+          (u.cachePct === null ? '' : ` · ${u.cachePct}% reaproveitado`),
+      );
+      // Reaproveitamento baixo com volume real = alguma coisa mudou no começo
+      // do texto fixo e cada resposta passou a custar cheio.
+      if (u.chamadas >= 5 && u.cachePct !== null && u.cachePct < 40) {
+        problemas.push(
+          'O atendimento está reaproveitando pouco texto e ficando mais caro que o previsto.',
+        );
+      }
+    }
+
     // 5) Estado de operação: o que está ligado agora.
     const d = limites.disjuntor();
     if (d.estado === 'aberto') {

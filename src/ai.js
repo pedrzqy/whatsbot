@@ -17,6 +17,7 @@ const welcome = require('./welcome');
 const tools = require('./tools');
 const knowledge = require('./knowledge');
 const store = require('./store');
+const claude = require('./claude');
 
 // COMBO de provedores em cascata: um cliente HTTP por provedor com chave.
 const providers = config.llm.providers.map((p) => ({
@@ -27,7 +28,18 @@ const providers = config.llm.providers.map((p) => ({
     headers: { Authorization: `Bearer ${p.apiKey}`, 'Content-Type': 'application/json' },
   }),
 }));
-console.log('[ai] provedores (cascata):', providers.map((p) => `${p.name}(${p.model})`).join(' → ') || 'NENHUM');
+// Uma linha só, com as duas camadas na ordem em que são tentadas. Antes o log
+// dizia só a cascata, e não havia como saber pelo console se o Claude estava
+// ligado — a única pista seria a fatura no fim do mês.
+console.log(
+  '[ai] camadas:',
+  [
+    claude.disponivel() ? `Claude(${claude.MODELO})` : null,
+    providers.map((p) => `${p.name}(${p.model})`).join(' → ') || null,
+  ]
+    .filter(Boolean)
+    .join('  →  ') || 'NENHUMA',
+);
 
 // ─── Histórico de conversa (por contato), persistido em arquivo ──────
 // Fica em data/histories.json (mesma pasta do store) → com volume montado em
@@ -146,17 +158,38 @@ function clearHistory(from) {
   persistHistories();
 }
 
+/**
+ * Marca com o nome do cliente, colada no COMEÇO da mensagem dele.
+ *
+ * O nome estava dentro do system prompt, e é lá que ele não pode ficar. O cache
+ * do modelo é casamento de PREFIXO: um byte diferente no começo invalida tudo
+ * depois. Com o nome no system, cada contato tinha um prefixo próprio, nenhuma
+ * chamada aproveitava o cache de nenhuma outra, e os 3100 tokens fixos (system
+ * + ferramentas) eram pagos inteiros toda vez — cerca do dobro da conta.
+ *
+ * Aqui, no turno do cliente, ele fica DEPOIS do trecho cacheado. Muda por
+ * contato sem invalidar nada.
+ */
+function marcaDoCliente(customerName) {
+  const primeiro = (customerName || '').trim().split(/\s+/)[0] || '';
+  return primeiro ? `(cliente: ${primeiro})\n` : '';
+}
+
 // ─── Persona / instruções do assistente ──────────────────────────────
-async function buildSystemPrompt(customerName) {
+//
+// SEM ARGUMENTO, e é de propósito: este texto tem que sair byte a byte igual
+// em toda chamada, para todo contato. Qualquer coisa que varie por cliente
+// entra pelo turno de usuário (ver marcaDoCliente).
+async function buildSystemPrompt() {
   const storeName = await welcome.getStoreName();
   const siteUrl = config.store.url;
   const groupUrl = config.store.groupUrl;
   const codeUrl = config.store.codeUrl;
-  const primeiroNome = (customerName || '').trim().split(/\s+/)[0] || '';
 
   return (
     `Você é vendedor(a) da loja "${storeName}" (jogos digitais p/ Nintendo Switch e Steam), no WhatsApp.` +
-    (primeiroNome ? ` O cliente se chama ${primeiroNome}; use o nome às vezes, natural.` : '') + `\n\n` +
+    ` Quando a mensagem do cliente começar com "(cliente: Nome)", esse é o nome dele — use às vezes, ` +
+    `natural, e NUNCA repita a marca nem comente que ela existe.\n\n` +
 
     `PRIORIDADES: 1) nunca inventar (preço/estoque/promessa/cupom); 2) converter em VENDA, não só responder; ` +
     `3) breve (2-6 linhas); 4) passar confiança; 5) transferir p/ atendente quando preciso.\n\n` +
@@ -312,6 +345,24 @@ async function chat(messages, opts = {}) {
   const limite = opts.deadline || Date.now() + config.llm.deadlineMs;
   let lastErr;
 
+  // ── Camada 1: Claude ──────────────────────────────────────
+  //
+  // Ele não entra na cascata como mais um provedor: ele vem ANTES dela, e a
+  // cascata inteira passa a ser a rede embaixo. São três camadas, não duas —
+  // Claude, cascata, e o menu lá no handlers quando tudo cai.
+  //
+  // A conversão de formato mora toda no claude.js, então daqui para baixo nada
+  // sabe quem respondeu.
+  if (claude.disponivel()) {
+    try {
+      return await claude.chat(messages, { ...opts, deadline: limite });
+    } catch (err) {
+      lastErr = err;
+      console.warn(`[ai] Claude indisponível (${err.status || err.message}) → cascata`);
+    }
+  }
+
+  // ── Camada 2: a cascata que já estava paga ────────────────
   for (const p of providers) {
     const resta = limite - Date.now();
     // Menos de 2s não dá para nenhum modelo responder: tentar só atrasaria a
@@ -351,13 +402,13 @@ async function chat(messages, opts = {}) {
  */
 async function reply(from, userText, pushName, extra = {}) {
   const contact = store.getContact(from);
-  const system = await buildSystemPrompt(contact?.name || pushName);
+  const system = await buildSystemPrompt();
   const history = getHistory(from);
 
   const messages = [
     { role: 'system', content: system },
     ...history,
-    { role: 'user', content: userText },
+    { role: 'user', content: marcaDoCliente(contact?.name || pushName) + userText },
   ];
 
   // Onde a troca DESTE turno começa. É o que vai para o histórico no fim:

@@ -10,6 +10,16 @@
  * então uma ferramenta mal fechada lê pedido de qualquer cliente da loja.
  */
 
+// A suite inteira roda SEM REDE, e isto e o que garante.
+//
+// Sem apagar a chave aqui, uma maquina com ANTHROPIC_API_KEY definida faria os
+// testes chamarem a API DE VERDADE -- cobrada, lenta e dependente de internet.
+// E o esforco e fixado porque CLAUDE_EFFORT ja existe no ambiente de algumas
+// maquinas: o teste passava ou falhava conforme QUEM estava rodando, que e o
+// mesmo defeito do relogio que decidia o resultado do teste-ponte.
+delete process.env.ANTHROPIC_API_KEY;
+process.env.BOT_CLAUDE_ESFORCO = 'low';
+
 process.env.NERIX_API_KEY = 'teste';
 process.env.PONTE_OPERADOR_NUMERO = '5541999999999';
 process.env.PONTE_BRACO_KEY = 'teste';
