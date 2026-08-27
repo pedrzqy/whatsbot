@@ -6,7 +6,8 @@
   "type": "commonjs",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "node --watch src/server.js"
+    "dev": "node --watch src/server.js",
+    "teste": "node teste-ponte.js && node teste-tools.js && node teste-vendas.js && node teste-claude.js && node teste-webhook.js"
   },
   "engines": {
     "node": ">=20"

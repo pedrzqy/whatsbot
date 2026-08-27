@@ -208,7 +208,16 @@ function dataDoBuild(arquivo) {
   }
 }
 
-const server = app.listen(config.port, () => {
+// So sobe o servidor quando ESTE arquivo e o programa.
+//
+// O Dockerfile roda `node src/server.js`, entao em producao nada muda. O que
+// muda e que o teste consegue requerer o `app` e fazer uma requisicao de
+// verdade no webhook -- que era o unico caminho do bot sem teste nenhum, e
+// justamente onde ficam as portas que decidem se a foto e o audio do cliente
+// chegam a alguem.
+const ehOPrograma = require.main === module;
+
+const server = ehOPrograma && app.listen(config.port, () => {
   console.log(`whatsbot rodando na porta ${config.port} — build de ${dataDoBuild(__filename)} UTC`);
   if (!config.autoReply) console.log('[bot] AUTO-RESPOSTA DESLIGADA (BOT_AUTOREPLY=false) — não responde no 1-a-1');
   recovery.start(); // recuperação de venda: cutuca quem sumiu no meio da conversa
@@ -229,7 +238,7 @@ const server = app.listen(config.port, () => {
 // headersTimeout precisa ser MAIOR que keepAliveTimeout: se for menor, o Node
 // derruba a conexão enquanto ainda espera os cabeçalhos e o problema volta com
 // outra cara.
-server.keepAliveTimeout = 65_000;
+if (server) server.keepAliveTimeout = 65_000;
 
 // Encerramento limpo: SALVA O ESTADO antes de morrer.
 //
@@ -241,7 +250,7 @@ server.keepAliveTimeout = 65_000;
 // Sai com 0 de propósito: encerramento pedido pelo orquestrador não é falha, e
 // código de erro aqui polui o log do painel com "crash" que nunca houve.
 let encerrando = false;
-for (const sinal of ['SIGTERM', 'SIGINT']) {
+if (ehOPrograma) for (const sinal of ['SIGTERM', 'SIGINT']) {
   process.on(sinal, () => {
     if (encerrando) return; // segundo sinal não reentra
     encerrando = true;
@@ -262,4 +271,6 @@ for (const sinal of ['SIGTERM', 'SIGINT']) {
     server.close(() => process.exit(0));
   });
 }
-server.headersTimeout = 70_000;
+if (server) server.headersTimeout = 70_000;
+
+module.exports = { app };
