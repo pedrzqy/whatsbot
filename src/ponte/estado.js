@@ -57,6 +57,18 @@ let dados = {
   tarefas: [],
   /** Respostas do fornecedor seguradas para revisão humana antes de ir ao cliente. */
   aprovacoes: [],
+  /**
+   * Quando cada mensagem foi descartada como ruído (só os timestamps).
+   *
+   * Existe para o descarte não ser invisível. Um classificador que come a coisa
+   * errada CALADO não deixa rastro nenhum: a mensagem some, ninguém é avisado, e
+   * o único sintoma é um cliente que espera para sempre. O #fila mostra o número,
+   * e um salto nele é o que faz alguém desconfiar da regra.
+   *
+   * Só o horário, sem o texto: o que é descartado vem em chinês, e guardar para
+   * exibir depois seria guardar algo que não pode sair no WhatsApp.
+   */
+  ignorados: [],
   limites: {},
   disjuntor: { estado: 'fechado', motivo: null, printPath: null, falhasSeguidas: 0, abertoEm: null },
   seq: 0,
@@ -128,6 +140,34 @@ function proximoId() {
   return String(dados.seq);
 }
 
+// ── Contador de descartes ───────────────────────────────────
+
+const DIA = 24 * 60 * 60 * 1000;
+
+/**
+ * Anota que uma mensagem foi descartada como ruído.
+ *
+ * Poda em 7 dias na própria escrita para o arquivo não crescer sem fim. Sete e
+ * não trinta porque é a janela em que o número ainda diz alguma coisa: "400
+ * descartados desde sempre" não faz ninguém olhar duas vezes, "12 hoje" faz.
+ */
+function registrarIgnorado(agora = Date.now()) {
+  if (!Array.isArray(dados.ignorados)) dados.ignorados = [];
+  dados.ignorados.push(agora);
+  dados.ignorados = dados.ignorados.filter((ts) => ts > agora - 7 * DIA);
+  persist();
+}
+
+/** @returns {{hoje:number, semana:number, ultimoEm:number|null}} */
+function contarIgnorados(agora = Date.now()) {
+  const lista = Array.isArray(dados.ignorados) ? dados.ignorados : [];
+  return {
+    hoje: lista.filter((ts) => ts > agora - DIA).length,
+    semana: lista.length,
+    ultimoEm: lista.length ? Math.max(...lista) : null,
+  };
+}
+
 // ── Modo teste, POR NÚMERO ──────────────────────────────────
 //
 // Era um objeto só (`{ate}`) porque só existia um operador. Com dois, o global
@@ -170,4 +210,13 @@ function marcarTeste(numero, ms) {
 
 load();
 
-module.exports = { dados, persist, persistAgora, proximoId, emTeste, marcarTeste };
+module.exports = {
+  dados,
+  persist,
+  persistAgora,
+  proximoId,
+  emTeste,
+  marcarTeste,
+  registrarIgnorado,
+  contarIgnorados,
+};

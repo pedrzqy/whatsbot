@@ -32,7 +32,7 @@ const janela = require('./janela');
 const midia = require('./midia');
 const politica = require('./politica');
 const marca = require('./marca');
-const { dados, persist, persistAgora, proximoId, emTeste } = require('./estado');
+const { dados, persist, persistAgora, proximoId, emTeste, registrarIgnorado } = require('./estado');
 const sender = require('../sender');
 
 async function alertar(texto, imagem, nomeArquivo) {
@@ -267,6 +267,43 @@ async function receberDoFornecedor(entrada) {
     return;
   }
 
+  // Ruído: card de produto, pesquisa de satisfação, "ok" solto. Não é resposta
+  // ao pedido de ninguém — some sem alerta, sem aprovação e SEM mexer na fila.
+  //
+  // Não mexer na fila é o ponto: o cliente da vez continua esperando, porque
+  // ninguém respondeu a ele. Concluir aqui entregaria a vez ao próximo por causa
+  // de um anúncio que a loja disparou sozinha.
+  if (c.tipo === 'ignorar') {
+    registrarIgnorado();
+    console.log(`[ponte] descartado como ruído: ${entrada.texto.slice(0, 60)}`);
+    return;
+  }
+
+  // Pacote (conta + senha + jogo) e senha solta SÃO entrega — 13% do que ele
+  // manda. Antes disto caíam em "problema": viravam uma aprovação parada no
+  // WhatsApp, e a fila só destravava com o timeout de 4h. O cliente seguinte
+  // esperava essas 4h por nada.
+  //
+  // Vão para o OPERADOR, não para o cliente. O código sai sozinho porque a fila
+  // serial garante de quem ele é; uma conta inteira não tem essa garantia — a
+  // atribuição aqui é inferência, e senha entregue ao cliente errado é
+  // exatamente a falha que a fila serial existe para impedir (fila.js:9-14).
+  if (c.tipo === 'pacote') {
+    await entregarPacote(at, c.pacotes);
+    return;
+  }
+
+  if (c.tipo === 'senha') {
+    // Ele repetiu de volta o usuário que MANDAMOS. Não é senha — é o formato
+    // idêntico dos dois (codigo.js: `rrtt9255` é login, `z23trzqx` é senha) se
+    // fazendo passar por entrega. Cai no caminho de problema, que é humano.
+    const eco = at.usuario && String(c.senha).toLowerCase() === String(at.usuario).toLowerCase();
+    if (!eco) {
+      await entregarSenha(at, c.senha);
+      return;
+    }
+  }
+
   // Não é código: é problema. Traduz só para o operador entender e decidir.
   //
   // Marcador sintético do braço ("respondeu com uma imagem") já vem em
@@ -335,6 +372,127 @@ async function entregarCodigo(atendimento, cod) {
   limites.registrarSucesso();
 
   await fila.concluir(atendimento.id, 'codigo_entregue');
+  await promoverProximo();
+}
+
+/**
+ * Nome do jogo em português, ou null.
+ *
+ * O nome vem em chinês, e chinês no número comercial entrega a origem igual à
+ * palavra "fornecedor" — o limparAlerta apagaria os caracteres na saída e o
+ * operador leria "Jogo:" seguido de nada. Por isso a tradução acontece aqui, e
+ * o que não traduz some junto com o rótulo.
+ *
+ * Falhou o tradutor, ou sobrou caractere original, devolve null: uma linha a
+ * menos é melhor que uma linha que não diz nada.
+ */
+async function nomeDoJogo(bruto) {
+  const original = String(bruto || '').trim();
+  if (!original) return null;
+  if (!politica.temCJK(original)) return original; // já veio em alfabeto latino
+
+  try {
+    const { traducao } = await tradutor.paraCliente(original, []);
+    const limpo = String(traducao || '').trim();
+    return limpo && !politica.temCJK(limpo) ? limpo : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Quantos pacotes cabem num alerta de WhatsApp sem virar parede de texto. */
+const PACOTES_NO_ALERTA = 3;
+
+/**
+ * Conta + senha + jogo: a entrega completa, o formato mais comum dele.
+ *
+ * Libera a vez ANTES do operador agir, de propósito. A resposta chegou — o que
+ * falta é conferência humana, e prender a fila nisso faria o próximo cliente
+ * esperar por uma pessoa em vez de esperar pelo fornecedor. O cliente da vez
+ * não fica no escuro: recebe o aviso de que já chegou.
+ */
+async function entregarPacote(atendimento, pacotes) {
+  const lista = Array.isArray(pacotes) ? pacotes : [];
+  if (!lista.length) return;
+
+  const mostrar = lista.slice(0, PACOTES_NO_ALERTA);
+  const jogos = await Promise.all(mostrar.map((p) => nomeDoJogo(p.jogo)));
+
+  const linhas = [`📦 Entrega recebida — cliente *${atendimento.nome}*`, ''];
+
+  if (lista.length === 1) {
+    linhas.push(`Conta: \`${mostrar[0].conta}\``, `Senha: \`${mostrar[0].senha}\``);
+    if (jogos[0]) linhas.push(`Jogo: ${jogos[0]}`);
+  } else {
+    // Ele já mandou 100 contas de uma vez (19/08). Nesse caso a mensagem NÃO é
+    // resposta para quem está na vez, e o operador precisa ver isso na primeira
+    // linha — não descobrir depois de mandar a conta errada para alguém.
+    linhas.push(`Vieram *${lista.length}* contas de uma vez:`, '');
+    mostrar.forEach((p, i) => {
+      linhas.push(`${i + 1}) \`${p.conta}\` · senha \`${p.senha}\`${jogos[i] ? ` — ${jogos[i]}` : ''}`);
+    });
+    if (lista.length > mostrar.length) {
+      linhas.push(`_(mostrando as ${mostrar.length} primeiras de ${lista.length})_`);
+    }
+  }
+
+  linhas.push(
+    '',
+    lista.length === 1
+      ? 'Confere e manda para o cliente.'
+      : 'Confere qual é a do pedido e manda para o cliente.',
+    '_Já liberei a vez para o próximo._',
+  );
+
+  await alertar(linhas.join('\n'));
+  await encerrarComEntrega(atendimento);
+}
+
+/**
+ * Senha sozinha na mensagem, sem o 密码 do pacote.
+ *
+ * Mostra o usuário junto porque é ele que dá sentido à senha — e porque é a
+ * conferência que o operador faz de graça: usuário e senha iguais significa que
+ * ele devolveu o que mandamos, não que entregou algo.
+ */
+async function entregarSenha(atendimento, senha) {
+  await alertar(
+    [
+      `🔑 Senha recebida — cliente *${atendimento.nome}*`,
+      '',
+      `Usuário: \`${atendimento.usuario || '(não registrado)'}\``,
+      `Senha: \`${senha}\``,
+      '',
+      'Confere e manda para o cliente.',
+      '_Já liberei a vez para o próximo._',
+    ].join('\n'),
+  );
+  await encerrarComEntrega(atendimento);
+}
+
+/**
+ * Fecha a vez de quem recebeu uma entrega que ainda passa por humano.
+ *
+ * O aviso ao cliente não é gentileza: sem ele o atendimento é concluído em
+ * silêncio, o próximo da fila recebe "chegou sua vez" e quem estava sendo
+ * atendido fica sem nenhum sinal — esperando algo que agora depende de uma
+ * pessoa conferir. Não promete prazo, porque quem cumpre o prazo é o operador.
+ */
+async function encerrarComEntrega(atendimento) {
+  try {
+    await sender.send(
+      atendimento.from,
+      'Chegou o retorno da sua conta! Só vou conferir uma coisa aqui e já te mando 👍',
+    );
+  } catch (err) {
+    // O aviso é secundário; a fila destravar é o que não pode falhar.
+    console.error('[ponte] não avisei o cliente da entrega:', err.message);
+  }
+
+  console.log(`[ponte] entrega recebida para ${atendimento.from} — vez encerrada`);
+  limites.registrarSucesso();
+
+  await fila.concluir(atendimento.id, 'entrega_recebida');
   await promoverProximo();
 }
 

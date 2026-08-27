@@ -79,7 +79,14 @@ function extrairPacotes(texto) {
   // Conta e senha são alfanuméricos; o que vem depois, até a próxima conta ou o
   // fim, é o nome do jogo. `[^\s]` nos dois campos porque a Taobao separa com
   // tabulação, não espaço.
-  const re = /([a-z0-9]{4,20})\s*密码\s*([a-z0-9]{4,20})\s*([^\n]*?)(?=[a-z0-9]{4,20}\s*密码|$)/gi;
+  //
+  // Flag `m` obrigatória. Sem ela, `$` só casa no FIM DA MENSAGEM, então numa
+  // lista com uma conta por linha o nome do jogo da primeira linha não tinha
+  // onde terminar — `[^\n]*?` não atravessa a quebra — e a linha inteira era
+  // descartada. De 4 contas em 4 linhas saía 1: justamente a última, a única
+  // que alcançava o fim da mensagem. Com `m`, `$` também vale no fim de cada
+  // linha, e é assim que ele manda lote grande (100 contas em 19/08).
+  const re = /([a-z0-9]{4,20})\s*密码\s*([a-z0-9]{4,20})\s*([^\n]*?)(?=[a-z0-9]{4,20}\s*密码|$)/gim;
   let m;
   while ((m = re.exec(texto)) !== null) {
     fora.push({

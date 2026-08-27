@@ -149,6 +149,17 @@ const varios = codigo.classificar(
 );
 t('vários pacotes numa mensagem', varios.pacotes?.length === 2, String(varios.pacotes?.length));
 
+// UMA CONTA POR LINHA — o formato de lote grande, e o que quebrava.
+// Sem a flag `m` no regex, `$` só casava no fim da mensagem: só a ÚLTIMA linha
+// era extraída e as outras sumiam sem nenhum sinal. Com 100 contas isso é 99
+// entregas perdidas em silêncio.
+const emLinhas = codigo.classificar(
+  'aass9945 密码 ujuu3wjs 数码宝贝\nffgg2184 密码 n7dbspnc 斯普拉遁\nkkll3377 密码 q8mzt4vd 马力欧',
+);
+t('uma conta por linha extrai todas', emLinhas.pacotes?.length === 3, String(emLinhas.pacotes?.length));
+t('  e a primeira linha não se perde', emLinhas.pacotes?.[0]?.conta === 'aass9945', emLinhas.pacotes?.[0]?.conta);
+t('  com o jogo de cada uma separado', emLinhas.pacotes?.[1]?.jogo === '斯普拉遁', emLinhas.pacotes?.[1]?.jogo);
+
 // Senha solta: alfanumérico com letra E dígito. É inferência, e por isso ela
 // não é entregue sozinha ao cliente — vai ao operador com o texto pronto.
 t('senha solta é senha', codigo.classificar('z23trzqx').tipo === 'senha');
@@ -1010,6 +1021,155 @@ const OP = '5541999999999';
   cfgPonte.operador.numeros = numerosAntes;
   cfgPonte.operador.ehOperador = ehAntes;
 
+
+  // ── Entrega que NÃO é código: pacote, senha e ruído ────────
+  //
+  // São 13% do que ele manda (pacote + senha) e 8% de ruído. Antes deste bloco
+  // os três caíam em "problema": viravam aprovação parada no WhatsApp e a fila
+  // só destravava com o timeout de 4h — o cliente seguinte esperava essas 4h
+  // por nada. O que este bloco protege é a diferença entre "chegou e o operador
+  // confere" e "chegou e ninguém percebeu".
+  bloco('pacote e senha destravam a fila');
+
+  const tradutorMod = require('./src/ponte/tradutor');
+  const traduzReal = tradutorMod.paraCliente;
+  // O nome do jogo vem em chinês e é traduzido antes de entrar no alerta.
+  // Sem este dublê o teste sairia para a rede — e o arquivo inteiro tem que
+  // rodar offline, senão ninguém roda antes do deploy.
+  tradutorMod.paraCliente = async () => ({
+    traducao: 'Yoshi e o Livro Misterioso',
+    resumo: '',
+    confianca: 'alta',
+  });
+
+  /** Roda receberDoFornecedor com um cliente na vez e devolve o que saiu. */
+  async function receber(texto, { usuario = 'rrtt9321', segundoCliente = false } = {}) {
+    estadoPonte.dados.atendimentos = [];
+    estadoPonte.dados.tarefas = [];
+    estadoPonte.dados.aprovacoes = [];
+
+    const r = await filaMod.entrar('5541922220001', 'Ana');
+    r.atendimento.usuario = usuario;
+    if (segundoCliente) await filaMod.entrar('5541922220002', 'Bruno');
+
+    const senderMod = require('./src/sender');
+    const antes = senderMod.send;
+    const saiu = [];
+    senderMod.send = async (para, txt) => { saiu.push({ para, texto: String(txt) }); };
+    try {
+      await ponteMod.receberDoFornecedor({ texto });
+    } finally {
+      senderMod.send = antes;
+    }
+
+    return {
+      aoOperador: saiu.filter((s) => s.para === OP).map((s) => s.texto).join('\n'),
+      aoCliente: saiu.filter((s) => s.para === '5541922220001').map((s) => s.texto).join('\n'),
+      ativo: filaMod.ativo(),
+      aprovacoes: estadoPonte.dados.aprovacoes.length,
+    };
+  }
+
+  // ── Pacote: conta + senha + jogo ──
+  const pacoteRecebido = await receber('rrtt9321\t密码\tpdmtm5fk\t耀西与不可思议的图鉴');
+
+  t('pacote avisa o operador', pacoteRecebido.aoOperador.length > 0);
+  t('  com a conta', /rrtt9321/.test(pacoteRecebido.aoOperador), pacoteRecebido.aoOperador);
+  t('  com a senha', /pdmtm5fk/.test(pacoteRecebido.aoOperador));
+  t('  e com o jogo em português', /Yoshi e o Livro Misterioso/.test(pacoteRecebido.aoOperador));
+  // Regra 1 vale para o alerta do operador: ele sai pelo mesmo número comercial.
+  t('  sem caractere chinês', !politica.temCJK(pacoteRecebido.aoOperador), pacoteRecebido.aoOperador);
+  t('  sem vocabulário proibido',
+    !AUTOMACAO.test(pacoteRecebido.aoOperador) && !PROIBIDO.test(pacoteRecebido.aoOperador),
+    (pacoteRecebido.aoOperador.match(AUTOMACAO) || [''])[0] || 'limpo');
+  // A razão de existir do caminho: a vez tem que ser liberada.
+  t('  e a fila destrava', pacoteRecebido.ativo === null);
+  t('  sem virar aprovação parada', pacoteRecebido.aprovacoes === 0);
+
+  // A conta NÃO pode ir sozinha ao cliente: a atribuição é inferência, e senha
+  // para o cliente errado é a falha que a fila serial existe para impedir.
+  t('a conta não vai sozinha ao cliente',
+    !/rrtt9321|pdmtm5fk/.test(pacoteRecebido.aoCliente), pacoteRecebido.aoCliente);
+  // Mas ele também não pode ficar no escuro depois da vez dele ser encerrada.
+  t('e o cliente não fica no escuro', pacoteRecebido.aoCliente.length > 0);
+  t('  sem entregar a origem',
+    !PROIBIDO.test(pacoteRecebido.aoCliente) &&
+      !AUTOMACAO.test(pacoteRecebido.aoCliente) &&
+      !REPASSE.test(pacoteRecebido.aoCliente) &&
+      !politica.temCJK(pacoteRecebido.aoCliente),
+    pacoteRecebido.aoCliente);
+  t('  e sem comando de operador', !/#\w+/.test(pacoteRecebido.aoCliente), pacoteRecebido.aoCliente);
+
+  // ── Vários pacotes de uma vez (ele já mandou 100 em 19/08) ──
+  const varios = await receber(
+    'aaaa1111 密码 bbbb2222 游戏A\ncccc3333 密码 dddd4444 游戏B\neeee5555 密码 ffff6666 游戏C\ngggg7777 密码 hhhh8888 游戏D',
+  );
+  t('lote diz quantas contas vieram', /4/.test(varios.aoOperador), varios.aoOperador.split('\n')[2]);
+  t('  e não vira parede de texto', varios.aoOperador.split('\n').length <= 14,
+    varios.aoOperador.split('\n').length + ' linhas');
+  t('  sem caractere chinês', !politica.temCJK(varios.aoOperador), varios.aoOperador);
+
+  // ── Senha solta ──
+  const senhaRecebida = await receber('z23trzqx');
+  t('senha avisa o operador', /z23trzqx/.test(senhaRecebida.aoOperador), senhaRecebida.aoOperador);
+  t('  mostrando o usuário junto', /rrtt9321/.test(senhaRecebida.aoOperador));
+  t('  sem vocabulário proibido',
+    !AUTOMACAO.test(senhaRecebida.aoOperador) && !politica.temCJK(senhaRecebida.aoOperador));
+  t('  e a fila destrava', senhaRecebida.ativo === null);
+  t('a senha não vai sozinha ao cliente',
+    !/z23trzqx/.test(senhaRecebida.aoCliente), senhaRecebida.aoCliente);
+
+  // ── O próximo da fila é promovido de verdade ──
+  const comProximo = await receber('z23trzqx', { segundoCliente: true });
+  t('o próximo assume a vez', comProximo.ativo && comProximo.ativo.from === '5541922220002',
+    comProximo.ativo ? comProximo.ativo.nome : 'ninguém');
+
+  // ── Eco do usuário NÃO é entrega ──
+  //
+  // Login e senha têm o formato idêntico (`rrtt9255` é login, `z23trzqx` é
+  // senha). Se ele repete de volta o usuário que mandamos, tratar como entrega
+  // encerraria a vez do cliente sem ninguém ter entregado nada.
+  const eco = await receber('rrtt9321');
+  t('usuário devolvido não conta como entrega', eco.ativo !== null,
+    eco.ativo ? 'segurou' : 'liberou a vez sem entrega');
+  t('  e vai para o operador decidir', eco.aprovacoes === 1, String(eco.aprovacoes));
+
+  // ── Ruído não mexe em nada, mas deixa rastro ──
+  const antesDoRuido = require('./src/ponte/estado').contarIgnorados().semana;
+  const ruido = await receber('亲，为您推荐以下商品 ns switch游戏 ¥ 8 .00起');
+
+  t('ruído não alerta ninguém', ruido.aoOperador === '', ruido.aoOperador);
+  t('  não fala com o cliente', ruido.aoCliente === '');
+  t('  não vira aprovação', ruido.aprovacoes === 0);
+  // O cliente continua na vez: ninguém respondeu a ele. Liberar a vez por causa
+  // de um anúncio que a loja disparou sozinha entregaria o lugar dele ao próximo.
+  t('  e NÃO libera a vez do cliente', ruido.ativo !== null,
+    ruido.ativo ? 'segurou' : 'liberou a vez por causa de um anúncio');
+
+  // O contador é a única pista de que o filtro existe. Sem ele, uma regra que
+  // comesse resposta de verdade só apareceria como cliente esperando para sempre.
+  const depoisDoRuido = require('./src/ponte/estado').contarIgnorados();
+  t('  mas fica contado', depoisDoRuido.semana === antesDoRuido + 1,
+    `${antesDoRuido} -> ${depoisDoRuido.semana}`);
+  t('  e hoje também', depoisDoRuido.hoje >= 1, String(depoisDoRuido.hoje));
+
+  const painel = await operador.executar('#fila', OP);
+  t('o #fila mostra os descartados', /descartados/i.test(painel),
+    painel.split('\n').find((l) => /descartad/i.test(l)) || painel.slice(0, 60));
+  t('  com vocabulário limpo', !AUTOMACAO.test(painel) && !politica.temCJK(painel),
+    (painel.match(AUTOMACAO) || [''])[0] || 'limpo');
+
+  // ── Código continua saindo sozinho ──
+  // O caminho antigo é o que paga a conta. Nenhum dos tipos novos pode tê-lo
+  // desviado: código É entrega direta, e a fila serial garante de quem ele é.
+  const codigoDireto = await receber('394860');
+  t('código continua indo direto ao cliente', /394860/.test(codigoDireto.aoCliente),
+    codigoDireto.aoCliente);
+  t('  e continua destravando a fila', codigoDireto.ativo === null);
+
+  tradutorMod.paraCliente = traduzReal;
+  estadoPonte.dados.atendimentos = [];
+  estadoPonte.dados.aprovacoes = [];
 
   // ── #status ────────────────────────────────────────────────
   //

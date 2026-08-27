@@ -31,10 +31,13 @@ module.exports = {
       // Compatibilidade com a config antiga de intervalo único.
       (process.env.PONTE_SELLER_INICIO && process.env.PONTE_SELLER_FIM
         ? `${process.env.PONTE_SELLER_INICIO}-${process.env.PONTE_SELLER_FIM}`
-        // Para às 15:00 e volta às 17:30 (horário observado do fornecedor).
+        // Medido em 14 dias de conversa (8 a 27/08), não estimado: ele respondeu
+        // 7 vezes às 15h e 3 vezes entre 17h e 17h30 — todas com a janela
+        // anterior (15:00 / 17:30) fechada, ou seja, o envio ficava esperando
+        // uma pausa que ele não estava fazendo. O buraco real é só das 16h às 17h.
         // ATENÇÃO: se PONTE_SELLER_JANELAS estiver definida no Environment do
         // serviço, ela VENCE isto — mudar aqui não basta.
-        : '00:00-15:00,17:30-23:59'),
+        : '00:00-15:59,17:00-23:59'),
   },
 
   fila: {

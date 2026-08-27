@@ -27,7 +27,7 @@ const nerix = require('../nerix');
 const evolution = require('../evolution');
 const vendas = require('../vendas');
 const tools = require('../tools');
-const { dados, persistAgora, emTeste, marcarTeste } = require('./estado');
+const { dados, persistAgora, emTeste, marcarTeste, contarIgnorados } = require('./estado');
 
 const AJUDA = [
   '*Comandos*',
@@ -657,6 +657,16 @@ async function executar(texto, de = '') {
     for (const t of emCurso.slice(0, 3)) {
       linhas.push(`   \`${t.usuario}\` — começou há ${min(Date.now() - (t.pegaEm || Date.now()))} min`);
     }
+
+    // O que foi descartado como ruído. Aparece SEMPRE, inclusive zerado.
+    //
+    // É a única pista de que o filtro existe. Ele apaga a mensagem sem alertar
+    // ninguém — de propósito, porque são anúncios e pesquisas de satisfação —
+    // mas se um dia ele comer uma resposta de verdade, o sintoma seria um
+    // cliente esperando para sempre e nada no WhatsApp. Escondida quando zero,
+    // esta linha só apareceria depois que o estrago já estivesse feito.
+    const ig = contarIgnorados();
+    linhas.push(`🔇 descartados: ${ig.hoje} hoje · ${ig.semana} em 7 dias`);
 
     // Por que o último não foi. Motivo neutro: isto sai no WhatsApp.
     const falhou = dados.tarefas.filter((t) => t.estado === 'falhou');
