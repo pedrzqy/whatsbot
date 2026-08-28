@@ -220,6 +220,10 @@ const ai = require('./src/ai');
   bloco('a chamada de verdade, com o fetch dublado');
 
   process.env.ANTHROPIC_API_KEY = 'chave-de-mentira';
+  // Antes da PRIMEIRA chamada de proposito: o cliente do SDK e criado uma vez
+  // so, e os cabecalhos padrao sao fixados nesse instante. Definir depois nao
+  // alcancaria nada -- e o teste passaria medindo um cliente sem cabecalho.
+  process.env.ANTHROPIC_WORKSPACE_ID = 'wrkspc_de_mentira';
 
   // UM duble so para o arquivo inteiro, com o comportamento trocavel.
   //
@@ -283,6 +287,22 @@ const ai = require('./src/ai');
   t('  sem temperature no corpo', !('temperature' in req1), JSON.stringify(Object.keys(req1)));
   t('  com raciocínio adaptativo', req1.thinking?.type === 'adaptive');
   t('  e teto de tokens folgado', req1.max_tokens >= 2000, String(req1.max_tokens));
+
+  // ── O cabeçalho do workspace, NA REDE ──
+  //
+  // A Anthropic tem dois tipos de chave, e a "identity-linked" recusa TODA
+  // chamada com 400 se este cabeçalho não for junto. Aconteceu de verdade: o
+  // dono rotacionou a chave, criou uma desse tipo, e o bot passou a responder
+  // o menu de "não entendi" a tudo -- sem nada no atendimento ter mudado.
+  //
+  // O SDK lê ANTHROPIC_WORKSPACE_ID sozinho, mas só no caminho de login
+  // federado; com chave de API comum ele nunca manda. Por isso o teste é na
+  // REDE e não na função: o que importa é o cabeçalho ter saído.
+  const cab = requisicoes[0].headers;
+  const pego = typeof cab?.get === 'function'
+    ? cab.get('anthropic-workspace-id')
+    : cab?.['anthropic-workspace-id'] || cab?.['Anthropic-Workspace-Id'];
+  t('  o workspace vai no cabeçalho', pego === 'wrkspc_de_mentira', String(pego));
 
   // O cache: sem a marca, a conta quase dobra.
   t('  o system marcado para cache', req1.system?.[0]?.cache_control?.type === 'ephemeral');
@@ -515,6 +535,57 @@ process.env.ANTHROPIC_API_KEY = '';
   }
   t('  e chat() falha em vez de travar', Boolean(erro), erro?.message);
   if (chaveAntes) process.env.ANTHROPIC_API_KEY = chaveAntes;
+
+  // ── O tipo da chave ───────────────────────────────────────
+  //
+  // Chave comum nao quer o cabecalho do workspace, e mandar um vazio seria
+  // pior do que nao mandar. So a "identity-linked" precisa dele.
+  bloco('o tipo da chave');
+
+  const wsAntes = process.env.ANTHROPIC_WORKSPACE_ID;
+  process.env.ANTHROPIC_WORKSPACE_ID = '';
+  t('sem workspace, nenhum cabeçalho extra',
+    Object.keys(claude.cabecalhosDaChave()).length === 0,
+    JSON.stringify(claude.cabecalhosDaChave()));
+
+  // Espaco em branco no painel e um classico: colar o id com um espaco atras
+  // mandaria " wrkspc_1" e a API recusaria igual.
+  process.env.ANTHROPIC_WORKSPACE_ID = '  wrkspc_1  ';
+  t('com workspace, o cabeçalho aparece limpo',
+    claude.cabecalhosDaChave()['anthropic-workspace-id'] === 'wrkspc_1',
+    JSON.stringify(claude.cabecalhosDaChave()));
+  process.env.ANTHROPIC_WORKSPACE_ID = wsAntes || '';
+
+  // ── O erro de chave vira instrucao ────────────────────────
+  //
+  // O que chegava ao log era o JSON cru da API, e um 400 de chave ficava
+  // igual a um 400 de pedido malformado. Custou uma rodada inteira de
+  // investigacao no atendimento quando o problema era o tipo da chave.
+  const ditos = [];
+  const errReal = console.error;
+  console.error = (...a) => ditos.push(a.join(' '));
+
+  claude.explicarErroDeChave({
+    status: 400,
+    message: '400 {"type":"error","error":{"type":"invalid_request_error","message":' +
+      '"anthropic-workspace-id is required when authenticating with an identity-linked API key"}}',
+  });
+  t('o erro do workspace vira instrução', /ANTHROPIC_WORKSPACE_ID/.test(ditos.join(' ')),
+    ditos[0] || '(calado)');
+  t('  dizendo tambem a saída mais simples', /dentro de um workspace/i.test(ditos.join(' ')),
+    ditos.join(' ').slice(-60));
+
+  ditos.length = 0;
+  claude.explicarErroDeChave({ status: 401, message: '401 invalid x-api-key' });
+  t('chave recusada diz onde colar a nova', /ANTHROPIC_API_KEY/.test(ditos.join(' ')),
+    ditos[0] || '(calado)');
+
+  // Erro desconhecido segue cru: inventar explicacao e pior do que mostrar o
+  // erro de verdade, porque manda o dono consertar a coisa errada.
+  ditos.length = 0;
+  claude.explicarErroDeChave({ status: 500, message: 'internal server error' });
+  t('erro desconhecido não ganha explicação inventada', ditos.length === 0, ditos.join(' '));
+  console.error = errReal;
 
   console.log('\n' + (falhas ? falhas + ' FALHA(S)' : 'todos os testes passaram'));
   process.exit(falhas ? 1 : 0);

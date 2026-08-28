@@ -84,16 +84,79 @@ let contador = { dia: null, n: 0, cacheLido: 0, cacheGravado: 0, entrada: 0 };
  */
 const TENTATIVAS = Number(process.env.BOT_CLAUDE_TENTATIVAS ?? 1);
 
+/**
+ * O workspace, quando a chave é do tipo que exige um.
+ *
+ * A Anthropic tem dois tipos de chave. A comum já sabe em que workspace ela
+ * vive; a "identity-linked" (ligada a uma pessoa, não a um workspace) não sabe,
+ * e a API recusa TODA chamada com 400:
+ *
+ *   anthropic-workspace-id is required when authenticating with an
+ *   identity-linked API key; send the id of the workspace this request acts in
+ *
+ * O SDK lê ANTHROPIC_WORKSPACE_ID sozinho, mas só no caminho de login federado
+ * (OIDC) -- com chave de API comum ele nunca manda o cabeçalho. Por isso vai
+ * daqui, na mão.
+ *
+ * Vazio quando não existe, e aí nada muda: a chave comum não quer o cabeçalho.
+ *
+ * Lido na hora e não no topo do arquivo: uma constante de módulo congela o
+ * valor no `require`, e aí nem o teste nem um restart tardio conseguem mudá-lo.
+ */
+function cabecalhosDaChave() {
+  const workspace = String(process.env.ANTHROPIC_WORKSPACE_ID || '').trim();
+  return workspace ? { 'anthropic-workspace-id': workspace } : {};
+}
+
 let cliente = null;
 function obterCliente() {
   // lê ANTHROPIC_API_KEY do ambiente
-  if (!cliente) cliente = new Anthropic({ maxRetries: TENTATIVAS });
+  if (!cliente) {
+    cliente = new Anthropic({ maxRetries: TENTATIVAS, defaultHeaders: cabecalhosDaChave() });
+  }
   return cliente;
 }
 
 /** Sem chave, o módulo inteiro se desliga e o bot segue na cascata antiga. */
 function disponivel() {
   return Boolean(process.env.ANTHROPIC_API_KEY);
+}
+
+/**
+ * Traduz os erros de CHAVE, que são os únicos que o dono resolve sozinho.
+ *
+ * O que chegava ao log era o JSON cru da API. Um 400 de chave e um 400 de
+ * pedido malformado ficam idênticos assim, e o desfecho no WhatsApp é o mesmo
+ * para os dois: o cliente recebe o menu. Uma rodada inteira se foi procurando
+ * bug no atendimento quando o problema era o tipo da chave.
+ *
+ * Só os casos que TÊM conserto conhecido viram frase; o resto continua subindo
+ * como está, porque inventar explicação para erro desconhecido é pior do que
+ * mostrar o erro.
+ */
+function explicarErroDeChave(err) {
+  const texto = `${err?.message || ''} ${JSON.stringify(err?.error || '')}`;
+
+  if (/anthropic-workspace-id/i.test(texto)) {
+    console.error(
+      '[claude] a chave é do tipo que exige workspace (identity-linked). ' +
+        'Conserto: no Environment, criar ANTHROPIC_WORKSPACE_ID com o id do workspace ' +
+        '-- ou trocar por uma chave criada DENTRO de um workspace, que não precisa disso.',
+    );
+    return;
+  }
+
+  if (err?.status === 401 || /invalid x-api-key|authentication_error/i.test(texto)) {
+    console.error(
+      '[claude] a chave foi recusada (401). Conserto: colar a chave nova no ' +
+        'Environment, em ANTHROPIC_API_KEY, e dar Deploy.',
+    );
+    return;
+  }
+
+  if (err?.status === 400 && /credit|billing|insufficient/i.test(texto)) {
+    console.error('[claude] a conta da Anthropic está sem crédito. Conserto: comprar crédito no console.');
+  }
 }
 
 function diaDeHoje() {
@@ -374,9 +437,15 @@ async function chat(messages, opts = {}) {
     throw new Error('teto diário do Claude estourado');
   }
 
-  const resposta = await obterCliente().messages.create(montarParametros(messages, opts), {
-    timeout: Math.min(resta, 40000),
-  });
+  let resposta;
+  try {
+    resposta = await obterCliente().messages.create(montarParametros(messages, opts), {
+      timeout: Math.min(resta, 40000),
+    });
+  } catch (err) {
+    explicarErroDeChave(err);
+    throw err;
+  }
 
   // Recusa por política: chega como 200, com stop_reason 'refusal' e sem
   // conteúdo útil. Vira erro de propósito, para o bot cair na cascata — que é a
@@ -412,4 +481,6 @@ module.exports = {
   converterMensagens,
   converterResposta,
   montarParametros,
+  cabecalhosDaChave,
+  explicarErroDeChave,
 };
