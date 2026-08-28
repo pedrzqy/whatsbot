@@ -2476,14 +2476,23 @@ const OP = '5541999999999';
 
   const telasMod = require('./src/telas');
 
+  // O JEITO QUE A PESSOA ESCREVE, e nao a tela copiada.
+  //
+  // Os padroes eram frases inteiras e exatas, entao so reconheciam quem
+  // colasse a tela -- justamente quem nao precisa de ajuda. Um cliente escreveu
+  // "inicie nova sessao com sua conta nintendo" (duas palavras fora de ordem) e
+  // caiu no "nao entendi".
   for (const [caso, texto, esperado] of [
+    ['as palavras fora de ordem', 'inicie nova sessao com sua conta nintendo', 'sessao_expirada'],
+    ['  sem acento nenhum', 'pede pra iniciar sessao de novo na conta', 'sessao_expirada'],
+    ['  dito com outras palavras', 'ta pedindo pra logar de novo na conta nintendo', 'sessao_expirada'],
+    ['  e a frase da tela tambem', 'Inicie a sessão novamente com a sua conta Nintendo', 'sessao_expirada'],
+    ['o problema contado a mao', 'nao posso usar o software agora', 'software_indisponivel'],
     ['o código do erro', 'erro 2819-0042', 'jogo_em_outro_console'],
     ['  escrito com espaço', '2819 0042', 'jogo_em_outro_console'],
     ['  ou pelo que a tela diz', 'o cartão de jogo virtual está sendo usado em outro console',
       'jogo_em_outro_console'],
-    ['sessão expirada', 'Inicie a sessão novamente com a sua conta Nintendo', 'sessao_expirada'],
-    ['software indisponível', 'no momento este software não pode ser usado',
-      'software_indisponivel'],
+    ['software indisponível', 'no momento este software não pode ser usado', 'software_indisponivel'],
     ['  pela outra frase da tela', 'conta Nintendo estiver vinculada a outro console',
       'software_indisponivel'],
     ['pedido de código', 'confirmação do endereço de e-mail', 'pediu_codigo'],

@@ -37,7 +37,12 @@ const TELAS = [
     oQueE:
       'Erro 2819-0042. O console diz que o jogo está sendo usado em outro ' +
       'aparelho ao mesmo tempo, e suspende a partida.',
-    sinais: [/2819[-\s]?0042/, /usado em outro console/i, /cart[ãa]o de jogo virtual/i],
+    // Casa se QUALQUER destes conjuntos estiver todo presente no texto.
+    sinais: [
+      [/2819[\s-]?0042/],
+      [/outro console/, /(jogo|cartao|game)/],
+      [/cartao de jogo virtual/],
+    ],
     // Entrar PRIMEIRO e só então cortar a rede: o console checa a licença ao
     // abrir. Cortando antes, ele nem deixa entrar.
     resposta:
@@ -54,7 +59,13 @@ const TELAS = [
   {
     id: 'sessao_expirada',
     oQueE: 'A conta pede para iniciar a sessão de novo. É só relogar.',
-    sinais: [/inicie a sess[ãa]o novamente/i, /iniciar sess[ãa]o novamente/i],
+    // "sessao" sozinho e ambiguo; junto de "nintendo", "conta" ou "de novo"
+    // vira inequivoco. Cobre "inicie a sessao novamente", "inicie nova
+    // sessao", "pede pra logar de novo" e o que mais a pessoa inventar.
+    sinais: [
+      [/(sessao|session)/, /(nintendo|conta|novamente|nova|de novo|outra vez)/],
+      [/(logar|login|entrar)/, /(de novo|novamente|outra vez)/, /(conta|nintendo)/],
+    ],
     resposta:
       'É só entrar de novo com a *senha da conta* que você recebeu 👍\n\n' +
       'Depois disso volta ao normal.',
@@ -67,9 +78,9 @@ const TELAS = [
       'Software não pode ser usado agora. Na prática é o servidor da Nintendo ' +
       'reiniciando; volta sozinho.',
     sinais: [
-      /software n[ãa]o pode ser usado/i,
-      /vinculada a outro console/i,
-      /conecte o outro console/i,
+      [/software/, /(nao pode ser usado|nao posso usar|indisponivel|bloqueado)/],
+      [/vinculada a outro console/],
+      [/conecte o outro console/],
     ],
     // Prazo REAL, e não "já já": duas horas é o que costuma levar, e um prazo
     // curto demais faz ele voltar irritado antes de o problema ter chance de
@@ -92,9 +103,9 @@ const TELAS = [
       'A tela pede o código de confirmação enviado por e-mail. É o fluxo do ' +
       'código de verificação.',
     sinais: [
-      /c[óo]digo de confirma[çc][ãa]o/i,
-      /confirma[çc][ãa]o do endere[çc]o de e-?mail/i,
-      /inserir? o c[óo]digo que foi enviado/i,
+      [/codigo de confirmacao/],
+      [/confirmacao do endereco de e-?mail/],
+      [/codigo/, /(enviado|chegou) (por|no) e-?mail/],
     ],
     // Não responde nada aqui: quem conduz é a recepção da ponte, que já pede
     // foto e usuário no passo certo. Duas mensagens diferentes sobre a mesma
@@ -112,10 +123,36 @@ const TELAS = [
  *
  * @returns {Tela|null}
  */
+/**
+ * Sem acento, sem pontuacao, minusculo, espaco unico.
+ *
+ * O cliente digita no celular, com pressa, e quase nunca copia a tela: escreve
+ * "sessao" sem til, "nao" sem circunflexo, e erra o espaco. Comparar contra o
+ * texto cru so reconheceria quem copiasse e colasse -- que e justamente quem
+ * nao precisa de ajuda.
+ */
+const normalizar = (t) =>
+  String(t || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9\s-]/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+
 function porTexto(texto) {
-  const bruto = String(texto || '');
-  if (!bruto.trim()) return null;
-  return TELAS.find((t) => t.sinais.some((re) => re.test(bruto))) || null;
+  const alvo = normalizar(texto);
+  if (!alvo) return null;
+
+  // Cada `sinal` e um CONJUNTO de padroes que precisam estar todos presentes,
+  // em qualquer ordem. Era uma frase inteira, exata, e por isso so reconhecia
+  // quem colasse a tela: "inicie nova sessao com sua conta nintendo" nao casava
+  // com /inicie a sessao novamente/, porque a pessoa trocou duas palavras de
+  // lugar. Exigir palavras, e nao a frase, e o que sobrevive ao jeito de gente
+  // escrever.
+  return (
+    TELAS.find((t) => t.sinais.some((conjunto) => conjunto.every((re) => re.test(alvo)))) || null
+  );
 }
 
 const porId = (id) => TELAS.find((t) => t.id === id) || null;
