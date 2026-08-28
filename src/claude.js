@@ -25,14 +25,58 @@
  *    com `thinking: {type:'disabled'}` o modelo às vezes escreve a chamada de
  *    ferramenta no texto visível — que aqui vira uma mensagem de WhatsApp
  *    dizendo "vou chamar buscar_produtos" para o cliente. Fica adaptativo, com
- *    esforço baixo e teto de tokens folgado.
+ *    esforço baixo e teto de tokens folgado — mas SÓ nos modelos que aceitam
+ *    esses dois campos, que de 4.5 para baixo os recusam com 400. Ver
+ *    MODELOS_ADAPTATIVOS.
  *
  * 3. O cache é casamento de PREFIXO. Ver `ai.js` → `marcaDoCliente`.
  */
 
 const Anthropic = require('@anthropic-ai/sdk');
 
-const MODELO = process.env.BOT_CLAUDE_MODELO || 'claude-opus-5';
+const MODELO = process.env.BOT_CLAUDE_MODELO || 'claude-haiku-4-5';
+
+/**
+ * Quais modelos aceitam raciocínio adaptativo e `effort`.
+ *
+ * Não é detalhe de estilo: `thinking:{type:'adaptive'}` e `output_config.effort`
+ * existem de Opus/Sonnet 4.6 PARA CIMA. No Haiku 4.5 e em qualquer coisa mais
+ * antiga os dois são recusados com 400 — 100% das chamadas, e no WhatsApp isso
+ * vira o mesmo menu de "não entendi" de sempre, sem pista nenhuma.
+ *
+ * Isto existe porque o modelo é uma variável de ambiente (BOT_CLAUDE_MODELO):
+ * dá para trocá-lo sem passar por aqui, e sem esta lista a troca derrubaria o
+ * atendimento inteiro em silêncio.
+ *
+ * `startsWith` e não igualdade: um snapshot com data no fim
+ * (claude-opus-4-6-20250514) é a mesma geração e aceita os mesmos campos.
+ */
+const MODELOS_ADAPTATIVOS = [
+  'claude-fable-5',
+  'claude-mythos-5',
+  'claude-opus-5',
+  'claude-opus-4-8',
+  'claude-opus-4-7',
+  'claude-opus-4-6',
+  'claude-sonnet-5',
+  'claude-sonnet-4-6',
+];
+
+/** Os campos de raciocínio que ESTE modelo aceita. Vazio quando não aceita. */
+function paramsDeRaciocinio(model) {
+  const m = String(model || '');
+  if (!MODELOS_ADAPTATIVOS.some((id) => m.startsWith(id))) return {};
+  return {
+    // Adaptativo, não desligado: com o raciocínio desligado o modelo às vezes
+    // escreve a chamada de ferramenta no texto visível, e aqui texto visível é
+    // uma mensagem de WhatsApp para o cliente.
+    thinking: { type: 'adaptive' },
+    // Esforço baixo: atendimento de loja é conversa curta com fatos vindos de
+    // ferramenta, não raciocínio longo. É o que segura o custo sem piorar a
+    // resposta.
+    output_config: { effort: process.env.BOT_CLAUDE_ESFORCO || 'low' },
+  };
+}
 
 /**
  * Teto de tokens de saída.
@@ -391,14 +435,9 @@ function montarParametros(messages, opts) {
     // O raciocínio conta aqui dentro. Ver o cabeçalho do arquivo.
     max_tokens: Math.max(Number(opts.maxTokens) || 0, MAX_TOKENS),
 
-    // Adaptativo, não desligado: com o raciocínio desligado o modelo às vezes
-    // escreve a chamada de ferramenta no texto visível, e aqui texto visível é
-    // uma mensagem de WhatsApp para o cliente.
-    thinking: { type: 'adaptive' },
-    // Esforço baixo: atendimento de loja é conversa curta com fatos vindos de
-    // ferramenta, não raciocínio longo. É o que segura o custo sem piorar a
-    // resposta.
-    output_config: { effort: process.env.BOT_CLAUDE_ESFORCO || 'low' },
+    // O raciocínio, só nos modelos que aceitam. Ver MODELOS_ADAPTATIVOS: no
+    // Haiku 4.5 estes campos dão 400 e derrubam toda chamada.
+    ...paramsDeRaciocinio(opts.model || MODELO),
 
     // O breakpoint vai no system, e cobre as FERRAMENTAS junto: a ordem de
     // renderização é ferramentas → system → mensagens, então uma marca no fim
@@ -483,4 +522,6 @@ module.exports = {
   montarParametros,
   cabecalhosDaChave,
   explicarErroDeChave,
+  paramsDeRaciocinio,
+  MODELOS_ADAPTATIVOS,
 };

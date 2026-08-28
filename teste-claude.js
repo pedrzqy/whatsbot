@@ -50,12 +50,45 @@ t('top_k não é repassado', p.top_k === undefined);
 // chegava cortada no meio de uma frase, sem erro nenhum.
 t('max_tokens não obedece um teto baixo demais', p.max_tokens >= 2000, String(p.max_tokens));
 
-// Desligar o raciocínio é pior que pagá-lo: sem ele o modelo às vezes escreve a
-// chamada de ferramenta no texto visível — que aqui é uma mensagem de WhatsApp.
-t('raciocínio fica adaptativo', p.thinking?.type === 'adaptive', JSON.stringify(p.thinking));
-t('  e nunca desligado', p.thinking?.type !== 'disabled');
-t('  nem com budget_tokens (removido do modelo)', p.thinking?.budget_tokens === undefined);
-t('esforço baixo para segurar o custo', p.output_config?.effort === 'low', JSON.stringify(p.output_config));
+// ── O raciocínio muda com a GERAÇÃO do modelo ───────────────
+//
+// De Opus/Sonnet 4.6 para cima: adaptativo e `effort`. No Haiku 4.5 esses dois
+// campos NAO EXISTEM -- sao recusados com 400, toda chamada, e no WhatsApp isso
+// vira o mesmo menu de "nao entendi" de sempre. Como o modelo e uma variavel de
+// ambiente, trocar de geracao sem mexer no codigo passaria batido: por isso as
+// duas gerações são testadas, e não só a que está configurada hoje.
+bloco('o raciocínio muda com a geração do modelo');
+
+// Em cima: adaptativo. Desligar o raciocínio é pior que pagá-lo -- sem ele o
+// modelo às vezes escreve a chamada de ferramenta no texto visível, que aqui é
+// uma mensagem de WhatsApp para o cliente.
+const emCima = claude.paramsDeRaciocinio('claude-opus-5');
+t('no Opus 5 o raciocínio fica adaptativo', emCima.thinking?.type === 'adaptive',
+  JSON.stringify(emCima.thinking));
+t('  e nunca desligado', emCima.thinking?.type !== 'disabled');
+t('  nem com budget_tokens (removido do modelo)', emCima.thinking?.budget_tokens === undefined);
+t('  com esforço baixo para segurar o custo', emCima.output_config?.effort === 'low',
+  JSON.stringify(emCima.output_config));
+
+// Um snapshot com data no fim é a MESMA geração e aceita os mesmos campos.
+t('  e o snapshot com data conta como a mesma geração',
+  claude.paramsDeRaciocinio('claude-opus-4-6-20250514').thinking?.type === 'adaptive');
+
+// Embaixo: nenhum dos dois. Mandar qualquer um deles derruba a chamada.
+const embaixo = claude.paramsDeRaciocinio('claude-haiku-4-5');
+t('no Haiku 4.5 não vai thinking', embaixo.thinking === undefined, JSON.stringify(embaixo));
+t('  nem output_config', embaixo.output_config === undefined, JSON.stringify(embaixo));
+
+// Modelo desconhecido cai no lado seguro: sem os campos novos a chamada
+// funciona em qualquer geração; COM eles, quebra em metade delas.
+t('modelo desconhecido não ganha campo nenhum',
+  Object.keys(claude.paramsDeRaciocinio('claude-coisa-nova-9')).length === 0);
+
+// E o que sai de verdade tem que bater com o modelo configurado agora.
+const adaptativoAgora = claude.MODELOS_ADAPTATIVOS.some((id) => claude.MODELO.startsWith(id));
+t(`o modelo de hoje (${claude.MODELO}) manda os campos certos`,
+  adaptativoAgora ? p.thinking?.type === 'adaptive' : p.thinking === undefined,
+  JSON.stringify({ thinking: p.thinking, output_config: p.output_config }));
 
 // ── O cache, que é a diferença entre R$ 287 e R$ 600 ────────
 bloco('o prefixo cacheado');
@@ -282,10 +315,16 @@ const ai = require('./src/ai');
   const req1 = requisicoes[0].corpo;
   t('foi para a Anthropic', /api\.anthropic\.com|\/v1\/messages/.test(requisicoes[0].url),
     requisicoes[0].url);
-  t('  com o modelo certo', req1.model === 'claude-opus-5', req1.model);
+  t('  com o modelo configurado', req1.model === claude.MODELO, req1.model);
   // Os três que dão 400. Aqui é o JSON real que sai pela rede, não o objeto.
   t('  sem temperature no corpo', !('temperature' in req1), JSON.stringify(Object.keys(req1)));
-  t('  com raciocínio adaptativo', req1.thinking?.type === 'adaptive');
+  // Na REDE, e não no objeto: um campo a mais aqui é 400 em toda chamada, e a
+  // geração do modelo decide quais campos podem sair.
+  t('  com o raciocínio que ESTE modelo aceita',
+    adaptativoAgora
+      ? req1.thinking?.type === 'adaptive'
+      : !('thinking' in req1) && !('output_config' in req1),
+    JSON.stringify({ thinking: req1.thinking, output_config: req1.output_config }));
   t('  e teto de tokens folgado', req1.max_tokens >= 2000, String(req1.max_tokens));
 
   // ── O cabeçalho do workspace, NA REDE ──
