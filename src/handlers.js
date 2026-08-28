@@ -640,6 +640,28 @@ async function handleMessage(msg) {
     // Pior: como a escolha nunca era executada, "falar com um atendente"
     // também não rodava, e o cliente que pediu humano continuava no laço.
     store.saveContact(from, { menuNode: 'main', modoIA: false });
+
+    // FOTO com a conversa livre desligada.
+    //
+    // Quem enxerga a imagem é o modelo; sem ele, a foto não vira nada. Só que
+    // responder "não entendi, escolhe uma opção" a quem acabou de mandar um
+    // print é o pior desfecho possível: ele mandou a tela do erro, o bot
+    // ignorou a tela e devolveu um menu de oito itens. Parece que a foto nem
+    // chegou.
+    //
+    // O código do erro, digitado, o bot RESOLVE sozinho (ver telas.js) — e é
+    // isso que vale pedir. Uma linha na tela do console, que ele já está
+    // olhando, contra oito opções que não respondem a pergunta dele.
+    if (imagem || imagemBase64) {
+      await sender.send(
+        from,
+        'Recebi sua foto 👍\n\n' +
+          'Me diz o *código do erro* que aparece na tela (algo tipo *2819-0042*) ' +
+          'ou escreve em uma frase o que apareceu, que eu te falo como resolver.',
+      );
+      return;
+    }
+
     await enviarMenu(from, 'main', variator.pick(NAO_ENTENDI));
     return;
   }

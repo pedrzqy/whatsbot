@@ -161,6 +161,27 @@ function webhookDe(numero, message, pushName = 'Cliente') {
   t('  e a IA responde sem a foto', !vistoPelaIA?.extra?.imagemBase64);
   midiaDevolvida = { base64: PIXEL, mimetype: 'image/png' };
 
+  // ── Foto com a conversa livre DESLIGADA ──────────────
+  //
+  // Quem enxerga a imagem e o modelo; sem ele a foto nao vira nada. Mas
+  // responder "nao entendi, escolhe uma opcao" a quem acabou de mandar um
+  // print e o pior desfecho: ele mandou a tela do erro, o bot ignorou a tela e
+  // devolveu um menu de oito itens. Parece que a foto nem chegou.
+  bloco('foto com a conversa livre desligada');
+
+  chaves.definir('ia', false);
+  await entregar(webhookDe(CLI, { imageMessage: { caption: 'deu esse erro para mim' } }));
+  const respostaSemIA = enviadas.filter((e) => e.para === CLI).map((e) => e.texto).join('\n');
+
+  t('o bot reconhece que veio uma foto', /recebi sua foto/i.test(respostaSemIA),
+    respostaSemIA.split('\n')[0] || '(nada)');
+  // O código do erro, digitado, o bot RESOLVE sozinho (telas.js). É isso que
+  // vale pedir: uma linha da tela que ele já está olhando.
+  t('  e pede o código do erro', /2819-0042|c[oó]digo do erro/i.test(respostaSemIA), respostaSemIA);
+  t('  em vez de "não entendi"', !/n[ãa]o entendi|escolhe uma op[çc][ãa]o/i.test(respostaSemIA),
+    respostaSemIA.split('\n')[0]);
+  chaves.definir('ia', true);
+
   // ── ÁUDIO ──────────────────────────────────────────────────
   //
   // Sem chave de transcrição o áudio não vira texto — e o cliente precisa
