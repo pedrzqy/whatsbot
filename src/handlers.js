@@ -266,8 +266,12 @@ async function acaoDoMenu(acao, { from, pushName }) {
       // de handoff escreviam cada uma a sua, e foi assim que passaram a
       // prometer coisas diferentes para a mesma situação — todas as três
       // dizendo "em instantes" também às 3h da manhã, quando não há ninguém.
+      // "voltar ao menu", e não "voltar ao atendimento automático": a palavra
+      // "automático" está no vocabulário proibido (ponte/politica.js) e estava
+      // saindo daqui para o cliente. Escapou porque o teste de vocabulário só
+      // olhava as mensagens do operador, e esta é do atendimento.
       `Certo! ${expediente.promessaDeAtendimento()}\n\n` +
-        '_Se quiser voltar ao atendimento automático, digite *#inicio*._',
+        '_Se quiser voltar ao menu, digite *#inicio*._',
     );
     return true;
   }
@@ -648,7 +652,7 @@ async function handleMessage(msg) {
       return;
     }
 
-    await enviarMenu(from, 'main', variator.pick(NAO_ENTENDI));
+    await naoEntendi(from, pushName);
     return;
   }
 
@@ -694,9 +698,75 @@ async function handleMessage(msg) {
       return;
     }
 
-    await enviarMenu(from, 'main', variator.pick(NAO_ENTENDI));
+    await naoEntendi(from, pushName);
   }
 }
+
+/**
+ * "Não entendi" — mas sem repetir o menu inteiro a cada mensagem.
+ *
+ * O relato veio com print: três menus de oito opções em um minuto. O cliente
+ * escrevia em português, caía aqui, e recebia a MESMA lista de novo, inteira.
+ * Com a IA fora do ar isso acontece em toda mensagem que não seja um número, e
+ * a tela do cliente vira um paredão.
+ *
+ * A lista tem valor na PRIMEIRA vez: é a rede que funciona sem modelo nenhum.
+ * Da segunda em diante ela não informa nada — ele já está olhando para ela — e
+ * só empurra a conversa para cima. Então: a primeira manda o menu, as seguintes
+ * mandam uma linha.
+ *
+ * E na terceira seguida o bot para de insistir e chama gente. Foi o próprio
+ * teste do dono que mostrou o porquê: o cliente disse "não tenho a senha, eu
+ * perdi" e não havia número de 1 a 8 para isso. Insistir no menu com quem já
+ * disse duas vezes que não é o menu é como o laço termina sem ninguém atender.
+ *
+ * A contagem zera sozinha depois da janela: quem volta amanhã com outra dúvida
+ * merece o menu inteiro, não a linha curta de uma conversa que já acabou.
+ */
+const MENU_JANELA_MS = Number(process.env.BOT_MENU_JANELA_MS || 10 * 60 * 1000);
+// 0 desliga a passagem para gente e deixa só a linha curta.
+const FALHAS_ATE_HUMANO = Math.max(Number(process.env.BOT_FALHAS_ATE_HUMANO ?? 3), 0);
+
+async function naoEntendi(from, pushName) {
+  const contato = store.getContact(from) || {};
+  const agora = Date.now();
+  const naJanela = contato.naoEntendiEm && agora - contato.naoEntendiEm < MENU_JANELA_MS;
+  const seguidas = naJanela ? (contato.naoEntendiSeguidas || 0) + 1 : 1;
+
+  store.saveContact(from, {
+    menuNode: 'main',
+    modoIA: false,
+    naoEntendiEm: agora,
+    naoEntendiSeguidas: seguidas,
+  });
+
+  if (FALHAS_ATE_HUMANO && seguidas >= FALHAS_ATE_HUMANO) {
+    // Some do log: sem esta linha, o dono só veria o alerta de handoff chegar
+    // sem saber que quem o gerou foi o laço, e não o cliente escolhendo a 8.
+    console.log(`[handoff] ${from} -> ${seguidas} mensagens sem entender, chamando gente`);
+    store.saveContact(from, { naoEntendiSeguidas: 0 });
+    await acaoDoMenu('atendente', { from, pushName });
+    return;
+  }
+
+  if (seguidas === 1) {
+    await enviarMenu(from, 'main', variator.pick(NAO_ENTENDI));
+    return;
+  }
+
+  await sender.send(
+    from,
+    `${variator.pick(SO_O_NUMERO)}\n\n_Ou *#inicio* para ver a lista de novo._`,
+  );
+}
+
+// A segunda tentativa em diante. Curtas de propósito: a lista inteira já está
+// na tela dele, logo acima.
+const SO_O_NUMERO = [
+  'Ainda não peguei 🤔 Me manda só o *número* da opção, de 1 a 8.',
+  'Me diz o *número* da opção que você quer, de 1 a 8, que eu sigo daqui 👍',
+  'Responde só com o *número* da lista aí em cima, de 1 a 8.',
+];
 
 /**
  * A foto chegou, mas ninguém pôde olhar para ela.

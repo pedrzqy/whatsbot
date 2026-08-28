@@ -73,8 +73,17 @@ evolution.getBase64FromMediaMessage = async () => {
 const sendReal = sender.send;
 
 // O que o bot mandou, e para quem.
+//
+// `enviadas` e zerado a cada entregar(); `tudoQueSaiu` nao zera nunca. O
+// segundo existe para a varredura de vocabulario no fim do arquivo: uma palavra
+// proibida so precisa escapar UMA vez, num caminho qualquer, e olhar so a
+// ultima mensagem de cada bloco deixaria o resto sem cobertura.
 const enviadas = [];
-sender.send = async (para, texto) => { enviadas.push({ para, texto: String(texto) }); };
+const tudoQueSaiu = [];
+sender.send = async (para, texto) => {
+  enviadas.push({ para, texto: String(texto) });
+  tudoQueSaiu.push({ para, texto: String(texto) });
+};
 
 // O que chegou ao modelo. `ai.reply` é o fim da linha do que este arquivo mede:
 // se a foto chegou até aqui, chegou ao modelo (isso o teste-claude cobre).
@@ -208,12 +217,62 @@ function webhookDe(numero, message, pushName = 'Cliente') {
 
   // Sem foto o menu CONTINUA sendo a rede: quem escreveu tem oito caminhos que
   // funcionam sem modelo nenhum, e e quando a IA cai que ele mais precisa deles.
+  //
+  // Zerando a contagem antes: os blocos acima ja caíram no "nao entendi" com
+  // este mesmo contato, e a partir da segunda vez a resposta e a linha curta.
+  // Sem zerar, este teste mediria o estado deixado pelos vizinhos.
+  store.saveContact(CLI, { naoEntendiEm: 0, naoEntendiSeguidas: 0 });
   await entregar(webhookDe(CLI, { conversation: 'queria saber de uma coisa' }));
   const semFotoIaCaiu = enviadas.filter((e) => e.para === CLI).map((e) => e.texto).join('\n');
   t('mas sem foto o menu continua aparecendo',
     /n[ãa]o entendi|escolhe uma op[çc][ãa]o|escolhe pelo n[uú]mero|op[çc][õo]es/i.test(semFotoIaCaiu),
     semFotoIaCaiu.split('\n')[0] || '(nada)');
   ai.reply = replyBom;
+
+  // ── O menu nao se repete inteiro a cada mensagem ───────────
+  //
+  // O relato veio com print: tres menus de oito opcoes em um minuto. Com a IA
+  // fora do ar isso acontece a cada mensagem que nao seja um numero, e a tela
+  // do cliente vira um paredao.
+  //
+  // A lista vale na PRIMEIRA vez -- e a rede que funciona sem modelo nenhum. Da
+  // segunda em diante ela nao informa nada: ele ja esta olhando para ela.
+  bloco('o menu nao se repete inteiro');
+
+  const CLI_FLOOD = '5541900008888';
+  store.saveContact(CLI_FLOOD, { ...jaSaudado, menuNode: null, modoIA: false });
+  chaves.definir('ia', false);
+
+  await entregar(webhookDe(CLI_FLOOD, { conversation: 'oi, to com um problema aqui' }));
+  const primeira = enviadas.filter((e) => e.para === CLI_FLOOD).map((e) => e.texto).join('\n');
+  t('a primeira vez manda o menu inteiro', /Suporte Steam/.test(primeira),
+    primeira.split('\n')[0] || '(nada)');
+
+  await entregar(webhookDe(CLI_FLOOD, { conversation: 'nao tenho a senha, eu perdi' }));
+  const segunda = enviadas.filter((e) => e.para === CLI_FLOOD).map((e) => e.texto).join('\n');
+  t('a segunda NÃO repete as oito opções', !/Suporte Steam/.test(segunda),
+    segunda.split('\n')[0] || '(nada)');
+  t('  manda uma linha curta apontando para a lista', /n[uú]mero/i.test(segunda), segunda);
+  t('  e uma saída (#inicio)', /#inicio/.test(segunda), segunda);
+
+  // Terceira seguida: para de insistir e chama gente. Foi o proprio teste do
+  // dono que mostrou o porque -- o cliente disse "nao tenho a senha, eu perdi"
+  // e nao existe numero de 1 a 8 para isso.
+  await entregar(webhookDe(CLI_FLOOD, { conversation: 'mas eu preciso resolver isso hoje' }));
+  const terceira = enviadas.filter((e) => e.para === CLI_FLOOD).map((e) => e.texto).join('\n');
+  t('a terceira seguida chama gente', store.getContact(CLI_FLOOD)?.paused === true,
+    `paused=${store.getContact(CLI_FLOOD)?.paused}`);
+  t('  e o cliente sabe que alguém vem', terceira.length > 0 && !/Suporte Steam/.test(terceira),
+    terceira.split('\n')[0] || '(nada)');
+
+  // Depois da janela, quem volta merece o menu inteiro de novo: a linha curta
+  // so faz sentido enquanto a lista ainda esta na tela dele.
+  store.saveContact(CLI_FLOOD, { paused: false, naoEntendiEm: 1, naoEntendiSeguidas: 2 });
+  await entregar(webhookDe(CLI_FLOOD, { conversation: 'oi, voltei com outra duvida' }));
+  const depois = enviadas.filter((e) => e.para === CLI_FLOOD).map((e) => e.texto).join('\n');
+  t('passada a janela, o menu inteiro volta', /Suporte Steam/.test(depois),
+    depois.split('\n')[0] || '(nada)');
+  chaves.definir('ia', true);
 
   // ── ÁUDIO ──────────────────────────────────────────────────
   //
@@ -337,6 +396,45 @@ function webhookDe(numero, message, pushName = 'Cliente') {
   evolutionEco.sendText = sendTextAntes;
   evolutionEco.sendPresence = sendPresenceAntes;
   senderEco.send = sendEcoAntes;
+
+  // ── Varredura: nada proibido saiu para o cliente ───────────
+  //
+  // O teste-ponte ja fazia isto, mas so nas mensagens do OPERADOR. As do
+  // atendimento nunca foram olhadas -- e foi por essa fresta que passou um
+  // "_Se quiser voltar ao atendimento automatico, digite #inicio_", com
+  // "automatico" na lista de proibidas, direto para o cliente.
+  //
+  // A varredura roda no FIM porque so aqui `tudoQueSaiu` tem tudo o que o
+  // arquivo exercitou: menu, telas, foto, audio, handoff, pos-venda.
+  bloco('nada proibido chegou ao cliente');
+
+  const politicaW = require('./src/ponte/politica');
+
+  // Passa pelo normalizeWhatsApp antes de medir, porque e ele que o cliente
+  // recebe. O duble deste arquivo substitui o `sender.send` INTEIRO, entao a
+  // limpeza da fila real nao roda aqui -- medir o texto cru acusaria travessao
+  // em mensagem que na producao sai com virgula.
+  const comoOClienteVe = tudoQueSaiu.map((m) => ({
+    para: m.para,
+    texto: sender.normalizeWhatsApp(m.texto),
+  }));
+
+  const sujas = comoOClienteVe.filter((m) => politicaW.vocabularioProibido().test(m.texto));
+  t(`nenhuma das ${comoOClienteVe.length} mensagens usa palavra proibida`, sujas.length === 0,
+    sujas.length ? `${(sujas[0].texto.match(politicaW.vocabularioProibido()) || [''])[0]} em "${sujas[0].texto.slice(0, 60)}"` : 'limpo');
+
+  const comCJK = comoOClienteVe.filter((m) => politicaW.temCJK(m.texto));
+  t('  nem caractere chinês', comCJK.length === 0, comCJK[0]?.texto.slice(0, 60) || 'limpo');
+
+  // Travessao: ninguem digita isso no WhatsApp, e e a marca mais obvia de texto
+  // gerado. A rede e o normalizeWhatsApp; aqui so se confere que ela pegou tudo.
+  const comTravessao = comoOClienteVe.filter((m) => /[—–]/.test(m.texto));
+  t('  nem travessão', comTravessao.length === 0, comTravessao[0]?.texto.slice(0, 60) || 'limpo');
+
+  // Markdown de dois asteriscos aparece CRU no WhatsApp: negrito la e um so.
+  const comMarkdown = comoOClienteVe.filter((m) => /\*\*/.test(m.texto));
+  t('  nem negrito de markdown', comMarkdown.length === 0, comMarkdown[0]?.texto.slice(0, 60) || 'limpo');
+
   servidor.close();
   console.log('\n' + (falhas ? falhas + ' FALHA(S)' : 'todos os testes passaram'));
   process.exit(falhas ? 1 : 0);
