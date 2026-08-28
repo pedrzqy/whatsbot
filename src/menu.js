@@ -28,16 +28,16 @@ const NODES = {
       'Escolha uma opção abaixo (é só responder com o *número*):',
     ],
     options: [
-      { label: '🤔 Tenho dúvidas sobre os jogos', goto: 'duvidas' },
-      { label: '🕹️ Suporte Nintendo Switch', topic: 'plataforma_nintendo' },
-      { label: '💨 Suporte Steam', topic: 'plataforma_steam' },
-      { label: '🎯 Pedir um jogo que não achei', action: 'pedirjogo' },
-      { label: '🔑 Preciso de um código de segurança', action: 'codigo' },
-      { label: '💰 Meu pedido / financeiro', action: 'pedido' },
+      { label: '🤔 Tenho dúvidas sobre os jogos', curto: 'Dúvidas sobre jogos', goto: 'duvidas' },
+      { label: '🕹️ Suporte Nintendo Switch', curto: 'Suporte Switch', topic: 'plataforma_nintendo' },
+      { label: '💨 Suporte Steam', curto: 'Suporte Steam', topic: 'plataforma_steam' },
+      { label: '🎯 Pedir um jogo que não achei', curto: 'Pedir um jogo', action: 'pedirjogo' },
+      { label: '🔑 Preciso de um código de segurança', curto: 'Código de segurança', action: 'codigo' },
+      { label: '💰 Meu pedido / financeiro', curto: 'Meu pedido', action: 'pedido' },
       // O ÚNICO ramo que acorda a IA. Aqui o cliente escreve livre, cada caso
       // é diferente, e não há resposta pronta que sirva.
-      { label: '🛠️ Problema com a compra', action: 'ia' },
-      { label: '🧑‍💼 Falar com um atendente', action: 'atendente' },
+      { label: '🛠️ Problema com a compra', curto: 'Problema na compra', action: 'ia' },
+      { label: '🧑‍💼 Falar com um atendente', curto: 'Falar com atendente', action: 'atendente' },
     ],
   },
   duvidas: {
@@ -103,7 +103,7 @@ ${chamada}`.replace(/\*/g, '') : chamada.replace(/\*/g, ''),
     footer: 'Você também pode digitar o número da opção.',
     rows: node.options.map((o, i) => ({
       rowId: String(i + 1),
-      title: tituloDaLinha(o.label),
+      title: tituloDaLinha(o),
       description: '',
     })),
   };
@@ -117,7 +117,22 @@ ${chamada}`.replace(/\*/g, '') : chamada.replace(/\*/g, ''),
  * texto vai voltar — se o corte fosse só do lado do WhatsApp, a comparação
  * seria contra um texto que nunca existiu deste lado.
  */
-const tituloDaLinha = (label) => String(label).replace(/\*/g, '').slice(0, 24).trim();
+const tituloDaLinha = (opcao) => {
+  // Aceita a opcao inteira ou so o rotulo: o resolve() compara os dois.
+  const o = typeof opcao === 'string' ? { label: opcao } : opcao;
+
+  // O rotulo CURTO, quando existe. Sem ele o corte em 24 produzia frases
+  // terminando no meio -- "Tenho duvidas sobre o", "Pedir um" --, que parecem
+  // defeito na tela do cliente. Um nome escrito para caber le-se inteiro; um
+  // nome cortado nao.
+  const limpo = String(o.curto || o.label).replace(/\*/g, '').trim();
+  if (limpo.length <= 24) return limpo;
+
+  // Sobrou comprido mesmo assim: corta na PALAVRA, nao no caractere.
+  const cru = limpo.slice(0, 24);
+  const ultimoEspaco = cru.lastIndexOf(' ');
+  return (ultimoEspaco > 10 ? cru.slice(0, ultimoEspaco) : cru).trim();
+};
 
 /**
  * Resolve a opção escolhida dentro de um nó.
@@ -146,9 +161,30 @@ function resolve(nodeId, input) {
 
   const bruto = String(input ?? '').trim();
 
-  const n = parseInt(bruto, 10);
-  if (Number.isInteger(n) && n >= 1 && n <= node.options.length && /^\d+$/.test(bruto)) {
-    return node.options[n - 1];
+  // O NÚMERO, do jeito que a pessoa digita.
+  //
+  // Era `/^\d+$/`: só dígitos, nada mais. E foi assim que sete das oito opções
+  // pararam de funcionar em produção sem ninguém entender — o cliente copiava o
+  // número da lista com o ponto junto ("2.") e caía no "não entendi". Só o
+  // último, digitado solto, respondia. Da tela dele: o menu está ali, ele
+  // responde certo, e o bot devolve o mesmo menu.
+  //
+  // O que passa a valer é o que gente escreve de verdade: "2", "2.", "2)",
+  // "opção 2", "n 2". E o teclado do celular também oferece o dígito em emoji
+  // (2️⃣), que chega como o dígito mais dois caracteres invisíveis.
+  //
+  // O que NÃO pode passar continua não passando: "1080 Snowboarding" é nome de
+  // jogo, e casar isso com uma opção mandaria o cliente para um ramo que ele
+  // não escolheu. Por isso o número tem que estar SOZINHO na mensagem.
+  const semTecla = bruto.replace(/[️⃣]/g, '');
+  const so = semTecla.match(
+    /^(?:(?:op[cç][aã]o|n[uú]mero|numero|item|n[º°]?)\s*)?(\d{1,2})\s*[.)\]}°º:\-–]?$/i,
+  );
+  if (so) {
+    const n = parseInt(so[1], 10);
+    // A faixa continua estreita: "23" não é a opção 23 nem a 2, é texto solto.
+    if (n >= 1 && n <= node.options.length) return node.options[n - 1];
+    return null;
   }
 
   // Título da linha, comparado por IGUALDADE — nunca por prefixo.
@@ -164,7 +200,7 @@ function resolve(nodeId, input) {
   if (!alvo) return null;
   return (
     node.options.find(
-      (o) => normalizar(tituloDaLinha(o.label)) === alvo || normalizar(o.label) === alvo,
+      (o) => normalizar(tituloDaLinha(o)) === alvo || normalizar(o.label) === alvo,
     ) || null
   );
 }

@@ -94,7 +94,7 @@ function send(number, text, opts = {}) {
 // Guardar o id da mensagem seria mais exato, mas send() devolve boolean e o id
 // só existe dentro do cliente da Evolution: mudança bem maior para o mesmo
 // resultado prático.
-const JANELA_ECO_MS = 120_000;
+const JANELA_ECO_MS = Number(process.env.SENDER_ECO_MS || 120_000);
 const enviadosPeloBot = new Map();
 
 const chaveEco = (texto) => String(texto || '').trim().slice(0, 160);
@@ -155,6 +155,26 @@ async function processJob(job) {
   }
 
   // 4) Envio.
+
+  // REGISTRA DE NOVO, no instante em que a mensagem vai sair.
+  //
+  // Ela ja foi registrada no send(), e aquilo continua necessario: o eco do
+  // WhatsApp pode voltar antes de a promessa resolver. O problema e que o
+  // relogio da janela de 2 minutos comecava a correr ali, na hora de ENTRAR NA
+  // FILA -- e a fila e lenta de proposito (ritmo humanizado: espera, reacao,
+  // "digitando..."). No pior caso sao ~33s por mensagem, entao da QUARTA em
+  // diante o registro ja tinha vencido quando o envio acontecia.
+  //
+  // O sintoma era exatamente este: o bot mandava a boas-vindas, o menu e mais
+  // uma, e ao ver o eco da ultima nao se reconhecia. Concluia que o operador
+  // tinha digitado, PAUSAVA o contato e mandava "Nosso suporte entrou no chat"
+  // sem ninguem ter entrado. O cliente ficava esperando um atendente que nao
+  // existia, e o bot calado.
+  //
+  // Registrando aqui, os 2 minutos passam a contar do envio, que e o unico
+  // instante de que o eco depende.
+  registrarEnvioDoBot(text);
+
   //
   // LISTA primeiro, quando pedida. Ela passa pelo Baileys, que reimplementa um
   // formato não documentado do WhatsApp — o suporte muda entre versões da

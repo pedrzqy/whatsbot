@@ -435,6 +435,108 @@ const CLI = '5541999998888';
 
   Object.assign(cfgPV.posvenda, reativarAntes);
 
+  // ── O menu tem que aceitar o que a pessoa digita ───────────
+  //
+  // Sete das oito opções pararam de funcionar em produção e ninguém entendeu
+  // por quê: o `resolve` exigia SÓ dígitos (`/^\d+$/`), e o cliente copiava o
+  // número da lista com o ponto junto ("2."). Só o oitavo, digitado solto,
+  // respondia.
+  //
+  // Da tela dele: o menu está ali, ele responde certo, e o bot devolve o mesmo
+  // menu. Nada no log, nenhum erro, nada para investigar.
+  bloco('o menu aceita o número do jeito que a pessoa manda');
+
+  const menuMod = require('./src/menu');
+
+  // TODA opção, em TODA forma. Uma por uma, porque foi exatamente uma opção
+  // específica que continuou funcionando e escondeu o problema das outras.
+  for (let i = 1; i <= menuMod.NODES.main.options.length; i++) {
+    const formas = [`${i}`, `${i}.`, `${i})`, ` ${i} `, `${i} -`, `opcao ${i}`, `${i}\u{fe0f}\u{20e3}`];
+    const todas = formas.every((f) => menuMod.resolve('main', f) === menuMod.NODES.main.options[i - 1]);
+    t(`opção ${i} resolve em todas as formas`, todas,
+      formas.filter((f) => !menuMod.resolve('main', f)).map((f) => JSON.stringify(f)).join(' ') || 'todas');
+  }
+
+  // E o que NÃO pode virar escolha de menu continua não virando.
+  //
+  // Nome de jogo pode ser só dígitos ("1080 Snowboarding", "Fifa 23"): casar
+  // isso com uma opção mandaria o cliente para um ramo que ele não escolheu.
+  for (const solto of ['23', '1080', '1080 Snowboarding', 'fifa 23', '0', '99', '2 3', 'suporte', '']) {
+    t(`"${solto || '(vazio)'}" não vira opção`, menuMod.resolve('main', solto) === null,
+      menuMod.resolve('main', solto)?.label);
+  }
+
+  // ── A lista nativa ──
+  //
+  // O título de cada linha tem limite de 24 no WhatsApp, e o corte cru
+  // produzia "Tenho dúvidas sobre o" e "Pedir um": frases que terminam no meio
+  // e parecem defeito.
+  const linhas = menuMod.lista('main', '').rows;
+  t('a lista tem uma linha por opção', linhas.length === menuMod.NODES.main.options.length,
+    String(linhas.length));
+  for (const r of linhas) {
+    t(`linha ${r.rowId} cabe no limite do WhatsApp`, r.title.length <= 24,
+      `${r.title.length}: ${r.title}`);
+    // Terminar em preposição ou artigo é a assinatura do corte no meio.
+    // A ÚLTIMA PALAVRA, separada por espaço, e não `\b`.
+    //
+    // Em JavaScript o `\b` só conhece [A-Za-z0-9_], então "ç" conta como
+    // separador: "segurança" parecia terminar na palavra "a" e o teste acusava
+    // um corte que não existia. Acento e cedilha são o normal aqui.
+    const ultima = r.title.split(/\s+/).pop().toLowerCase();
+    t(`  e não termina cortada`,
+      !['o', 'a', 'os', 'as', 'de', 'da', 'do', 'com', 'que', 'um', 'uma', 'em', 'no', 'na', 'pra', 'para']
+        .includes(ultima),
+      `termina em "${ultima}"`);
+    // Tocar na linha tem que resolver: algumas versões devolvem o TÍTULO em vez
+    // do id, e sem isto o cliente toca no menu e recebe o menu de volta.
+    t(`  e o título dela resolve`, Boolean(menuMod.resolve('main', r.title)), r.title);
+    t(`  o id dela também`, Boolean(menuMod.resolve('main', r.rowId)), r.rowId);
+  }
+
+  // ── O caminho inteiro: cada opção faz alguma coisa ─────────
+  //
+  // Resolver não basta. Uma opção pode resolver e a ação não existir, e o
+  // cliente cairia no "não entendi" do mesmo jeito.
+  bloco('cada opção do menu faz alguma coisa');
+
+  const handlersM = require('./src/handlers');
+  const storeM = require('./src/store');
+  const senderM = require('./src/sender');
+  const cfgM = require('./src/config');
+  const sendMAntes = senderM.send;
+
+  const autoAntesM = cfgM.autoReply;
+  cfgM.autoReply = true;
+  require('./src/chaves').definir('atendimento', true);
+
+  for (let i = 1; i <= 8; i++) {
+    const CLI = `55419000${i}555`;
+    storeM.saveContact(CLI, {
+      greetedAt: Date.now(), lastSeen: Date.now(), paused: false,
+      menuNode: 'main', modoIA: false, aguardandoJogo: false, aguardandoProblema: false,
+    });
+
+    const recebidas = [];
+    senderM.send = async (para, txt) => { recebidas.push({ para, texto: String(txt) }); };
+    try {
+      // Com o PONTO, que é a forma que quebrava.
+      await handlersM.onIncomingMessage({ from: CLI, text: `${i}.`, pushName: 'Marco' });
+    } finally {
+      senderM.send = sendMAntes;
+    }
+
+    const aoCliente = recebidas.filter((r) => r.para === CLI).map((r) => r.texto).join('\n');
+    t(`opção ${i} responde alguma coisa`, aoCliente.trim().length > 0, '(silêncio)');
+    // O sintoma exato do defeito: escolher uma opção e receber o menu de volta.
+    t(`  e não devolve "não entendi"`,
+      !/n[ãa]o entendi|deixa eu te ajudar melhor|te atender mais r[áa]pido/i.test(aoCliente),
+      aoCliente.split('\n')[0]);
+  }
+
+  cfgM.autoReply = autoAntesM;
+
+
   console.log('\n' + (falhas ? falhas + ' FALHA(S)' : 'todos os testes passaram'));
   process.exit(falhas ? 1 : 0);
 })();

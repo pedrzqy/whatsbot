@@ -752,6 +752,20 @@ async function onOperadorDigitou({ para, texto }) {
   // atendimento de ninguém.
   if (require('./ponte/config').operador.ehOperador(from)) return;
 
+  // A MESMA checagem do server.js, de novo.
+  //
+  // Não é redundância: pausar um contato por engano é a falha mais cara deste
+  // arquivo. O bot cala a boca, manda "nosso suporte entrou no chat", e o
+  // cliente fica esperando um atendente que ninguém chamou — sem erro nenhum
+  // no log, porque do ponto de vista do código tudo funcionou.
+  //
+  // A checagem morava só na porta de entrada, e quem chamasse esta função por
+  // outro caminho pulava a proteção inteira. Custa uma consulta a um Map.
+  if (texto && sender.foiDoBot(texto)) {
+    console.warn('[handoff] ignorei o eco de uma mensagem do próprio bot');
+    return;
+  }
+
   const contato = store.getContact(from);
   if (contato?.paused) return; // já assumido: não avisa de novo
 

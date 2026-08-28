@@ -65,6 +65,13 @@ evolution.getBase64FromMediaMessage = async () => {
   return midiaDevolvida;
 };
 
+// O send DE VERDADE, guardado ANTES do duble.
+//
+// O bloco do eco precisa exercitar a fila inteira, porque e ela que registra
+// que a mensagem e do bot, no instante em que sai. Com o send dublado esse
+// registro nunca acontece e o teste mediria o duble em vez do filtro.
+const sendReal = sender.send;
+
 // O que o bot mandou, e para quem.
 const enviadas = [];
 sender.send = async (para, texto) => { enviadas.push({ para, texto: String(texto) }); };
@@ -207,6 +214,75 @@ function webhookDe(numero, message, pushName = 'Cliente') {
     vistoPelaIA === null && !enviadas.some((e) => /broadcast/.test(e.para)),
     JSON.stringify(enviadas.map((e) => e.para)));
 
+  // ── O bot não pode achar que ele mesmo é o operador ────────
+  //
+  // Toda mensagem que sai do nosso número volta no webhook com fromMe=true, e
+  // pelo evento não dá para saber se foi o bot ou uma pessoa digitando. O bot
+  // guarda o TEXTO do que mandou para se reconhecer.
+  //
+  // O relógio dessa memória contava do momento de ENTRAR NA FILA, e a fila é
+  // lenta de propósito (ritmo humanizado: espera, reação, "digitando..."). No
+  // pior caso são ~33s por mensagem, então da QUARTA em diante o registro já
+  // tinha vencido quando o envio acontecia.
+  //
+  // O sintoma: o bot mandava boas-vindas, menu e mais uma, via o eco da última,
+  // não se reconhecia, concluía que o operador tinha assumido, PAUSAVA o
+  // contato e mandava "Nosso suporte entrou no chat" sem ninguém ter entrado.
+  // O cliente esperava um atendente que não existia, e o bot ficava calado.
+  bloco('o eco da própria mensagem');
+
+  const senderEco = require('./src/sender');
+  const evolutionEco = require('./src/evolution');
+  const storeEco = require('./src/store');
+  const handlersEco = require('./src/handlers');
+
+  const sendTextAntes = evolutionEco.sendText;
+  const sendPresenceAntes = evolutionEco.sendPresence;
+  const sendEcoAntes = senderEco.send;
+
+  let ultimoTexto = null;
+  evolutionEco.sendText = async (n, t) => { ultimoTexto = t; return true; };
+  evolutionEco.sendPresence = async () => true;
+  senderEco.send = sendReal; // a fila inteira, para ela registrar o envio
+
+  const CLI_ECO = '5567961695300';
+  storeEco.saveContact(CLI_ECO, {
+    greetedAt: Date.now(), lastSeen: Date.now(), paused: false,
+  });
+
+  // Manda pela fila de verdade e depois entrega o eco, como o WhatsApp faz.
+  await senderEco.send(CLI_ECO, 'Bem-vindo ao suporte da Phaze Games. Entre pelo link: https://chat.whatsapp.com/abc');
+  t('a mensagem saiu', Boolean(ultimoTexto), ultimoTexto?.slice(0, 40));
+  t('e o bot se reconhece nela', senderEco.foiDoBot(ultimoTexto) === true);
+
+  await handlersEco.onOperadorDigitou({ para: `${CLI_ECO}@s.whatsapp.net`, texto: ultimoTexto });
+  t('o eco NÃO pausa o contato', storeEco.getContact(CLI_ECO)?.paused !== true,
+    storeEco.getContact(CLI_ECO)?.paused ? 'pausou (bug)' : 'seguiu normal');
+
+  // A defesa em profundidade: mesmo chamando a função direto, sem passar pela
+  // porta de entrada, o eco continua sendo reconhecido. Foi por esse caminho
+  // que o teste anterior escondeu o problema.
+  storeEco.saveContact(CLI_ECO, { paused: false });
+  await handlersEco.onOperadorDigitou({ para: `${CLI_ECO}@s.whatsapp.net`, texto: ultimoTexto });
+  t('  nem por chamada direta', storeEco.getContact(CLI_ECO)?.paused !== true);
+
+  // E o caminho de verdade continua funcionando: gente digitando PAUSA.
+  storeEco.saveContact(CLI_ECO, { paused: false });
+  const avisos = [];
+  senderEco.send = async (para, txt) => { avisos.push({ para, texto: String(txt) }); };
+  await handlersEco.onOperadorDigitou({
+    para: `${CLI_ECO}@s.whatsapp.net`,
+    texto: 'oi, aqui é o Pedro, vou te ajudar pessoalmente',
+  });
+  senderEco.send = sendReal;
+
+  t('mas gente digitando ainda pausa', storeEco.getContact(CLI_ECO)?.paused === true);
+  t('  e o cliente é avisado', avisos.some((a) => /suporte/i.test(a.texto)),
+    avisos.map((a) => a.texto.split('\n')[0]).join(' | ') || '(nada)');
+
+  evolutionEco.sendText = sendTextAntes;
+  evolutionEco.sendPresence = sendPresenceAntes;
+  senderEco.send = sendEcoAntes;
   servidor.close();
   console.log('\n' + (falhas ? falhas + ' FALHA(S)' : 'todos os testes passaram'));
   process.exit(falhas ? 1 : 0);
