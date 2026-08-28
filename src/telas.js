@@ -56,6 +56,59 @@ const TELAS = [
     depois: 'nenhuma',
   },
 
+  // ── A ORDEM DAQUI PARA BAIXO NÃO É ARBITRÁRIA ──────────────
+  //
+  // `porTexto` devolve a PRIMEIRA tela que casa. Três telas da Nintendo têm o
+  // mesmo título ("Iniciar a sessão com uma conta Nintendo") e só se distinguem
+  // pelo que vem DEPOIS: "a senha está incorreta", o código QR, ou "novamente".
+  //
+  // A `sessao_expirada` casa com (sessao + conta|nintendo), que é o titulo puro
+  // -- ou seja, ela pega as três. Por isso as mais específicas vêm antes dela.
+  // Colocar qualquer uma abaixo é fazê-la nunca ser alcançada, e o cliente
+  // receberia "entra de novo com a senha" para uma tela dizendo que a senha
+  // está errada.
+  {
+    id: 'senha_incorreta',
+    oQueE:
+      'A tela de login diz que a senha está incorreta. A senha que o cliente ' +
+      'tem não serve mais, e quem resolve é a Phaze.',
+    sinais: [
+      [/senha/, /(incorreta|errada|invalida|nao confere|nao funciona|nao aceita)/],
+      [/(senha|password)/, /(recusada|negada)/],
+    ],
+    // Pede o USUÁRIO, nunca a senha. O usuário está na própria tela que ele
+    // está olhando, logo acima do campo. Pedir a senha ao cliente seria pedir
+    // justamente o que ele não tem -- é por isso que ele mandou a foto.
+    resposta:
+      'Essa eu resolvo pra você 👍\n\n' +
+      'Me manda o *usuário da conta* que aparece nessa mesma tela, logo acima ' +
+      'do campo da senha.\n\n' +
+      'Se não estiver aparecendo aí, me avisa que eu vejo pelo seu pedido.',
+    // Os dois caminhos terminam com uma pessoa: com o usuário ela resolve
+    // rápido, sem ele ela procura pelo pedido. Foi o que o dono pediu.
+    depois: 'operador',
+  },
+
+  {
+    id: 'login_outros_metodos',
+    oQueE:
+      'A tela de login mostra o código QR. O cliente precisa clicar em "Iniciar ' +
+      'sessão usando outros métodos" para chegar ao campo da senha.',
+    // O dono digitou exatamente "Inicie sessao com outros metodos" no teste e
+    // caiu no menu: nenhuma tela reconhecia isso.
+    sinais: [
+      [/outros metodos/],
+      [/codigo qr/],
+      [/(qr code)/],
+      [/dispositivo inteligente/],
+    ],
+    resposta:
+      'Nessa tela é só tocar em *Iniciar sessão usando outros métodos* 👍\n\n' +
+      'Fica logo abaixo do quadrado do QR. Aí abre o campo pra digitar a ' +
+      '*senha da conta* que você recebeu.',
+    depois: 'nenhuma',
+  },
+
   {
     id: 'sessao_expirada',
     oQueE: 'A conta pede para iniciar a sessão de novo. É só relogar.',

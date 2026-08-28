@@ -274,6 +274,63 @@ function webhookDe(numero, message, pushName = 'Cliente') {
     depois.split('\n')[0] || '(nada)');
   chaves.definir('ia', true);
 
+  // ── A tela "senha incorreta" termina com gente ─────────────
+  //
+  // A tela diz que a senha do cliente nao serve. Quem resolve e a Phaze, e o
+  // dado que ela precisa e o USUARIO da conta -- que esta na mesma tela que ele
+  // esta olhando. Pedir a SENHA ao cliente seria pedir justamente o que ele nao
+  // tem: e por isso que ele mandou a foto.
+  bloco('senha incorreta pede o usuário e passa para gente');
+
+  const CLI_SENHA = '5541900009999';
+  const comUsuario = async (oQueEleResponde) => {
+    store.saveContact(CLI_SENHA, {
+      ...jaSaudado, menuNode: null, modoIA: false, paused: false, aguardandoProblema: false,
+    });
+    await entregar(webhookDe(CLI_SENHA, { conversation: 'a senha esta incorreta' }));
+    const pedido = enviadas.filter((e) => e.para === CLI_SENHA).map((e) => e.texto).join('\n');
+    await entregar(webhookDe(CLI_SENHA, { conversation: oQueEleResponde }));
+    return { pedido, tudo: enviadas.slice() };
+  };
+
+  const comOUsuario = await comUsuario('o usuario e dgzpp123');
+
+  t('pede o usuário da conta', /usu[aá]rio da conta/i.test(comOUsuario.pedido),
+    comOUsuario.pedido.split('\n')[0] || '(nada)');
+  t('  e NUNCA pede a senha ao cliente',
+    !/(me manda|me passa|qual|informe)[^.]{0,30}senha/i.test(comOUsuario.pedido),
+    comOUsuario.pedido);
+  // O erro que a ordem errada no telas.js produziria: mandar quem teve a senha
+  // recusada "entrar de novo com a senha".
+  t('  e não cai na tela de sessão expirada', !/entrar de novo/i.test(comOUsuario.pedido),
+    comOUsuario.pedido.split('\n')[0]);
+
+  t('o usuário que ele mandou chega ao operador',
+    comOUsuario.tudo.some((e) => e.para !== CLI_SENHA && /dgzpp123/.test(e.texto)),
+    comOUsuario.tudo.map((e) => `${e.para}:${e.texto.slice(0, 25)}`).join(' | ') || '(nada)');
+  t('  e o cliente fica pausado, esperando gente',
+    store.getContact(CLI_SENHA)?.paused === true);
+
+  // SEM o usuario termina no mesmo lugar. Foi o que o dono pediu: "tenta pedir
+  // o usuario ao cliente, se nao tiver precisa me chamar".
+  const semOUsuario = await comUsuario('nao acho esse usuario em lugar nenhum');
+  t('sem o usuário também vai para gente',
+    semOUsuario.tudo.some((e) => e.para !== CLI_SENHA && /nao acho esse usuario/i.test(e.texto)),
+    semOUsuario.tudo.map((e) => e.para).join(',') || '(nada)');
+  t('  e não devolve o menu para ele',
+    !semOUsuario.tudo.some((e) => e.para === CLI_SENHA && /Suporte Steam/.test(e.texto)));
+
+  // ── A tela do QR resolve sozinha, sem incomodar ninguém ────
+  bloco('a tela do QR resolve sozinha');
+
+  const CLI_QR = '5541900001010';
+  store.saveContact(CLI_QR, { ...jaSaudado, menuNode: null, modoIA: false, paused: false });
+  await entregar(webhookDe(CLI_QR, { conversation: 'Inicie sessao com outros metodos' }));
+  const respostaQR = enviadas.filter((e) => e.para === CLI_QR).map((e) => e.texto).join('\n');
+  t('diz onde tocar', /outros m[eé]todos/i.test(respostaQR), respostaQR.split('\n')[0] || '(nada)');
+  t('  e não chama ninguém', store.getContact(CLI_QR)?.paused !== true);
+  t('  nem devolve o menu', !/Suporte Steam/.test(respostaQR), respostaQR.split('\n')[0]);
+
   // ── ÁUDIO ──────────────────────────────────────────────────
   //
   // Sem chave de transcrição o áudio não vira texto — e o cliente precisa

@@ -377,7 +377,18 @@ async function handleMessage(msg) {
     return;
   }
 
-  if (ponte.ativa()) {
+  // `aguardandoProblema` VENCE a recepção da ponte.
+  //
+  // A ponte reconhece "o usuário é X" em qualquer ponto da conversa e assume o
+  // fluxo do CÓDIGO. Só que a tela de senha incorreta também pede o usuário, e
+  // ali o que falta é a SENHA, não o código: sem esta guarda o cliente
+  // respondia à pergunta que o bot acabou de fazer e recebia "manda também a
+  // foto", de um fluxo que ele nunca pediu. O caso do dono cai exatamente aqui.
+  //
+  // A regra por trás é maior que este caso: quando o bot acabou de perguntar
+  // uma coisa, a resposta pertence a quem perguntou. Qualquer atalho que leia a
+  // mensagem antes precisa dar passagem.
+  if (ponte.ativa() && !store.getContact(from)?.aguardandoProblema) {
     const r = recepcao.avaliar(from, trimmed, imagem);
 
     if (r.acao === 'responder') {
@@ -504,17 +515,36 @@ async function handleMessage(msg) {
   // texto, que o prompt carrega de src/telas.js.
   const telaConhecida = trimmed && telas.porTexto(trimmed);
   if (telaConhecida && telaConhecida.resposta) {
-    store.saveContact(from, { menuNode: 'main', modoIA: false });
+    // `depois: 'operador'` = a resposta PEDE uma coisa ao cliente (o usuário da
+    // conta) e quem fecha o caso é gente.
+    //
+    // Marcando `aguardandoProblema`, a proxima mensagem dele -- tenha achado o
+    // usuário ou não -- vai para o operador pelo caminho que já existe, com o
+    // texto junto e o cliente pausado. Sem isso a resposta cairia no menu e o
+    // pedido morreria no vazio: o bot teria perguntado uma coisa e ignorado a
+    // resposta.
+    const vaiParaGente = telaConhecida.depois === 'operador';
+    store.saveContact(from, {
+      menuNode: vaiParaGente ? null : 'main',
+      modoIA: false,
+      ...(vaiParaGente ? { aguardandoProblema: true } : {}),
+    });
     await sender.send(
       from,
       // Uma saída só no fim, não duas. Quando a tela tem o `seInsistir`, ele JÁ
       // diz o que fazer se não resolver — e com mais precisão ("me manda o
       // usuário do perfil"). Somar a frase genérica em cima faria a mensagem
       // terminar pedindo duas coisas diferentes para o mesmo caso.
+      //
+      // E quando a tela vai para gente, a mensagem JÁ termina pedindo o
+      // usuário: qualquer rodapé aqui viraria um segundo pedido na mesma
+      // mensagem.
       telaConhecida.resposta +
-        (telaConhecida.seInsistir
-          ? `\n\n_${telaConhecida.seInsistir}_`
-          : '\n\n_Se não resolver, me avisa que eu vejo isso com você._'),
+        (vaiParaGente
+          ? ''
+          : telaConhecida.seInsistir
+            ? `\n\n_${telaConhecida.seInsistir}_`
+            : '\n\n_Se não resolver, me avisa que eu vejo isso com você._'),
     );
     console.log(`[telas] ${from}: reconheci "${telaConhecida.id}" pelo texto`);
     return;

@@ -2538,6 +2538,24 @@ const OP = '5541999999999';
     ['  pela outra frase da tela', 'conta Nintendo estiver vinculada a outro console',
       'software_indisponivel'],
     ['pedido de código', 'confirmação do endereço de e-mail', 'pediu_codigo'],
+
+    // ── As duas telas novas, e a ARMADILHA entre elas ──
+    //
+    // Tres telas da Nintendo comecam com "Iniciar a sessao com uma conta
+    // Nintendo" e so se distinguem pelo que vem depois. A `sessao_expirada`
+    // casa com o titulo puro (sessao + conta), entao pegaria as tres se
+    // estivesse antes -- e o cliente cuja senha foi RECUSADA receberia
+    // "entra de novo com a senha", que e exatamente o que ele acabou de tentar.
+    ['a senha recusada', 'a senha esta incorreta', 'senha_incorreta'],
+    ['  contada a mao', 'a senha que voces mandaram nao funciona', 'senha_incorreta'],
+    ['  com o titulo da tela junto (a armadilha)',
+      'Iniciar a sessão com uma conta Nintendo. A senha está incorreta.', 'senha_incorreta'],
+
+    // O dono digitou exatamente isto num teste e caiu no menu.
+    ['a tela do QR', 'Inicie sessao com outros metodos', 'login_outros_metodos'],
+    ['  pelo que ele ve na tela', 'aparece um codigo qr pra ler', 'login_outros_metodos'],
+    ['  com o titulo junto (a armadilha)',
+      'iniciar a sessão com uma conta nintendo, aparece o código QR', 'login_outros_metodos'],
   ]) {
     t(`reconhece ${caso}`, telasMod.porTexto(texto)?.id === esperado,
       telasMod.porTexto(texto)?.id || '(nada)');
