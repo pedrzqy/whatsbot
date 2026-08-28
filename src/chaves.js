@@ -42,6 +42,15 @@ const { dados, persistAgora } = require('./ponte/estado');
  *   padrao  função que devolve o padrão do Environment
  *   risco   'baixo' | 'medio' | 'alto' — o que a confirmação usa
  *   cuidado o que ele precisa saber ANTES de ligar (só nos de risco alto)
+ *   impedimento  função que devolve o MOTIVO de esta função não conseguir
+ *           rodar mesmo ligada, ou null quando está tudo certo. Ver abaixo.
+ *
+ * Sobre o `impedimento`: ligada no painel não é o mesmo que FUNCIONANDO. A
+ * chave que falta mora no Environment, que é justamente o que este painel não
+ * mexe — e o desfecho de uma função ligada-mas-morta é idêntico ao dela
+ * desligada. Foi assim que se perdeu uma investigação inteira: o dono ligou a
+ * conversa livre, mandou uma foto, recebeu "não entendi, escolhe uma opção",
+ * e o painel continuava dizendo ✅ o tempo todo.
  */
 const CATALOGO = [
   {
@@ -61,6 +70,13 @@ const CATALOGO = [
       'Desligada, quem responde é o menu numerado, com texto pronto.',
     padrao: () => config.iaLigada,
     risco: 'medio',
+    // Sem a chave da Anthropic TODA chamada morre no mesmo lugar, e o cliente
+    // recebe o menu de "não entendi" — exatamente o que ele receberia com esta
+    // função desligada. Require aqui dentro para o painel não carregar o SDK.
+    impedimento: () =>
+      require('./claude').disponivel()
+        ? null
+        : 'a chave da IA não está no servidor (ANTHROPIC_API_KEY)',
   },
   {
     id: 'vender',
@@ -197,7 +213,23 @@ function situacao() {
     // Marca so quando ela ESTA no estado que merece atencao.
     atencao: Boolean(c.perigoQuando) && c.perigoQuando === (ligada(c.id) ? 'ligada' : 'desligada'),
     mexida: foiMexida(c.id),
+    // So interessa quando ela esta LIGADA: desligada, nao conseguir rodar nao
+    // e novidade nenhuma -- e avisar dos dois jeitos viraria decoracao.
+    impedida: ligada(c.id) ? impedimentoDe(c) : null,
   }));
 }
 
-module.exports = { CATALOGO, ligada, definir, achar, situacao, foiMexida };
+/** O motivo de `c` não conseguir rodar, ou null. Nunca deixa erro escapar. */
+function impedimentoDe(c) {
+  if (typeof c.impedimento !== 'function') return null;
+  try {
+    return c.impedimento() || null;
+  } catch (err) {
+    // Um impedimento quebrado não pode derrubar o painel: ele é justamente o
+    // comando que o dono usa quando alguma coisa já está errada.
+    console.warn(`[chaves] impedimento de ${c.id} falhou: ${err.message}`);
+    return null;
+  }
+}
+
+module.exports = { CATALOGO, ligada, definir, achar, situacao, foiMexida, impedimentoDe };

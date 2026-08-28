@@ -989,9 +989,12 @@ async function executar(texto, de = '') {
         // O ⚠️ só aparece quando ela ESTÁ no estado que merece atenção —
         // desligar a aprovação, ligar o repertório ou a reativação. Marcar
         // sempre viraria decoração e ele pararia de enxergar.
+        // Ligada mas impedida ganha 🚫 no lugar do ✅, e o motivo na linha de
+        // baixo. Sem isso o painel MENTE: diz ✅ para uma função que morre em
+        // toda chamada, e o dono fica procurando bug no lugar errado.
         linhas.push(
-          `*${c.numero}.* ${c.ligada ? '✅' : '⛔'} *${c.nome}*${c.atencao ? ' ⚠️' : ''}`,
-          `_${c.curto}_`,
+          `*${c.numero}.* ${c.impedida ? '🚫' : c.ligada ? '✅' : '⛔'} *${c.nome}*${c.atencao ? ' ⚠️' : ''}`,
+          c.impedida ? `_ligada, mas ${c.impedida}_` : `_${c.curto}_`,
           '',
         );
       }
@@ -1013,11 +1016,21 @@ async function executar(texto, de = '') {
     // ── #admin 2 — explica ──
     if (!acao) {
       const estado = chaves.ligada(c.id);
+      const impedida = estado ? chaves.impedimentoDe(c) : null;
       const linhas = [
-        `*${numero}. ${c.nome}* — ${estado ? '✅ ligado' : '⛔ desligado'}`,
+        `*${numero}. ${c.nome}* — ${impedida ? '🚫 ligado, mas parado' : estado ? '✅ ligado' : '⛔ desligado'}`,
         '',
         c.explica,
       ];
+      // Antes do `cuidado`: o que está QUEBRADO agora vale mais do que o aviso
+      // de risco de uma função que, neste momento, nem roda.
+      if (impedida) {
+        linhas.push(
+          '',
+          `🚫 *Ela está ligada mas não roda:* ${impedida}.`,
+          '_Isso se resolve no painel do servidor (Environment), não por aqui._',
+        );
+      }
       if (c.cuidado) linhas.push('', `⚠️ ${c.cuidado}`);
       linhas.push(
         '',

@@ -182,6 +182,39 @@ function webhookDe(numero, message, pushName = 'Cliente') {
     respostaSemIA.split('\n')[0]);
   chaves.definir('ia', true);
 
+  // ── Foto com a conversa livre LIGADA e a IA QUEBRANDO ──────────────
+  //
+  // O relato do dono, com print: ligou a conversa livre, mandou a foto da tela
+  // de erro e recebeu "Nao entendi bem, escolhe uma opcao" com o menu de oito
+  // itens. A conversa livre estava mesmo ligada -- a IA foi chamada e FALHOU
+  // (chave recusada, teto estourado, timeout), e o catch mandava o menu
+  // generico.
+  //
+  // Para o cliente e identico ao caso de cima: ninguem pode ver a imagem. A
+  // resposta tem que ser a mesma, e nao era.
+  bloco('foto com a IA ligada, mas quebrando');
+
+  const replyBom = ai.reply;
+  ai.reply = async () => { throw new Error('401 invalid x-api-key'); };
+  await entregar(webhookDe(CLI, { imageMessage: { caption: 'to com esse erro' } }));
+  const respostaIaCaiu = enviadas.filter((e) => e.para === CLI).map((e) => e.texto).join('\n');
+
+  t('a IA caiu e o bot ainda reconhece a foto', /recebi sua foto/i.test(respostaIaCaiu),
+    respostaIaCaiu.split('\n')[0] || '(nada)');
+  t('  e pede o código do erro', /2819-0042|c[oó]digo do erro/i.test(respostaIaCaiu), respostaIaCaiu);
+  t('  em vez do menu de oito opções',
+    !/n[ãa]o entendi|escolhe uma op[çc][ãa]o|escolhe pelo n[uú]mero/i.test(respostaIaCaiu),
+    respostaIaCaiu.split('\n')[0]);
+
+  // Sem foto o menu CONTINUA sendo a rede: quem escreveu tem oito caminhos que
+  // funcionam sem modelo nenhum, e e quando a IA cai que ele mais precisa deles.
+  await entregar(webhookDe(CLI, { conversation: 'queria saber de uma coisa' }));
+  const semFotoIaCaiu = enviadas.filter((e) => e.para === CLI).map((e) => e.texto).join('\n');
+  t('mas sem foto o menu continua aparecendo',
+    /n[ãa]o entendi|escolhe uma op[çc][ãa]o|escolhe pelo n[uú]mero|op[çc][õo]es/i.test(semFotoIaCaiu),
+    semFotoIaCaiu.split('\n')[0] || '(nada)');
+  ai.reply = replyBom;
+
   // ── ÁUDIO ──────────────────────────────────────────────────
   //
   // Sem chave de transcrição o áudio não vira texto — e o cliente precisa

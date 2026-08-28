@@ -2183,6 +2183,48 @@ const OP = '5541999999999';
   t('  sem vocabulário proibido', !AUTOMACAO.test(lista) && !politica.temCJK(lista),
     (lista.match(AUTOMACAO) || [''])[0] || 'limpo');
 
+  // ── Ligada NAO e o mesmo que funcionando ──
+  //
+  // O relato: ligou a conversa livre, mandou uma foto e recebeu "nao entendi,
+  // escolhe uma opcao" -- o mesmo que receberia com ela DESLIGADA. A chave da
+  // Anthropic nao estava no servidor, entao toda chamada morria; e o painel
+  // dizia ✅ o tempo todo, mandando ele procurar bug no lugar errado.
+  //
+  // A chave mora no Environment, que e justamente o que este painel nao mexe.
+  // Por isso ele precisa DIZER, em vez de so mostrar o interruptor.
+  chavesMod.definir('ia', true);
+  const semChave = await operador.executar('#admin', OP);
+  t('a conversa livre ligada sem chave nao aparece como ✅',
+    /🚫 \*Conversa livre\*/.test(semChave),
+    (semChave.split('\n').find((l) => /Conversa livre/.test(l)) || '(sumiu)'));
+  t('  e o painel diz o motivo', /ANTHROPIC_API_KEY/.test(semChave),
+    (semChave.split('\n').find((l) => /ligada, mas/.test(l)) || '(nao disse)'));
+
+  const detalheSemChave = await operador.executar('#admin 2', OP);
+  t('  o detalhe tambem avisa', /ligado, mas parado/.test(detalheSemChave),
+    detalheSemChave.split('\n')[0]);
+  t('  e manda no lugar certo (Environment)', /Environment/.test(detalheSemChave),
+    detalheSemChave.split('\n').find((l) => /Environment/.test(l)) || '(nao disse)');
+  t('  sem vocabulário proibido', !AUTOMACAO.test(detalheSemChave) && !politica.temCJK(detalheSemChave),
+    (detalheSemChave.match(AUTOMACAO) || [''])[0] || 'limpo');
+
+  // Com a chave no lugar, volta a ser um ✅ comum: o aviso nao pode virar
+  // decoracao permanente, senao ele para de enxergar.
+  process.env.ANTHROPIC_API_KEY = 'chave-de-mentira';
+  const comChave = await operador.executar('#admin', OP);
+  t('com a chave no lugar volta ao ✅', /✅ \*Conversa livre\*/.test(comChave),
+    (comChave.split('\n').find((l) => /Conversa livre/.test(l)) || '(sumiu)'));
+  t('  e sem o aviso sobrando', !/ligada, mas/.test(comChave));
+  process.env.ANTHROPIC_API_KEY = '';
+
+  // Desligada, ninguem precisa ouvir que ela tambem nao rodaria: o ⛔ ja diz
+  // tudo, e avisar dos dois jeitos e o que transforma aviso em ruido.
+  chavesMod.definir('ia', false);
+  const desligadaSemChave = await operador.executar('#admin', OP);
+  t('desligada, nao repete o aviso', !/ligada, mas/.test(desligadaSemChave),
+    (desligadaSemChave.split('\n').find((l) => /Conversa livre/.test(l)) || ''));
+  chavesMod.definir('ia', null);
+
   // ── Ligar e desligar, pelo NÚMERO ──
   //
   // Por número e não por nome: ele digita no celular, no meio de outra coisa.

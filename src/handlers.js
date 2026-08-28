@@ -641,24 +641,10 @@ async function handleMessage(msg) {
     // também não rodava, e o cliente que pediu humano continuava no laço.
     store.saveContact(from, { menuNode: 'main', modoIA: false });
 
-    // FOTO com a conversa livre desligada.
-    //
-    // Quem enxerga a imagem é o modelo; sem ele, a foto não vira nada. Só que
-    // responder "não entendi, escolhe uma opção" a quem acabou de mandar um
-    // print é o pior desfecho possível: ele mandou a tela do erro, o bot
-    // ignorou a tela e devolveu um menu de oito itens. Parece que a foto nem
-    // chegou.
-    //
-    // O código do erro, digitado, o bot RESOLVE sozinho (ver telas.js) — e é
-    // isso que vale pedir. Uma linha na tela do console, que ele já está
-    // olhando, contra oito opções que não respondem a pergunta dele.
+    // FOTO com a conversa livre desligada: quem enxerga a imagem é o modelo,
+    // e sem ele a foto não vira nada. Ver pedirCodigoDoErro().
     if (imagem || imagemBase64) {
-      await sender.send(
-        from,
-        'Recebi sua foto 👍\n\n' +
-          'Me diz o *código do erro* que aparece na tela (algo tipo *2819-0042*) ' +
-          'ou escreve em uma frase o que apareceu, que eu te falo como resolver.',
-      );
+      await pedirCodigoDoErro(from);
       return;
     }
 
@@ -693,8 +679,46 @@ async function handleMessage(msg) {
     // modoIA:false junto, senão a mensagem seguinte pula o menu e volta para a
     // IA que acabou de falhar.
     store.saveContact(from, { menuNode: 'main', modoIA: false });
+
+    // Menos a FOTO. A rede do menu vale para quem escreveu, não para quem
+    // printou: o cliente mandou a tela do erro e receber oito opções que não
+    // falam da tela dele parece que a foto nem chegou.
+    //
+    // Isto já estava certo no caminho de cima (conversa livre desligada) e
+    // ERRADO aqui. A diferença passou batida porque o desfecho é o mesmo para
+    // quem olha de fora: ninguém pôde ver a imagem. Só que este caminho é o
+    // que dispara quando a IA está LIGADA e quebrando — chave recusada, teto
+    // estourado, timeout — e é justamente o que o dono viu no print.
+    if (imagem || imagemBase64) {
+      await pedirCodigoDoErro(from);
+      return;
+    }
+
     await enviarMenu(from, 'main', variator.pick(NAO_ENTENDI));
   }
+}
+
+/**
+ * A foto chegou, mas ninguém pôde olhar para ela.
+ *
+ * Dois caminhos levam aqui, e para o cliente eles são a mesma coisa: a
+ * conversa livre desligada (o modelo nem é chamado) e o modelo chamado que
+ * FALHOU. Nos dois, responder "não entendi, escolhe uma opção" logo depois de
+ * ele mandar um print é o pior desfecho possível — ele mandou a tela do erro,
+ * o bot ignorou a tela e devolveu um menu de oito itens que não responde nada
+ * disso. Parece que a foto nem chegou.
+ *
+ * O código do erro, DIGITADO, o bot resolve sozinho (ver telas.js), sem modelo
+ * nenhum. É uma linha da tela que ele já está olhando, contra oito opções que
+ * não servem.
+ */
+function pedirCodigoDoErro(from) {
+  return sender.send(
+    from,
+    'Recebi sua foto 👍\n\n' +
+      'Me diz o *código do erro* que aparece na tela (algo tipo *2819-0042*) ' +
+      'ou escreve em uma frase o que apareceu, que eu te falo como resolver.',
+  );
 }
 
 const NAO_ENTENDI = [
