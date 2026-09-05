@@ -163,10 +163,25 @@ const CATALOGO = [
     // queda é automática: sem saldo ou fora do ar, o trabalho sai pelo Claude
     // igual. O pior caso é uma tradução um pouco pior no SEU alerta.
     risco: 'baixo',
-    impedimento: () =>
-      require('./deepseek').temChave()
-        ? null
-        : 'a chave da IA barata não está no servidor (DEEPSEEK_API_KEY)',
+    // Duas perguntas diferentes, e a segunda é a que o painel já errou antes.
+    //
+    // Sem chave é o caso óbvio. O caso que engana é a chave PRESENTE e a conta
+    // sem saldo: o painel mostraria ✅, o trabalho sairia todo pelo Claude, e a
+    // economia simplesmente não aconteceria — sem erro, sem log no WhatsApp,
+    // sem nada. É o mesmo desfecho da conversa livre ligada sem
+    // ANTHROPIC_API_KEY, que custou uma investigação inteira.
+    //
+    // O disjuntor do deepseek.js abre depois de três falhas seguidas, e é ele
+    // que sabe disso. Aqui só se pergunta.
+    impedimento: () => {
+      const ds = require('./deepseek');
+      if (!ds.temChave()) return 'a chave da IA barata não está no servidor (DEEPSEEK_API_KEY)';
+      if (!ds.disponivel()) {
+        return 'a IA barata falhou várias vezes seguidas e está parada. O motivo está no log ' +
+          '(o mais comum é a conta sem saldo). Enquanto isso o trabalho sai pela cara';
+      }
+      return null;
+    },
   },
 ];
 

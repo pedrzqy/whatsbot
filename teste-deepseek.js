@@ -261,8 +261,24 @@ const zerar = () => {
     /DEEPSEEK_API_KEY/.test(chavesMod.CATALOGO[8].impedimento() || ''),
     String(chavesMod.CATALOGO[8].impedimento()));
   process.env.DEEPSEEK_API_KEY = 'chave-de-mentira';
+  deepseek._zerar();
   t('  e com a chave não sobra aviso', chavesMod.CATALOGO[8].impedimento() === null,
     String(chavesMod.CATALOGO[8].impedimento()));
+
+  // O caso que ENGANA, e que este projeto já pagou uma vez para aprender: a
+  // chave está lá e a conta está sem saldo. Ligada no painel, ✅ na tela, e o
+  // trabalho saindo todo pelo Claude sem erro nenhum aparecendo. Era assim que
+  // a conversa livre ficava ✅ sem ANTHROPIC_API_KEY.
+  zerar();
+  responder = () => ({ status: 402, texto: 'Insufficient Balance' });
+  for (let i = 0; i < 3; i++) await deepseek.chat([{ role: 'user', content: 'x' }]).catch(() => {});
+  t('ligada mas parada NÃO aparece como ✅',
+    /falhou várias vezes/.test(chavesMod.CATALOGO[8].impedimento() || ''),
+    String(chavesMod.CATALOGO[8].impedimento()));
+  t('  e o painel diz que o trabalho continua saindo',
+    /sai pela cara/.test(chavesMod.CATALOGO[8].impedimento() || ''),
+    String(chavesMod.CATALOGO[8].impedimento()));
+  deepseek._zerar();
 
   // ── A chave não pode estar no repositório ─────────────────
   //
