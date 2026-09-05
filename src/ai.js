@@ -19,6 +19,7 @@ const tools = require('./tools');
 const knowledge = require('./knowledge');
 const store = require('./store');
 const claude = require('./claude');
+const deepseek = require('./deepseek');
 const telas = require('./telas');
 
 // Uma camada so, e o menu embaixo. A cascata de seis provedores foi removida:
@@ -352,6 +353,30 @@ class PrazoEsgotado extends Error {
  */
 async function chat(messages, opts = {}) {
   const limite = opts.deadline || Date.now() + config.llm.deadlineMs;
+
+  // ── O trabalho de bastidor vai pelo barato ────────────────
+  //
+  // `opts.barato` é uma declaração de quem chama: "ninguém está esperando isto
+  // na tela, e o texto passa por uma pessoa antes de virar qualquer coisa".
+  // Hoje são três — o analista, a tradução do que o outro lado escreve, e a
+  // escolha da linha do repertório — e juntos eles são a maior parte do token
+  // que o bot gasta fora da conversa.
+  //
+  // A conversa com o CLIENTE nunca passa por aqui, e isso não é esquecimento.
+  // A cascata de seis provedores foi removida porque cada um fora do ar somava
+  // até 40s de "digitando..." (ver o comentário logo acima). Um provedor a mais
+  // no caminho do cliente seria o mesmo erro com outro nome.
+  //
+  // A escolha é por chamada e a queda é silenciosa: sem chave, sem saldo ou com
+  // o disjuntor aberto, cai no Claude e o desfecho é o mesmo de antes.
+  if (opts.barato && deepseek.disponivel() && require('./chaves').ligada('barato')) {
+    try {
+      return await deepseek.chat(messages, { ...opts, deadline: limite });
+    } catch (err) {
+      // Não vira erro do chamador: ele pediu um trabalho, não um provedor.
+      console.warn(`[ai] DeepSeek não deu conta (${err.message}) — indo pelo Claude`);
+    }
+  }
 
   if (!claude.disponivel()) {
     // Sem chave, nem tenta: falhar na hora leva o cliente ao menu em

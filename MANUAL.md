@@ -49,6 +49,7 @@ Digite **`#admin`**. Ele mostra tudo com uma marca do lado:
 6. ⛔ Responder o outro lado sozinho
 7. ✅ Perguntar se ativou
 8. ⛔ Chamar quem sumiu
+9. ✅ Economia nos bastidores
 ```
 
 | Comando | O que faz |
@@ -64,6 +65,12 @@ escolha sobrevive a deploy e a reinicialização.
 
 > **Antes de ligar a 6 ou a 8**, leia o aviso que o `#admin 6` mostra. São as
 > duas que falam para fora sem você ver.
+
+**A 9 é só dinheiro.** Ligada, o trabalho que ninguém vê acontecer (a análise
+do `#analisar`, a tradução do que o outro lado escreve, a escolha da resposta
+pronta) usa uma IA mais barata. **A conversa com o cliente não muda** e nunca
+vai mudar por causa dela: quem está esperando na tela continua no de sempre.
+Se a conta da IA barata ficar sem saldo, o trabalho sai pela cara e nada para.
 
 ### "Está tudo funcionando?"
 

@@ -54,6 +54,12 @@ const config = {
   // BOT_IA=true religa, e aí ela volta a atender o que o menu não cobre.
   iaLigada: process.env.BOT_IA === 'true',
 
+  // A IA barata nos bastidores (deepseek.js). Nasce LIGADA, ao contrário da
+  // iaLigada acima, e a diferença é quem lê o que sai: aqui é sempre o
+  // operador, num alerta ou num arquivo, e nunca o cliente. Sem a
+  // DEEPSEEK_API_KEY isto não faz nada — o trabalho sai pelo Claude igual.
+  baratoLigado: process.env.BOT_IA_BARATA !== 'false',
+
   evolution: {
     url: (process.env.EVOLUTION_API_URL || 'http://localhost:8080').replace(/\/$/, ''),
     apiKey: required('EVOLUTION_API_KEY'),

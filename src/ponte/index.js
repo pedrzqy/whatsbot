@@ -789,9 +789,13 @@ async function tentarResponder(atendimento, textoDele) {
  */
 async function escolherComModelo(textoDele) {
   try {
+    // `barato: true`: a saída inteira é UM NÚMERO, escolhido dentro de uma
+    // lista fechada. Não há texto gerado atravessando — `lerEscolha` só aceita
+    // um índice válido, e qualquer outra coisa vira "nada casou", que devolve o
+    // caso para o operador. É o menor risco possível de trocar de modelo.
     const msg = await require('../ai').chat(
       [{ role: 'user', content: repertorio.montarPrompt(textoDele) }],
-      { maxTokens: 2000 },
+      { maxTokens: 2000, barato: true },
     );
     const linha = repertorio.lerEscolha(msg.content);
     if (!linha) console.log('[ponte] repertório: nada casou — deixo para o operador');

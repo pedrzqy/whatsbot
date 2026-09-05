@@ -146,6 +146,28 @@ const CATALOGO = [
       'É a única coisa que fala com quem não puxou conversa. Mensagem em ' +
       'massa é como se perde o número do WhatsApp.',
   },
+  // Entrou no FIM da lista de propósito. A ordem é o número que ele digita, e
+  // ele decora a posição — inserir no meio faria o #admin 5 dele virar outra
+  // coisa da noite para o dia.
+  {
+    id: 'barato',
+    curto: 'Usa a IA barata no que ninguém vê',
+    nome: 'Economia nos bastidores',
+    explica:
+      'O trabalho de bastidor (a análise, a tradução do que o outro lado ' +
+      'escreve, a escolha da resposta pronta) passa a usar uma IA mais barata. ' +
+      'A conversa com o cliente NÃO muda: continua na mesma de sempre. ' +
+      'Desligado, tudo volta a rodar pela IA cara.',
+    padrao: () => config.baratoLigado,
+    // Nada aqui fala com cliente nem com o outro lado sem passar por você, e a
+    // queda é automática: sem saldo ou fora do ar, o trabalho sai pelo Claude
+    // igual. O pior caso é uma tradução um pouco pior no SEU alerta.
+    risco: 'baixo',
+    impedimento: () =>
+      require('./deepseek').temChave()
+        ? null
+        : 'a chave da IA barata não está no servidor (DEEPSEEK_API_KEY)',
+  },
 ];
 
 const porId = (id) => CATALOGO.find((c) => c.id === id) || null;

@@ -210,9 +210,18 @@ async function analisar(dias = 30) {
   // ela entra no repertório e passa a responder errado com confiança.
   if (dados.problemas.length >= MINIMO) {
     try {
+      // `barato: true` — este é o trabalho que MAIS pede o modelo barato de
+      // todo o projeto, e por três motivos que se somam: a entrada é enorme
+      // (40 mensagens do outro lado, mais o repertório inteiro), a saída é
+      // longa, e ninguém está esperando na tela. Ainda por cima, o que sai daqui
+      // é um arquivo que uma pessoa lê e decide se aproveita — o pior caso de
+      // um modelo mais fraco é uma proposta boba, que o dono descarta lendo.
+      //
+      // Se o DeepSeek não estiver de pé, cai no Claude sozinho. A análise sai
+      // do mesmo jeito, só custa mais.
       const msg = await require('./ai').chat(
         [{ role: 'user', content: montarPrompt(dados) }],
-        { maxTokens: 4000 },
+        { maxTokens: 4000, barato: true },
       );
       proposta = String(msg.content || '').trim() || null;
     } catch (err) {

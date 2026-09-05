@@ -2399,15 +2399,25 @@ const OP = '5541999999999';
   const comChave = await operador.executar('#admin', OP);
   t('com a chave no lugar volta ao ✅', /✅ \*Conversa livre\*/.test(comChave),
     (comChave.split('\n').find((l) => /Conversa livre/.test(l)) || '(sumiu)'));
-  t('  e sem o aviso sobrando', !/ligada, mas/.test(comChave));
+  // A linha DELA, e nao o painel inteiro.
+  //
+  // Medindo o painel todo, este teste passava a falhar por causa de QUALQUER
+  // outra chave que estivesse ligada-mas-parada — e passou mesmo, no dia em que
+  // a IA barata entrou como chave 9 sem DEEPSEEK_API_KEY no ambiente de teste.
+  // O aviso dela estava certo; quem estava errado era a régua.
+  const linhaDa = (painel, nome) => painel.split('\n').find((l) => l.includes(nome)) || '(sumiu)';
+
+  t('  e sem o aviso sobrando', !/ligada, mas/.test(linhaDa(comChave, 'Conversa livre')),
+    linhaDa(comChave, 'Conversa livre'));
   process.env.ANTHROPIC_API_KEY = '';
 
   // Desligada, ninguem precisa ouvir que ela tambem nao rodaria: o ⛔ ja diz
   // tudo, e avisar dos dois jeitos e o que transforma aviso em ruido.
   chavesMod.definir('ia', false);
   const desligadaSemChave = await operador.executar('#admin', OP);
-  t('desligada, nao repete o aviso', !/ligada, mas/.test(desligadaSemChave),
-    (desligadaSemChave.split('\n').find((l) => /Conversa livre/.test(l)) || ''));
+  t('desligada, nao repete o aviso',
+    !/ligada, mas/.test(linhaDa(desligadaSemChave, 'Conversa livre')),
+    linhaDa(desligadaSemChave, 'Conversa livre'));
   chavesMod.definir('ia', null);
 
   // ── Ligar e desligar, pelo NÚMERO ──

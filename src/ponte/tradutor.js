@@ -110,7 +110,16 @@ async function traduzir(direcao, texto, historico = []) {
 
   try {
     // temperatura baixa: tradução comercial não é lugar para criatividade.
-    const msg = await carregarAi().chat(messages, { temperature: 0.2, maxTokens: 800 });
+    //
+    // `barato: true`: quem lê esta tradução é o OPERADOR, num alerta, e ele
+    // decide o que fazer com ela — nada sai daqui direto para o cliente sem o
+    // #enviar. É a definição de trabalho de bastidor. E chinês comercial curto
+    // é justamente onde um modelo chinês barato não fica devendo nada.
+    const msg = await carregarAi().chat(messages, {
+      temperature: 0.2,
+      maxTokens: 800,
+      barato: true,
+    });
     const json = extrairJson(msg.content);
 
     if (json && json.traducao) {
