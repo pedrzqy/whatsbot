@@ -512,6 +512,27 @@ async function executar(texto, de = '') {
       }
     }
 
+    // A IA barata do bastidor. Aparece só quando tem chave, e nunca zerada:
+    // "0 hoje" num dia sem análise nem tradução é o normal, e uma linha que
+    // aparece todo dia dizendo zero é a que ele para de ler.
+    //
+    // Existe porque o contador sem tela é contador morto — a mesma armadilha
+    // do interruptor decorativo. Sem esta linha, "quanto de crédito eu ponho?"
+    // não tem como ser respondido no mês que vem com número, só com estimativa.
+    const ds = require('../deepseek');
+    if (ds.temChave()) {
+      const b = ds.uso();
+      if (!ds.disponivel()) {
+        linhas.push('💸 Economia — *parada*, o trabalho está saindo pelo caro');
+        problemas.push('A IA barata falhou várias vezes. O motivo mais comum é a conta sem saldo.');
+      } else if (b.n) {
+        linhas.push(
+          `💸 Economia — ${b.n} bastidor(es) hoje · ${b.entrada + b.saida} tokens` +
+            (b.cache ? ` · ${b.cache} de cache` : ''),
+        );
+      }
+    }
+
     // 5) Estado de operação: o que está ligado agora.
     const d = limites.disjuntor();
     if (d.estado === 'aberto') {
