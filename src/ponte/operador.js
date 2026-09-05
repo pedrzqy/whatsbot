@@ -884,11 +884,17 @@ async function executar(texto, de = '') {
       if (!at?.from) continue;
       // Avisa ANTES de encerrar: depois o atendimento não existe mais e o
       // número se perde junto.
+      //
+      // Duas linhas e uma instrução só. A versão anterior mandava o cliente
+      // responder "preciso do código" — uma frase que ele tem que reconstruir
+      // do zero, e que o dono achou confusa lendo do lado de fora. `#inicio` é
+      // a palavra que já aparece no rodapé de metade das mensagens do bot: ele
+      // não precisa entender nada, só repetir o que já viu.
       await sender
         .send(
           at.from,
-          'Oi! Não consegui concluir seu pedido de código agora 🙏\n\n' +
-            'Se ainda precisar, é só me mandar *preciso do código* que eu começo de novo.',
+          'Não consegui pegar seu código agora 🙏\n\n' +
+            'Digita *#inicio* e pede de novo que eu resolvo.',
         )
         .catch(() => {});
       await fila.concluir(at.id, 'limpeza_operador');
@@ -1226,15 +1232,27 @@ async function executar(texto, de = '') {
 
     // Explicação de problema, não código: manda o texto e encerra a vez, para
     // a fila não travar esperando um código que não vem.
-    await sender.send(at.from, final);
+    //
+    // Na maioria dos casos a vez JÁ foi liberada quando a mensagem chegou (ver
+    // receberDoFornecedor), e aí estas duas linhas não fazem nada — `concluir`
+    // sai vazio e `promoverProximo` não redespacha. Ficam porque a aprovação
+    // também nasce de caminhos que não liberam a vez, e porque não custa nada:
+    // encerrar duas vezes é operação idempotente.
+    //
+    // Encerra ANTES de mandar: se o envio ao cliente falhar (rede, número
+    // fora), o `await` estoura e nada abaixo dele roda — e aí a vez ficaria
+    // presa por causa de uma mensagem que não saiu.
+    const aindaNaVez = fila.ativo()?.id === at.id;
     await fila.concluir(at.id, 'problema_explicado');
+    await sender.send(at.from, final);
     await ponte.promoverProximo();
 
     // Diz o que foi tirado. Sem isto o operador acha que mandou o que digitou,
     // e só descobriria a diferença se o cliente respondesse estranhando.
     const mexeu = limpou || filtrado.texto !== bruto;
     return (
-      `✅ Enviado para *${ap.cliente}*. Vez encerrada, próximo promovido.` +
+      `✅ Enviado para *${ap.cliente}*.` +
+      (aindaNaVez ? ' Vez encerrada, próximo promovido.' : '') +
       (mexeu ? `\n\n_Tirei o que não podia sair. O cliente leu:_\n${final}` : '')
     );
   }
@@ -1256,6 +1274,28 @@ async function executar(texto, de = '') {
     const ap = dados.aprovacoes.find((a) => a.id === id);
     const at = ap ? fila.porId(ap.atendimentoId) : fila.porId(id);
     if (!at) return `Não achei o atendimento \`${id}\`. Veja os pendentes com *#fila*.`;
+
+    // Só quem está na vez fala com o outro lado.
+    //
+    // Todos os clientes dividem o mesmo chat lá fora, e é a ordem serial que
+    // torna a resposta que volta atribuível a alguém sem chutar. Escrever por
+    // quem já saiu da vez coloca a mensagem no chat depois do pedido de OUTRA
+    // pessoa — e o próximo código que chegasse seria contado como resposta ao
+    // pedido dela.
+    //
+    // Isto passou a acontecer no uso normal quando a vez passou a ser liberada
+    // assim que o outro lado responde algo que não é código: quando o operador
+    // lê o alerta e digita, o atendimento já não é mais o ativo. A recusa vem
+    // com a saída, senão ele fica tentando de novo achando que errou o id.
+    const naVez = fila.ativo();
+    if (!naVez || naVez.id !== at.id) {
+      return (
+        `A vez de *${at.nome}* já passou, então não dá para falar do caso dele agora.\n\n` +
+        `Fala direto com ele: *#enviar ${ap ? ap.id : id}* manda a explicação traduzida.\n` +
+        `Se precisar perguntar de novo lá, peça para ele mandar *preciso do código* ` +
+        `que ele volta para a fila.`
+      );
+    }
 
     // Filtro de saída ANTES de traduzir. Um telefone ou um preço em real que o
     // operador escreveu sem pensar não pode nem chegar ao tradutor — traduzido,

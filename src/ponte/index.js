@@ -200,6 +200,29 @@ async function pedirCodigo(from, nome, usuarioBruto, imagemPath = null) {
 }
 
 /**
+ * Estados em que uma tarefa ainda vai acontecer.
+ *
+ * 'falhou' e 'concluida' ficam de fora: as duas já terminaram, e um pedido novo
+ * depois delas é pedido de verdade, não repetição.
+ */
+const TAREFA_ABERTA = ['pendente', 'aguardando_aprovacao', 'executando'];
+
+/**
+ * A tarefa deste atendimento que ainda está em pé, se houver.
+ * @returns {object|null}
+ */
+function tarefaAberta(atendimentoId, tipo) {
+  return (
+    dados.tarefas.find(
+      (t) =>
+        t.atendimentoId === atendimentoId &&
+        TAREFA_ABERTA.includes(t.estado) &&
+        (!tipo || t.tipo === tipo),
+    ) || null
+  );
+}
+
+/**
  * Cria a tarefa do braço.
  *
  * Dois tipos hoje, e o mesmo caminho para os dois:
@@ -222,6 +245,54 @@ async function despachar(atendimento, opcoes = {}) {
   if (!respondendo && !atendimento.usuario) {
     await alertar(`⚠️ Atendimento de *${atendimento.nome}* sem usuário definido. Pulei.`);
     return;
+  }
+
+  // ── Já tem um envio deste tipo em pé? Então não faz outro ──
+  //
+  // Este é o remendo do "painel repetido". O cliente ansioso manda a foto, o
+  // usuário e depois "e aí, saiu?" — três mensagens em segundos — e cada uma
+  // completa um pedido: `fila.entrar` reaproveitava o mesmo atendimento (ele é
+  // idempotente de propósito), mas o despachar seguia em frente e criava uma
+  // tarefa NOVA a cada vez. No copiloto isso vira um "📋 liberar envio" por
+  // mensagem no WhatsApp do operador, com um id diferente em cada um. O chat
+  // dele virava uma parede de painéis idênticos, e o pior: se ele desse #ok em
+  // dois, o mesmo print e o mesmo usuário saíam duas vezes para o outro lado —
+  // que é atividade repetida na conta, exatamente o que a gente evita.
+  //
+  // O mesmo caminho reaparecia pelo lado do operador: `#enviar` chama
+  // `promoverProximo` depois de concluir, e um atendimento já concluído fazia
+  // `concluir` sair vazio e o `promoverProximo` redespachar quem já estava na
+  // vez.
+  //
+  // A checagem é POR TIPO, e isso não é detalhe. Bloquear qualquer tarefa
+  // aberta faria o `#responder` do operador ser engolido calado sempre que o
+  // pedido de código ainda não tivesse sido dado como concluído — a resposta
+  // dele nunca sairia e nada no WhatsApp diria por quê.
+  const jaAberta = tarefaAberta(atendimento.id, tipo);
+  if (jaAberta) {
+    console.log(
+      `[ponte] ${atendimento.from} já tem um ${tipo} em pé (tarefa ${jaAberta.id}, ${jaAberta.estado}) — não criei outro`,
+    );
+    return jaAberta;
+  }
+
+  // ── Resposta ao outro lado SÓ de quem está na vez ──────────
+  //
+  // Todos os clientes dividem o mesmo chat lá fora, e é a fila serial que torna
+  // a resposta que volta atribuível sem chute (fila.js:9-14). Uma resposta
+  // enviada por quem já saiu da vez quebra isso na origem: a mensagem entra no
+  // chat DEPOIS do pedido de outra pessoa, e o que o fornecedor responder a
+  // seguir seria contado como resposta ao pedido dela.
+  //
+  // Passou a ser alcançável quando a vez passou a ser liberada assim que o
+  // outro lado responde qualquer coisa que não é código: o `#responder` do
+  // operador chega quando o atendimento já não é o ativo.
+  if (respondendo) {
+    const naVez = fila.ativo();
+    if (!naVez || naVez.id !== atendimento.id) {
+      console.warn(`[ponte] resposta barrada: ${atendimento.nome} não está na vez`);
+      return null;
+    }
   }
 
   // Filtro de SAÍDA, no texto que de fato vai sair.
@@ -441,6 +512,15 @@ async function receberDoFornecedor(entrada) {
   //
   // O que decide NÃO responder é o freio de turnos: passou do teto, o
   // ping-pong provavelmente travou, e mais uma resposta automática só afunda.
+  //
+  // O turno é contado AQUI, antes da tentativa, e não lá embaixo no caminho do
+  // operador. Contando depois, só as mensagens que viravam decisão humana
+  // entravam na conta — e o único ping-pong que sobrou é justamente o do
+  // repertório, porque o caminho humano agora encerra a vez na primeira
+  // mensagem. O freio lia um contador que nunca subia: com o repertório ligado
+  // ele podia responder para sempre.
+  const turno = fila.contarTurno(at.id);
+
   const respondeu = await tentarResponder(at, entrada.texto);
   if (respondeu) return;
 
@@ -493,11 +573,6 @@ async function receberDoFornecedor(entrada) {
   // traduzir "有货" sabendo que a pergunta foi sobre estoque.
   fila.registrar(at.id, 'vendedor', entrada.texto, seguro.texto);
 
-  // Turno contado, que também estava morto: `at.turnos` era sempre 0, o
-  // PONTE_MAX_TURNOS era config sem efeito, e o #destravar dizia "atendimento
-  // parado" para todo atendimento, inclusive os que estavam indo bem.
-  const turno = fila.contarTurno(at.id);
-
   persistAgora();
 
   // SEM o texto original.
@@ -538,9 +613,39 @@ async function receberDoFornecedor(entrada) {
 
   await alertar(
     `Cliente: *${at.nome}* · usuário \`${at.usuario}\`\n💬 ${seguro.texto}` +
-      (avisos.length ? `\n\n⚠️ ${avisos.join(' ')}` : ''),
+      (avisos.length ? `\n\n⚠️ ${avisos.join(' ')}` : '') +
+      `\n\n_A vez dele já foi liberada. Responde com *#enviar ${aprovacao.id}*._`,
     entrada.printPath,
   );
+
+  // ── E A FILA ANDA ───────────────────────────────────────
+  //
+  // Aqui é o conserto do travamento geral. Até agora o atendimento continuava
+  // ATIVO enquanto o operador não decidisse — e como um humano no celular
+  // demora, ou não vê, ou está dormindo, a fila inteira parava atrás de uma
+  // aprovação. Todo mundo ficava sem código por causa de UMA mensagem que o
+  // outro lado mandou fora do esperado, e só destravava com o timeout de 4h.
+  //
+  // Nada se perde: a aprovação continua na lista, o `#enviar` entrega a
+  // explicação a este cliente depois, e o alerta acima diz o id. O que muda é
+  // que a decisão dele deixou de ser um pedágio para os outros.
+  //
+  // O cliente é avisado ANTES de perder a vez. Sem isso ele fica em silêncio
+  // absoluto enquanto o próximo recebe "chegou sua vez" — e é assim que ele
+  // volta perguntando se foi esquecido.
+  try {
+    await sender.send(
+      at.from,
+      'Chegou o retorno da sua conta! Só vou conferir uma coisa aqui e já te falo 👍',
+    );
+  } catch (err) {
+    // O aviso é secundário; a fila destravar é o que não pode falhar.
+    console.error('[ponte] não avisei o cliente do retorno:', err.message);
+  }
+
+  console.log(`[ponte] ${at.from} passou para o operador — vez liberada`);
+  await fila.concluir(at.id, 'passou_para_operador');
+  await promoverProximo();
 }
 
 /**
@@ -844,6 +949,18 @@ async function promoverProximo() {
   const at = fila.ativo();
   if (!at || !at.usuario) return;
 
+  // Já é a vez dele e o envio já está em pé: não há nada a promover.
+  //
+  // `promoverProximo` é chamado depois de todo encerramento, e vários deles
+  // chegam sem ter mudado nada — `#enviar` num atendimento já encerrado, dois
+  // caminhos concluindo o mesmo atendimento, o tick expirando quem já saiu. Sem
+  // esta linha o cliente da vez recebia "Chegou sua vez!" de novo a cada um
+  // deles, tendo recebido a mesma frase minutos antes.
+  //
+  // Sai ANTES do despachar de propósito: o despachar também não duplicaria a
+  // tarefa, mas a mensagem ao cliente sairia do mesmo jeito.
+  if (tarefaAberta(at.id)) return;
+
   // Despacha ANTES de falar, porque é o estado da tarefa que decide o que
   // dizer. No copiloto ela nasce esperando o #ok e nada saiu ainda — prometer
   // "já estou pegando" aqui repetiria o defeito que já corrigimos no pedido:
@@ -1046,14 +1163,39 @@ let coletaMudaEm = 0;
 // Dois tetos, e a diferença é o cliente.
 //
 // Com alguém esperando código, cada minuto parado é um minuto de cliente no
-// vácuo: 2 min. Sem ninguém na fila, o silêncio quase sempre é deploy do
-// outro serviço — build da imagem mais o Chrome abrindo passa fácil de 3 min,
-// e alarme em todo deploy treina o operador a ignorar alarme. Aí 6 min.
+// vácuo. Sem ninguém na fila, o silêncio quase sempre é deploy do outro
+// serviço — build da imagem mais o Chrome abrindo passa fácil de 3 min, e
+// alarme em todo deploy treina o operador a ignorar alarme. Aí 6 min.
 //
-// O ciclo lá fora bate aqui a cada 25s no ocioso e a cada 6s com cliente
-// esperando, então mesmo o teto curto tem folga de sobra.
+// O TETO CURTO ERA 2 MIN E ESTAVA ERRADO. O comentário aqui dizia que o ciclo
+// lá fora bate a cada 6s com cliente esperando — o que só vale quando ele está
+// ocioso, esperando tarefa. Enquanto ele TRABALHA (abrir a conversa, colar o
+// print, digitar, esperar até 25s a própria mensagem aparecer, rolar o chat
+// atrás da resposta) ele não fala com este lado nenhuma vez, e um ciclo desses
+// passa de 2 min sem nada de errado acontecer. O resultado era alarme durante
+// o funcionamento normal.
 const SEM_SINAL_OCIOSO_MS = 6 * 60 * 1000;
-const SEM_SINAL_COM_FILA_MS = 2 * 60 * 1000;
+const SEM_SINAL_COM_FILA_MS = 4 * 60 * 1000;
+
+// Depois de um par de avisos (caiu + voltou), fica quieto por este tempo.
+//
+// É o teto do estrago: quando a coleta oscila — e ela oscila, porque trabalhar
+// é ficar em silêncio — o par se repetia a cada 3 minutos, para sempre. O
+// operador acordava com 40 mensagens e nenhuma delas dizendo nada de novo.
+// Instabilidade não muda o que ele faz: ou ele vai olhar o painel, ou não vai.
+const SILENCIO_APOS_AVISO_MS = 30 * 60 * 1000;
+
+// Quantas batidas novas SEGUIDAS provam que voltou de verdade.
+//
+// Uma só não prova nada: o braço em apuros bate uma vez a cada tanto, e cada
+// batida dessas virava um "de volta" seguido de um "sem sinal" três minutos
+// depois. Duas batidas em ticks consecutivos significam um minuto inteiro de
+// contato regular.
+const BATIDAS_PARA_VOLTAR = 2;
+
+let coletaAvisada = false; // a queda de agora chegou a ser avisada?
+let coletaBatidas = 0; // batidas novas seguidas desde que caiu
+let ultimoAvisoColeta = 0;
 
 async function vigiarColeta() {
   const visto = dados.coletaVistaEm || 0;
@@ -1063,32 +1205,70 @@ async function vigiarColeta() {
   // é o #fila, que sabe distinguir "nunca conectou" de "chave recusada".
   if (!visto) return;
 
+  // Está com a mão na massa? Então não sumiu — está ocupado.
+  //
+  // Uma tarefa em 'executando' é a prova de que o braço pegou trabalho e não
+  // reportou o fim ainda, e é justamente durante isso que ele fica sem falar
+  // com este lado. Quem cobre o caso de ele morrer no meio é o
+  // `recuperarTravadas`, com os mesmos 5 min: passou disso, a tarefa volta
+  // para a fila, deixa de estar 'executando' e o alarme aqui volta a valer.
+  const trabalhando = dados.tarefas.some(
+    (t) => t.estado === 'executando' && Date.now() - (t.pegaEm || 0) < EXECUTANDO_MAX_MS,
+  );
+  if (trabalhando) return;
+
   const idade = Date.now() - visto;
   const esperando = Boolean(fila.ativo());
   const teto = esperando ? SEM_SINAL_COM_FILA_MS : SEM_SINAL_OCIOSO_MS;
 
-  if (idade > teto && !coletaMuda) {
-    coletaMuda = true;
-    coletaMudaEm = visto;
-    const min = Math.round(idade / 60000);
-    const s = fila.situacao();
-    await alertar(
-      `🔌 *Coleta sem sinal há ${min} min.*\n\n` +
-        (s.ativo
-          ? `Tem *${s.ativo.cliente}* esperando código agora.`
-          : 'Ninguém esperando no momento.') +
-        `\n\nConfere o serviço no painel. Enquanto ela não voltar, código não sai.`,
-    );
+  if (idade > teto) {
+    if (!coletaMuda) {
+      coletaMuda = true;
+      coletaMudaEm = visto;
+      coletaBatidas = 0;
+
+      // Avisa, a não ser que o par anterior tenha sido agora há pouco. Quando
+      // cala, o log fica — é lá que se vê a oscilação depois.
+      coletaAvisada = Date.now() - ultimoAvisoColeta > SILENCIO_APOS_AVISO_MS;
+      if (!coletaAvisada) {
+        console.warn(`[ponte] coleta caiu de novo (${Math.round(idade / 60000)} min) — não avisei, faz pouco que avisei`);
+        return;
+      }
+
+      ultimoAvisoColeta = Date.now();
+      const min = Math.round(idade / 60000);
+      const s = fila.situacao();
+      await alertar(
+        `🔌 *Coleta sem sinal há ${min} min.*\n\n` +
+          (s.ativo
+            ? `Tem *${s.ativo.cliente}* esperando código agora.`
+            : 'Ninguém esperando no momento.') +
+          `\n\nConfere o serviço no painel. Enquanto ela não voltar, código não sai.`,
+      );
+    }
     return;
   }
 
+  if (!coletaMuda) return;
+
   // Avisar que VOLTOU importa tanto quanto avisar que caiu: sem isso você fica
-  // olhando o painel sem saber se já pode parar. Uma batida nova é a prova —
+  // olhando o painel sem saber se já pode parar. Batida nova é a prova —
   // relógio passando não é.
-  if (coletaMuda && visto > coletaMudaEm) {
-    coletaMuda = false;
-    await alertar('🔌 *Coleta de volta.* Os envios seguem normalmente.');
+  if (visto <= coletaMudaEm) {
+    coletaBatidas = 0; // o relógio andou, ele não
+    return;
   }
+
+  coletaMudaEm = visto;
+  coletaBatidas += 1;
+  if (coletaBatidas < BATIDAS_PARA_VOLTAR) return;
+
+  coletaMuda = false;
+  coletaBatidas = 0;
+  if (!coletaAvisada) return; // a queda foi silenciosa; a volta também é
+  coletaAvisada = false;
+  ultimoAvisoColeta = Date.now();
+  await alertar('🔌 *Coleta de volta.* Os envios seguem normalmente.');
 }
 
 async function tick() {

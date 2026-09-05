@@ -703,6 +703,56 @@ const OP = '5541999999999';
       `tarefa ficou como ${tarefaCriada ? tarefaCriada.estado : 'inexistente'}`);
   }
 
+  // ── Cliente ansioso não vira uma parede de painéis ─────────
+  //
+  // Ele manda a foto, o usuário e um "e aí, saiu?" em dez segundos, e cada uma
+  // dessas mensagens completa um pedido. `fila.entrar` é idempotente e
+  // reaproveitava o mesmo atendimento, mas o despachar seguia adiante e criava
+  // uma tarefa NOVA a cada vez — um "📋 liberar envio" por mensagem no
+  // WhatsApp do operador, cada um com um id diferente. Foi assim que o chat
+  // dele virou uma parede de painéis idênticos.
+  //
+  // E não era só barulho: dois #ok no mesmo pedido mandavam o mesmo print e o
+  // mesmo usuário duas vezes para o outro lado, que é atividade repetida na
+  // conta — exatamente o que a gente evita lá fora.
+  bloco('pedido repetido não vira painel repetido');
+
+  // Fila vazia: com alguém na vez os três pedidos entrariam na espera e nem
+  // chegariam a despachar — o teste passaria sem ter medido nada.
+  estadoPonte.dados.atendimentos = [];
+  estadoPonte.dados.tarefas = [];
+
+  const CLI_ANSIOSO = '5541911117777';
+  const senderAnsioso = require('./src/sender');
+  const sendAnsiosoAntes = senderAnsioso.send;
+  const paineis = [];
+  senderAnsioso.send = async (para, texto) => { paineis.push({ para, texto: String(texto) }); };
+  let respostas;
+  try {
+    respostas = [
+      await ponteMod.pedirCodigo(CLI_ANSIOSO, 'Ansioso', 'ansioso11', '/tmp/print.jpg'),
+      await ponteMod.pedirCodigo(CLI_ANSIOSO, 'Ansioso', 'ansioso11', '/tmp/print.jpg'),
+      await ponteMod.pedirCodigo(CLI_ANSIOSO, 'Ansioso', 'ansioso11', null),
+    ];
+  } finally {
+    senderAnsioso.send = sendAnsiosoAntes;
+  }
+
+  const tarefasDele = estadoPonte.dados.tarefas.filter((x) => x.usuario === 'ansioso11');
+  t('três pedidos seguidos geram UM envio só', tarefasDele.length === 1,
+    `${tarefasDele.length} tarefa(s)`);
+  t('  e UM painel só no seu WhatsApp',
+    paineis.filter((p) => p.para === OP && /liberar envio/i.test(p.texto)).length === 1,
+    `${paineis.filter((p) => p.para === OP).length} mensagem(ns) para o operador`);
+  // O cliente continua ouvindo resposta nas três: calar aqui seria trocar um
+  // defeito por outro, e ele mandaria uma quarta achando que não chegou.
+  t('  mas o cliente é respondido nas três',
+    respostas.every((r) => r.aceito && String(r.mensagem || '').trim().length > 0),
+    JSON.stringify(respostas.map((r) => r.aceito)));
+  t('  sem comando de operador vazando',
+    respostas.every((r) => !/#\w+/.test(r.mensagem)),
+    respostas.map((r) => r.mensagem).find((m) => /#\w+/.test(m)) || 'limpo');
+
   // No #teste o operador É o cliente, e as duas mensagens caem no mesmo
   // número. Sem a instrução ali, "Recebi tudo" parece o fim do fluxo e o #ok
   // fica esquecido esperando um envio que nunca sai sozinho.
@@ -775,13 +825,28 @@ const OP = '5541999999999';
   // para sempre uma resposta que não vem mais.
   const avisados = [];
   const sendReal = require('./src/sender').send;
-  require('./src/sender').send = async (para) => { avisados.push(para); };
+  require('./src/sender').send = async (para, texto) => { avisados.push({ para, texto: String(texto) }); };
   const limpou = await operador.executar('#limpar fila', OP);
   require('./src/sender').send = sendReal;
 
   t('#limpar fila esvazia a fila', filaMod.situacao().aguardando.length === 0 && !filaMod.situacao().ativo);
   t('e avisa TODOS os clientes', avisados.length === 3, `avisou ${avisados.length}`);
   t('e diz quantos foram', /3 cliente/i.test(limpou), limpou.split('\n')[2] || '');
+
+  // O que o cliente LÊ. É a mensagem que ele recebe do nada, sem ter feito
+  // nada errado, e o dono leu a versão anterior de fora e não entendeu: ela
+  // pedia para responder "preciso do código", uma frase que o cliente tem que
+  // reconstruir do zero. `#inicio` já está no rodapé de metade das mensagens
+  // do bot — ele não precisa entender nada, só repetir o que já viu.
+  const aoCliente = avisados[0]?.texto || '';
+  t('  e a mensagem manda ele voltar pelo #inicio', /#inicio/.test(aoCliente), aoCliente);
+  t('  em duas linhas, não num parágrafo',
+    aoCliente.split('\n').filter((l) => l.trim()).length <= 2,
+    `${aoCliente.split('\n').filter((l) => l.trim()).length} linha(s)`);
+  t('  sem entregar a origem nem admitir defeito',
+    !PROIBIDO.test(aoCliente) && !AUTOMACAO.test(aoCliente) && !REPASSE.test(aoCliente) &&
+      !/sistema|erro|falha|problema/i.test(aoCliente),
+    aoCliente);
 
   // ── Autopiloto (#auto) ─────────────────────────────────────
   bloco('#auto tira o #ok do caminho');
@@ -1023,16 +1088,82 @@ const OP = '5541999999999';
   );
 
   // Voltar importa tanto quanto cair: sem o aviso de volta, o operador fica
-  // olhando o painel sem saber se já pode parar. A prova é uma batida NOVA.
-  estadoPonte.dados.coletaVistaEm = Date.now();
+  // olhando o painel sem saber se já pode parar. A prova são DUAS batidas
+  // novas, em ticks seguidos.
+  //
+  // Uma só não prova nada, e foi assim que o privado do dono virou uma parede:
+  // o braço em apuros batia uma vez a cada tanto, cada batida virava um "de
+  // volta", e três minutos depois vinha o "sem sinal" de novo. O par se repetia
+  // a noite inteira, seis mensagens por meia hora, nenhuma dizendo nada novo.
+  // Carimbos SEPARADOS, e não dois `Date.now()` seguidos. O teste roda em
+  // milissegundos: dois `Date.now()` colados dão o mesmo número, o segundo não
+  // é uma batida nova e a recuperação nunca acontecia — o teste falharia
+  // medindo a pressa dele, não o comportamento.
+  const voltaEm = Date.now();
+  estadoPonte.dados.coletaVistaEm = voltaEm - 2000;
   await ponteMod.tick();
-  t('avisa quando a coleta volta', alertasVigia.some((a) => /de volta/i.test(a.texto)));
+  t(
+    'uma batida sozinha não conta como coleta de volta',
+    !alertasVigia.some((a) => /de volta/i.test(a.texto)),
+    JSON.stringify(alertasVigia.map((a) => a.texto.slice(0, 24))),
+  );
+
+  estadoPonte.dados.coletaVistaEm = voltaEm;
+  await ponteMod.tick();
+  t('duas batidas seguidas avisam que voltou', alertasVigia.some((a) => /de volta/i.test(a.texto)));
   // E uma vez só: o "de volta" repetido a cada 60s seria pior que o silêncio.
   await ponteMod.tick();
   t(
     'e o aviso de volta não repete',
     alertasVigia.filter((a) => /de volta/i.test(a.texto)).length === 1,
   );
+
+  // ── A oscilação não pode inundar o privado ─────────────────
+  //
+  // Trabalhar É ficar em silêncio: enquanto o braço abre a conversa, cola o
+  // print e espera a resposta, ele não fala com este lado. Então cair e voltar
+  // é o estado NORMAL de uma coleta ocupada, e narrar cada ida e volta é o que
+  // enche o WhatsApp de mensagem sem informação. Depois de um par de avisos, os
+  // 30 minutos seguintes são silêncio — o log continua registrando.
+  const quedasAntes = alertasVigia.filter((a) => /sem sinal/i.test(a.texto)).length;
+  for (let volta = 0; volta < 3; volta++) {
+    const ciclo = Date.now();
+    estadoPonte.dados.coletaVistaEm = ciclo - 7 * 60 * 1000; // sumiu de novo
+    await ponteMod.tick();
+    estadoPonte.dados.coletaVistaEm = ciclo - 2000;
+    await ponteMod.tick();
+    estadoPonte.dados.coletaVistaEm = ciclo;
+    await ponteMod.tick();
+  }
+  t(
+    'oscilar não gera aviso novo por meia hora',
+    alertasVigia.filter((a) => /sem sinal/i.test(a.texto)).length === quedasAntes,
+    `${quedasAntes} -> ${alertasVigia.filter((a) => /sem sinal/i.test(a.texto)).length}`,
+  );
+  t(
+    '  nem aviso de volta',
+    alertasVigia.filter((a) => /de volta/i.test(a.texto)).length === 1,
+    `${alertasVigia.filter((a) => /de volta/i.test(a.texto)).length} aviso(s)`,
+  );
+
+  // ── Trabalhando não é sumido ───────────────────────────────
+  //
+  // Uma tarefa em 'executando' é a prova de que o braço pegou serviço e está
+  // com a mão nele. O teto curto era de 2 min, abaixo de um ciclo de trabalho
+  // de verdade, e por isso o alarme disparava durante o funcionamento normal —
+  // era esta a causa da oscilação lá em cima, não uma coleta doente.
+  estadoPonte.dados.tarefas = [
+    { id: 9901, atendimentoId: 9999, tipo: 'pedir_codigo', estado: 'executando', pegaEm: Date.now() },
+  ];
+  const antesDoTrabalho = alertasVigia.length;
+  estadoPonte.dados.coletaVistaEm = Date.now() - 9 * 60 * 1000;
+  await ponteMod.tick();
+  t(
+    'braço trabalhando não vira alarme de coleta sumida',
+    alertasVigia.length === antesDoTrabalho,
+    JSON.stringify(alertasVigia.slice(antesDoTrabalho).map((a) => a.texto.slice(0, 30))),
+  );
+  estadoPonte.dados.tarefas = [];
 
   // Regra 1: isto sai pelo MESMO número comercial que fala com o cliente.
   for (const a of alertasVigia) {
@@ -1192,10 +1323,10 @@ const OP = '5541999999999';
   //
   // Login e senha têm o formato idêntico (`rrtt9255` é login, `z23trzqx` é
   // senha). Se ele repete de volta o usuário que mandamos, tratar como entrega
-  // encerraria a vez do cliente sem ninguém ter entregado nada.
+  // mandaria o operador entregar ao cliente uma senha que nunca chegou.
   const eco = await receber('rrtt9321');
-  t('usuário devolvido não conta como entrega', eco.ativo !== null,
-    eco.ativo ? 'segurou' : 'liberou a vez sem entrega');
+  t('usuário devolvido não conta como entrega',
+    !/Senha recebida|Entrega recebida/.test(eco.aoOperador), eco.aoOperador.slice(0, 40));
   t('  e vai para o operador decidir', eco.aprovacoes === 1, String(eco.aprovacoes));
 
   // ── Ruído não mexe em nada, mas deixa rastro ──
@@ -1230,6 +1361,27 @@ const OP = '5541999999999';
   t('código continua indo direto ao cliente', /394860/.test(codigoDireto.aoCliente),
     codigoDireto.aoCliente);
   t('  e continua destravando a fila', codigoDireto.ativo === null);
+
+  // ── Resposta que não é código NÃO trava a fila ─────────────
+  //
+  // O pior estado que este sistema já teve: o outro lado respondia qualquer
+  // coisa fora do esperado, o atendimento ficava ATIVO esperando você decidir
+  // no celular, e a fila inteira parava atrás dessa decisão. Todo mundo ficava
+  // sem código por causa de uma mensagem, até o timeout de 4 horas.
+  //
+  // O que passa a acontecer: a explicação vira aprovação (você decide quando
+  // quiser), a vez é liberada na hora e o próximo é atendido.
+  const travou = await receber('这个账号不存在', { segundoCliente: true });
+
+  t('mensagem fora do esperado não segura a fila',
+    travou.ativo && travou.ativo.from === '5541922220002',
+    travou.ativo ? `na vez: ${travou.ativo.nome}` : 'fila parada');
+  t('  e a decisão continua sua', travou.aprovacoes === 1, String(travou.aprovacoes));
+  t('  com o comando de responder junto', /#enviar \d+/.test(travou.aoOperador),
+    travou.aoOperador.split('\n').at(-1));
+  // Regra 1: o alerta sai pelo mesmo número que fala com o cliente.
+  t('  sem entregar a origem', !AUTOMACAO.test(travou.aoOperador) &&
+    !politica.temCJK(travou.aoOperador), (travou.aoOperador.match(AUTOMACAO) || [''])[0] || 'limpo');
 
   tradutorMod.paraCliente = traduzReal;
   estadoPonte.dados.atendimentos = [];
@@ -1269,7 +1421,12 @@ const OP = '5541999999999';
     return {
       aoOperador: saiu.filter((s) => s.para === OP).map((s) => s.texto).join('\n'),
       aprovacao: estadoPonte.dados.aprovacoes[0],
-      atendimento: filaMod.ativo(),
+      // Por ID, e não `fila.ativo()`. Uma mensagem que vira decisão do operador
+      // ENCERRA a vez agora (senão a fila inteira para atrás dela), então o
+      // atendimento existe mas não é mais o ativo — e `ativo()` devolvia null,
+      // fazendo três testes de histórico e turno medirem `undefined`.
+      atendimento: filaMod.porId(r.atendimento.id),
+      naVez: filaMod.ativo(),
     };
   }
 
@@ -1405,13 +1562,22 @@ const OP = '5541999999999';
   const alertasTurno = [];
   senderTurnos.send = async (para, txt) => { alertasTurno.push({ para, texto: String(txt) }); };
   tradutorF4.paraCliente = async () => ({ traducao: 'e ai?', resumo: '', confianca: 'alta' });
-  for (let i = 0; i < 6; i++) {
-    await ponteMod.receberDoFornecedor({ texto: '还在吗' });
-  }
+
+  // O ping-pong de SEIS mensagens não existe mais pelo caminho humano: a
+  // primeira mensagem que vira decisão sua já encerra a vez, senão a fila
+  // inteira para atrás dela. Quem ainda pode ir e voltar é o repertório, e é
+  // esse laço que o teto freia. Então o cenário é montado no contador, não com
+  // seis mensagens que hoje cairiam em "ninguém na vez".
+  const perto = await receberDele('有货吗', 'tem?');
+  const tetoTurnos = require('./src/ponte/config').fila.maxTurnos;
+  const r2 = await filaMod.entrar('5541944440001', 'Ana');
+  r2.atendimento.usuario = 'rrtt9321';
+  r2.atendimento.turnos = tetoTurnos - 1;
+  await ponteMod.receberDoFornecedor({ texto: '还在吗' });
   senderTurnos.send = sendTurnosAntes;
 
-  const at2 = filaMod.porId(at1.id);
-  t('os turnos se acumulam', at2.turnos >= 6, String(at2.turnos));
+  const at2 = filaMod.porId(r2.atendimento.id);
+  t('os turnos se acumulam', at2.turnos >= tetoTurnos, String(at2.turnos));
   const avisoTeto = alertasTurno.filter((a) => a.para === OP).map((a) => a.texto).join('\n');
   t('o teto avisa o operador', /idas e vindas/i.test(avisoTeto),
     avisoTeto.split('\n').filter((l) => /idas e vindas/i.test(l))[0] || avisoTeto.slice(-80));
@@ -1742,7 +1908,16 @@ const OP = '5541999999999';
   casoR6.atendimento.usuario = 'rrtt9321';
   const idCaso = casoR6.atendimento.id;
 
-  await ponteMod.receberDoFornecedor({ texto: '这个账号不存在' }); // problema
+  await ponteMod.receberDoFornecedor({ texto: '这个账号不存在' }); // problema: libera a vez
+
+  // O cliente pede de novo, e é um atendimento NOVO. A mensagem que vira
+  // decisão sua encerra a vez na hora — antes ela segurava a fila inteira
+  // esperando um humano no celular —, então as duas de baixo precisam de
+  // alguém na vez para terem a quem pertencer.
+  const casoR6b = await filaMod.entrar('5541966660001', 'Dani');
+  casoR6b.atendimento.usuario = 'rrtt9321';
+  const idCaso2 = casoR6b.atendimento.id;
+
   await ponteMod.receberDoFornecedor({ texto: '为您推荐以下商品' }); // ruído
   await ponteMod.receberDoFornecedor({ texto: '394860' }); // código: encerra
   senderR6.send = sendR6Antes;
@@ -1764,16 +1939,26 @@ const OP = '5541999999999';
 
   // O desfecho vem do fila.concluir, que é o único ponto por onde TODOS passam
   // — anotar em cada chamador deixaria de fora justamente os desfechos ruins.
-  const encerrado = anotado.find((l) => l.tipo === 'encerrado');
-  t('grava o desfecho', Boolean(encerrado), JSON.stringify(encerrado));
-  t('  com o motivo', encerrado?.motivo === 'codigo_entregue', encerrado?.motivo);
-  t('  e quanto tempo levou', typeof encerrado?.duracaoMin === 'number', String(encerrado?.duracaoMin));
+  const encerrados = anotado.filter((l) => l.tipo === 'encerrado');
+  t('grava o desfecho', encerrados.length === 2, String(encerrados.length));
+  t('  com o motivo', encerrados.some((e) => e.motivo === 'codigo_entregue'),
+    JSON.stringify(encerrados.map((e) => e.motivo)));
+  // O desfecho novo. É o que separa "travou esperando você" de "acabou bem", e
+  // sem ele a análise contaria os dois como o mesmo caso resolvido.
+  t('  inclusive quando a vez passou para você',
+    encerrados.some((e) => e.motivo === 'passou_para_operador'),
+    JSON.stringify(encerrados.map((e) => e.motivo)));
+  t('  e quanto tempo levou',
+    encerrados.every((e) => typeof e.duracaoMin === 'number'),
+    JSON.stringify(encerrados.map((e) => e.duracaoMin)));
 
   // Os eventos de um caso se amarram pelo id — que é tudo de que a análise
   // precisa, e por isso nome, telefone e e-mail do cliente não entram aqui.
-  t('os eventos do caso se amarram pelo id',
-    anotado.filter((l) => l.atendimentoId === idCaso).length >= 4,
-    String(anotado.filter((l) => l.atendimentoId === idCaso).length));
+  for (const [rotulo, alvo, minimo] of [['o que travou', idCaso, 2], ['o que deu certo', idCaso2, 3]]) {
+    t(`os eventos do caso se amarram pelo id (${rotulo})`,
+      anotado.filter((l) => l.atendimentoId === alvo).length >= minimo,
+      String(anotado.filter((l) => l.atendimentoId === alvo).length));
+  }
 
   const bruto = fsR.readFileSync(registroMod.FILE, 'utf8');
   for (const [nome, valor] of [['telefone', '5541966660001'], ['nome', 'Dani']]) {
@@ -2466,8 +2651,22 @@ const OP = '5541999999999';
 
   const veioChines = await receberDeLa('这个账号不存在', 'essa conta não existe');
 
-  // O CLIENTE não recebe nada até você liberar.
-  t('nada vai ao cliente sem você liberar', veioChines.aoCliente === '', veioChines.aoCliente);
+  // O CLIENTE não lê NADA do que o outro lado escreveu até você liberar.
+  //
+  // Ele recebe um aviso, e isso é de propósito: a vez dele acaba aqui (senão a
+  // fila inteira para atrás da sua decisão), e sem uma palavra ele ficaria em
+  // silêncio absoluto vendo o próximo ser atendido. O que ele NÃO pode ler é o
+  // conteúdo — nem em chinês, nem traduzido, nem em pedaço.
+  t('nada do outro lado vai ao cliente sem você liberar',
+    !/não existe/i.test(veioChines.aoCliente) && !politica.temCJK(veioChines.aoCliente),
+    veioChines.aoCliente);
+  t('  mas ele não fica no escuro', veioChines.aoCliente.trim().length > 0, veioChines.aoCliente);
+  t('  sem entregar a origem nem comando de operador',
+    !PROIBIDO.test(veioChines.aoCliente) &&
+      !AUTOMACAO.test(veioChines.aoCliente) &&
+      !REPASSE.test(veioChines.aoCliente) &&
+      !/#\w+/.test(veioChines.aoCliente),
+    veioChines.aoCliente);
   t('  e vira uma aprovação esperando', veioChines.aprovacoes === 1, String(veioChines.aprovacoes));
   // E o que VOCÊ lê já é português.
   t('o que chega para você é português',
