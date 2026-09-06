@@ -67,6 +67,20 @@ function comoHora(minutos) {
 }
 
 /**
+ * Quanto falta, do jeito que uma pessoa fala.
+ *
+ * "Volta às 17h00" sozinho obriga o cliente a olhar o relógio e subtrair, e é
+ * nessa conta que ele desiste. "Daqui a 40 minutos" ele entende sem pensar — e
+ * as duas informações juntas cobrem quem só quer saber se dá tempo de esperar.
+ */
+function comoEspera(minutos) {
+  if (minutos < 60) return `${minutos} minuto${minutos === 1 ? '' : 's'}`;
+  const h = Math.floor(minutos / 60);
+  const m = minutos % 60;
+  return `${h}h${m ? doisDigitos(m) : ''}`;
+}
+
+/**
  * @returns {{aberta:boolean, esperaMinutos:number, proximaAbertura:Date, avisoCliente:string}}
  */
 function estado(agora = new Date()) {
@@ -102,8 +116,13 @@ function estado(agora = new Date()) {
     proximaAbertura: new Date(agora.getTime() + espera * 60 * 1000),
     // Fora da janela também não se explica o motivo: só o horário. "Sistema em
     // manutenção" é verdade suficiente e não abre porta para pergunta nenhuma.
+    //
+    // A ESPERA vai junto com a hora, e isso não é enfeite. Só a hora obriga o
+    // cliente a olhar o relógio e fazer a conta, e é aí que ele desiste ou
+    // pergunta "vai demorar muito?". Com os dois, a resposta já está na
+    // mensagem.
     avisoCliente:
-      `Recebi! O sistema de código volta por volta das ${comoHora(alvo)}. ` +
+      `Recebi! Voltamos às *${comoHora(alvo)}*, daqui a *${comoEspera(espera)}*. ` +
       `Você já está na fila e eu te mando assim que sair 👍`,
   };
 }
@@ -117,26 +136,16 @@ function resumo(agora = new Date()) {
   return `🌙 offline — volta em ${h ? h + 'h' : ''}${m ? doisDigitos(m) : ''}`.trim();
 }
 
-/**
- * A pausa do dia, em texto, para avisar o cliente ANTES de ele pedir.
- *
- * Sai do próprio horário configurado, não de string fixa: com dois lugares
- * dizendo a mesma coisa, um deles fica velho quando a janela muda — e aí o
- * cliente lê um horário e o sistema opera em outro.
- *
- * Devolve null quando não há pausa no meio do dia (janela contínua), para o
- * chamador simplesmente não mostrar nada.
- */
-function avisoDaPausa() {
-  const lista = intervalos();
-  if (lista.length < 2) return null;
+// SAIU DAQUI: `avisoDaPausa()`.
+//
+// Ela montava "o sistema para às 15h e volta às 17h" e isso ia colado no pedido
+// da foto enquanto o sistema estava ABERTO. A intenção era avisar antes; o
+// efeito foi o contrário — o cliente lia o horário como se estivesse fechado
+// naquele instante, parava de mandar a foto, ou perguntava se ia esperar duas
+// horas. Quem está sendo atendido dentro do horário não tem o que fazer com o
+// horário.
+//
+// O aviso de fechado continua, no `avisoCliente` do estado(), e agora diz
+// quando volta E em quanto tempo.
 
-  // O buraco é entre o fim de um intervalo e o começo do seguinte.
-  const fim = lista[0].ate;
-  const volta = lista[1].de;
-  // `fim` é inclusive (15:00 ainda está dentro), mas dizer "para às 15h01"
-  // para o cliente é ruído. O minuto de diferença não muda nada para ele.
-  return `⏰ O sistema de código para às *${comoHora(fim)}* e volta às *${comoHora(volta)}*.`;
-}
-
-module.exports = { estado, resumo, intervalos, avisoDaPausa };
+module.exports = { estado, resumo, intervalos };

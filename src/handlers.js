@@ -19,6 +19,7 @@ const sender = require('./sender');
 const variator = require('./variator');
 const operador = require('./ponte/operador');
 const vendas = require('./vendas');
+const exemplo = require('./exemplo');
 const recepcao = require('./ponte/recepcao');
 const ponte = require('./ponte');
 const menu = require('./menu');
@@ -266,10 +267,18 @@ async function acaoDoMenu(acao, { from, pushName }) {
     // sem IA, e ela já conduz o passo a passo (foto → usuário). Aqui só se
     // manda o cliente começar esse fluxo do jeito que a recepção reconhece.
     store.saveContact(from, { menuNode: null });
+    // A frase sozinha na linha, e não no meio da frase.
+    //
+    // Ela é o gatilho que abre o passo a passo, e o cliente precisa copiar ou
+    // digitar exatamente isso. Escondida no meio de um parágrafo, ele lê a
+    // mensagem inteira, entende que é para "pedir o código" e escreve outra
+    // coisa qualquer.
     await sender.send(
       from,
-      '🔑 Beleza! Me manda a mensagem *preciso do código* que eu já começo o ' +
-        'passo a passo com você.',
+      '🔑 Beleza! Para eu começar, me manda:\n\n' +
+        '*preciso do código*\n\n' +
+        '_Se você já mandou a foto da tela, ela está guardada aqui — é só ' +
+        'mandar essa mensagem que eu sigo de onde parou._',
     );
     return true;
   }
@@ -420,7 +429,22 @@ async function handleMessage(msg) {
 
     if (r.acao === 'responder') {
       store.saveContact(from, { lastSeen: Date.now(), name: pushName || store.getContact(from)?.name });
-      await sender.send(from, r.mensagem);
+
+      // A instrução vai NA LEGENDA da foto de exemplo, e não numa mensagem
+      // separada. São duas coisas que só funcionam juntas: o texto diz o que
+      // fazer, a foto diz qual é a tela. Separadas, chegam com segundos de
+      // distância pela fila humanizada e a pessoa responde à primeira antes de
+      // a segunda existir.
+      //
+      // Sem o arquivo no disco, `telaDoConsole()` devolve null e sai só o texto
+      // — que é o que existia antes. O sender também cai para texto sozinho se
+      // a mídia for recusada.
+      const exemploFoto = r.comExemplo ? exemplo.telaDoConsole() : null;
+      await sender.send(
+        from,
+        r.mensagem,
+        exemploFoto ? { image: exemploFoto, fileName: 'tela-do-console.jpg' } : {},
+      );
       return;
     }
 
@@ -855,13 +879,32 @@ const SO_O_NUMERO = [
  * O código do erro, DIGITADO, o bot resolve sozinho (ver telas.js), sem modelo
  * nenhum. É uma linha da tela que ele já está olhando, contra oito opções que
  * não servem.
+ *
+ * ── POR QUE A MENSAGEM OFERECE DUAS COISAS ──────────────────
+ *
+ * Quem manda foto sem escrever nada é de dois tipos, e daqui não dá para saber
+ * qual: quem printou um ERRO, e quem printou a tela do console pedindo o código
+ * de segurança. O dono diz que o segundo grupo é grande — muita gente chega
+ * mandando a foto do console antes de escrever qualquer coisa.
+ *
+ * Pedir só o código do erro deixava esse grupo procurando na tela um número que
+ * não existe ali. Então a mensagem cobre os dois, e o pedido de código vem
+ * PRIMEIRO e SOZINHO na linha: a frase que abre o fluxo é a única coisa que
+ * essa pessoa precisa copiar, e enterrá-la no meio de um parágrafo é o mesmo
+ * que não dizer.
+ *
+ * A recepção guarda a foto por 10 minutos (recepcao.js, Caso 7). Então quem
+ * responder "preciso do código" já pula direto para o login — a foto que ele
+ * mandou antes de saber o passo a passo não se perde.
  */
 function pedirCodigoDoErro(from) {
   return sender.send(
     from,
     'Recebi sua foto 👍\n\n' +
-      'Me diz o *código do erro* que aparece na tela (algo tipo *2819-0042*) ' +
-      'ou escreve em uma frase o que apareceu, que eu te falo como resolver.',
+      'Se é para pegar o *código de segurança*, me manda:\n\n' +
+      '*preciso do código*\n\n' +
+      'Se for um erro na tela, me diz o *código do erro* (algo tipo *2819-0042*) ' +
+      'ou escreve numa frase o que apareceu.',
   );
 }
 

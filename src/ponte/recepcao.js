@@ -186,7 +186,15 @@ function avaliar(from, texto, imagem) {
       ultimoAviso: aviso,
     };
     persist();
-    return { acao: 'responder', mensagem };
+    // A FOTO DE EXEMPLO acompanha toda instrução que pede a foto.
+    //
+    // "Manda a foto da tela do console" é claro para quem já sabe qual tela é,
+    // e ambíguo para todo o resto: vem a caixa do jogo, a tela inicial, o menu
+    // de contas. Aí o pedido volta pela metade e alguém cobra de novo.
+    //
+    // Nos dois casos, e não só no primeiro: quem chega mandando o usuário antes
+    // (Caso 5) também nunca viu a tela certa.
+    return { acao: 'responder', mensagem, comExemplo: aviso === 'foto' };
   };
 
   const disparar = (u, img) => {
@@ -229,17 +237,18 @@ function avaliar(from, texto, imagem) {
     }
     if (repetiuAgora(guardado, 'foto')) return { acao: 'ignorar' };
 
-    // Fornecedor offline: avisa ANTES de o cliente juntar print e login, em vez
-    // de deixá-lo cumprir as duas etapas para só então descobrir que vai esperar.
+    // HORÁRIO só quando está mesmo fora do ar.
+    //
+    // Antes ia junto com a janela ABERTA também: um aviso de que o sistema para
+    // às 15h e volta às 17h, colado no pedido da foto. A intenção era boa, mas o
+    // efeito foi o oposto — muita gente leu o horário como se estivesse fechado
+    // AGORA e parou de mandar a foto, ou perguntou se ia demorar duas horas.
+    //
+    // Quem está sendo atendido dentro do horário não tem nada que fazer com o
+    // horário. Fechado, o aviso diz quando volta e em quanto tempo, que é a
+    // única pergunta que a pessoa tem naquele momento.
     const j = janela.estado();
-    // Com a janela ABERTA vai o horário da pausa junto: o cliente que pede
-    // 14h50 tem 10 minutos para mandar foto e usuário, e saber disso antes é
-    // melhor que descobrir quando o envio já não sai. Com a janela FECHADA o
-    // avisoCliente já diz a hora de voltar, então repetir seria redundância.
-    const pausa = janela.avisoDaPausa();
-    const msg = j.aberta
-      ? MSG_PEDE_FOTO + (pausa ? `\n\n_${pausa}_` : '')
-      : `${MSG_PEDE_FOTO}\n\n_${j.avisoCliente}_`;
+    const msg = j.aberta ? MSG_PEDE_FOTO : `${MSG_PEDE_FOTO}\n\n_${j.avisoCliente}_`;
     return responder('foto', msg, { usuario: null, imagem: null, etapa: 'foto' });
   }
 

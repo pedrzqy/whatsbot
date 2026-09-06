@@ -306,8 +306,11 @@ async function buildSystemPrompt() {
         `estiver ilegível ou não tiver a ver com a conversa, diga e peça outra. Nunca invente o que não conseguiu ler.\n\n`
       : `FOTO: o cliente pode mandar print de tela, e você NÃO consegue ver imagem nenhuma. Nunca diga o que ` +
         `está na foto, nunca finja ter lido, e nunca peça para ele mandar outra: o problema não é a foto dele. ` +
-        `Peça o CÓDIGO DO ERRO que aparece na tela (algo tipo 2819-0042) ou uma frase do que apareceu, e com ` +
-        `isso você resolve pelas telas conhecidas acima. Agradeça a foto antes de pedir, ela não foi à toa.\n\n`) +
+        `Agradeça a foto antes de pedir qualquer coisa, ela não foi à toa. ` +
+        `Se ele falar em código, verificação, login ou tela do console, peça que ele mande a mensagem ` +
+        `"preciso do código", sozinha, que o passo a passo começa (a foto dele fica guardada, não se perde). ` +
+        `Se for erro, peça o CÓDIGO DO ERRO que aparece na tela (algo tipo 2819-0042) ou uma frase do que ` +
+        `apareceu, e com isso você resolve pelas telas conhecidas acima.\n\n`) +
 
     `ÁUDIO: mensagem de voz do cliente chega aqui já em texto. Ela pode ter erro de transcrição, se a frase não ` +
     `fizer sentido, confirme o que ele quis dizer em vez de responder ao pé da letra. Responda sempre por escrito.\n\n` +

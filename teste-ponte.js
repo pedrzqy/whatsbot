@@ -248,6 +248,17 @@ t('03h00 BRT = online (madrugada)', janela.estado(emBRT('03:00')).aberta === tru
 const naPausa = janela.estado(emBRT('16:00'));
 t('espera até 17:15 ≈ 75 min', naPausa.esperaMinutos === 75, naPausa.esperaMinutos + ' min');
 t('aviso cita o horário de volta', /17h15/.test(naPausa.avisoCliente), naPausa.avisoCliente);
+// A ESPERA junto com a hora. Só a hora obriga o cliente a olhar o relógio e
+// fazer a conta, e é nessa conta que ele desiste ou pergunta "vai demorar?".
+t('  e diz em quanto tempo', /daqui a \*1h15\*/.test(naPausa.avisoCliente), naPausa.avisoCliente);
+// Menos de uma hora fala em minutos: "0h40" ninguém escreve.
+const quaseLa = janela.estado(emBRT('16:35'));
+t('  em minutos quando falta menos de uma hora',
+  /daqui a \*40 minutos\*/.test(quaseLa.avisoCliente), quaseLa.avisoCliente);
+// Dentro do expediente NÃO se fala de horário nenhum.
+t('  e aberto não cita horário',
+  !/\d\dh\d\d/.test(janela.estado(emBRT('10:00')).avisoCliente),
+  janela.estado(emBRT('10:00')).avisoCliente);
 t('dois intervalos configurados', janela.intervalos().length === 2);
 
 // ── O relógio não pode decidir se o teste passa ─────────────
@@ -308,11 +319,24 @@ r2 = recepcao.avaliar(CLI4, 'preciso do código', null);
 t('"preciso do código" responde', r2.acao === 'responder', r2.acao);
 t('pede a FOTO primeiro', /foto da tela do console/i.test(r2.mensagem || ''), r2.mensagem);
 t('não pede o usuário ainda', !/login\/usu/i.test(r2.mensagem || ''));
+// A FOTO DE EXEMPLO vai junto. "Manda a foto da tela do console" é claro para
+// quem já sabe qual tela é; para o resto vem a caixa do jogo, a tela inicial ou
+// o menu de contas, e o pedido volta pela metade.
+t('  e a foto de exemplo vai junto', r2.comExemplo === true, String(r2.comExemplo));
+// O HORÁRIO não aparece dentro do expediente. Ele já apareceu aqui, colado no
+// pedido da foto, e o cliente lia como se estivesse fechado NAQUELE instante:
+// parava de mandar a foto, ou perguntava se ia esperar duas horas.
+t('  e o horário não aparece dentro do expediente',
+  !/\d\dh\d\d/.test(r2.mensagem || ''),
+  (r2.mensagem || '').match(/\d\dh\d\d/)?.[0] || 'limpo');
 
 r2 = recepcao.avaliar(CLI4, '', 'tela.jpg');
 t('a foto agora tem resposta', r2.acao === 'responder', r2.acao);
 t('e pede o login/usuário', /login\/usu/i.test(r2.mensagem || ''), r2.mensagem);
 t('avisa para não mandar senha', /senha/i.test(r2.mensagem || ''));
+// Já mandou a foto: pedir de novo com exemplo seria mandar a pessoa refazer o
+// que ela acabou de fazer.
+t('  e o exemplo NÃO vem de novo', !r2.comExemplo, String(r2.comExemplo));
 
 r2 = recepcao.avaliar(CLI4, 'rsd32', null);
 t('o usuário fecha o fluxo', r2.acao === 'pedir', r2.acao);
