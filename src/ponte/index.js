@@ -1329,36 +1329,73 @@ function operadorEmTeste(from) {
 }
 
 /**
- * O atendimento automático está no ar?
- *
- * `dados.botLigado` (comando #bot) VENCE a variável de ambiente. Enquanto
- * ninguém tiver usado o comando, ele é undefined e vale o BOT_AUTOREPLY — sem
- * isso, um deploy novo desfaria silenciosamente um "#bot off" dado às 22h.
- */
-/**
  * Modo em vigor: 'copiloto' (tudo espera #ok) ou 'autopiloto' (sai sozinho).
  *
- * `dados.modo` (comando #auto) VENCE a variável de ambiente, pela mesma razão
- * do #atender: mudar isso no painel exige deploy, e a decisão de parar de
- * aprovar um a um costuma ser tomada no meio de um atendimento.
+ * A escolha do operador VENCE a variável de ambiente, e isso continua valendo:
+ * mudar o PONTE_MODO no painel exige deploy, e a decisão de parar de aprovar um
+ * a um costuma ser tomada no meio de um atendimento.
+ *
+ * O que mudou é ONDE ela mora — ver o comentário dentro da função.
  */
 function modoAtual() {
-  // Uma fonte so, compartilhada com o #admin.
+  // Uma fonte so -- e agora de verdade.
   //
-  // O #auto gravava em `dados.modo` e o painel leria outra coisa -- os dois
-  // mostrariam estados diferentes da MESMA chave, que e o tipo de divergencia
-  // que faz o operador desligar algo achando que desligou outra.
+  // Isto dizia "uma fonte so" e nao era: lia `dados.modo` PRIMEIRO e so caia no
+  // painel quando ele estava vazio. Como o #auto grava ali, bastava ter usado o
+  // #auto uma vez para o interruptor do painel virar decoracao pelo resto da
+  // vida: o simbolo mudava, o console dizia "aprovacao = false", e cada envio
+  // continuava esperando o #ok. Nao ha erro para investigar -- o painel diz uma
+  // coisa e o bot faz outra, que e o pior desfecho possivel num interruptor de
+  // risco alto.
   //
-  // `dados.modo` continua sendo lido para nao perder a escolha de quem ja usou
-  // o #auto antes desta versao.
-  if (dados.modo === 'autopiloto' || dados.modo === 'copiloto') return dados.modo;
+  // A escolha de quem usou o #auto nao se perde: ela e MOVIDA para a chave do
+  // painel na primeira leitura, e o `dados.modo` some. Dai em diante existe um
+  // lugar so, e os dois comandos escrevem nele.
+  //
+  // A migracao roda uma vez por instalacao: `definir` ja persiste, entao no
+  // proximo boot `dados.modo` nao existe mais e este bloco nem e alcancado.
+  if (dados.modo === 'autopiloto' || dados.modo === 'copiloto') {
+    const eraCopiloto = dados.modo === 'copiloto';
+    delete dados.modo;
+    const chaves = require('../chaves');
+    // Quem ja mexeu NO PAINEL vence o campo velho, e nao o contrario.
+    //
+    // O campo velho e justamente o que estava impedindo a escolha do painel de
+    // valer. Migrar por cima dela desfaria, num deploy, exatamente a decisao que
+    // motivou este conserto -- o operador desligou, viu que nao adiantou, e o
+    // conserto chegaria religando. Aqui o campo velho so e aproveitado quando
+    // ninguem tocou no interruptor: dai ele e a unica escolha que existe.
+    if (chaves.foiMexida('aprovacao')) persistAgora();
+    else chaves.definir('aprovacao', eraCopiloto);
+    console.log(
+      `[ponte] modo saiu do campo antigo (era ${eraCopiloto ? 'copiloto' : 'autopiloto'});` +
+        ` agora vale o painel: ${chaves.ligada('aprovacao') ? 'copiloto' : 'autopiloto'}`,
+    );
+  }
   return require('../chaves').ligada('aprovacao') ? 'copiloto' : 'autopiloto';
 }
 
+/**
+ * O atendimento automático está no ar?
+ *
+ * Mesma regra do modoAtual: a escolha do operador vence o BOT_AUTOREPLY, senão
+ * um deploy novo desfaria silenciosamente um "#atender off" dado às 22h.
+ */
 function atendimentoLigado() {
-  // `dados.botLigado` primeiro, pelo mesmo motivo do modoAtual: nao perder a
-  // escolha de quem ja usou o #atender antes do painel existir.
-  if (dados.botLigado === true || dados.botLigado === false) return dados.botLigado;
+  // Mesma migracao, mesmo defeito: `dados.botLigado` (#atender) vencia o painel
+  // para sempre, e quem tivesse usado o #atender uma vez nao conseguia mais
+  // mudar isto pelo #admin 1.
+  if (dados.botLigado === true || dados.botLigado === false) {
+    const eraLigado = dados.botLigado;
+    delete dados.botLigado;
+    const chaves = require('../chaves');
+    if (chaves.foiMexida('atendimento')) persistAgora();
+    else chaves.definir('atendimento', eraLigado);
+    console.log(
+      `[ponte] atendimento saiu do campo antigo (era ${eraLigado});` +
+        ` agora vale o painel: ${chaves.ligada('atendimento')}`,
+    );
+  }
   return require('../chaves').ligada('atendimento');
 }
 

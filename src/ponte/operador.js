@@ -312,9 +312,13 @@ async function executar(texto, de = '') {
   if (cmd === 'auto') {
     const arg = (id || '').toLowerCase();
 
+    // Grava NA CHAVE DO PAINEL, e não num campo só deste comando.
+    //
+    // Eram dois lugares para o mesmo estado, e o daqui vencia: quem usasse o
+    // #auto uma vez deixava o #admin 5 decorativo para sempre. `definir` já
+    // persiste sozinho, então não tem persistAgora aqui.
     if (/^(on|liga|ligar|sim)$/.test(arg)) {
-      dados.modo = 'autopiloto';
-      persistAgora();
+      require('../chaves').definir('aprovacao', false);
       return (
         '⚡ *Autopiloto LIGADO.*\n\n' +
         'O envio sai sozinho assim que o cliente manda a foto e o usuário. ' +
@@ -324,8 +328,7 @@ async function executar(texto, de = '') {
     }
 
     if (/^(off|desliga|desligar|nao|não)$/.test(arg)) {
-      dados.modo = 'copiloto';
-      persistAgora();
+      require('../chaves').definir('aprovacao', true);
       return (
         '🎛️ *Copiloto LIGADO.*\n\n' +
         'Todo envio volta a esperar seu *#ok* antes de sair.\n\n' +
@@ -355,9 +358,9 @@ async function executar(texto, de = '') {
   if (cmd === 'atender') {
     const arg = (id || '').toLowerCase();
 
+    // Na chave do painel, pelo mesmo motivo do #auto logo acima.
     if (/^(on|liga|ligar|sim)$/.test(arg)) {
-      dados.botLigado = true;
-      persistAgora();
+      require('../chaves').definir('atendimento', true);
       return (
         '✅ *Atendimento LIGADO.*\n\n' +
         'Quem mandar mensagem recebe o menu e é atendido na hora.\n\n' +
@@ -366,8 +369,7 @@ async function executar(texto, de = '') {
     }
 
     if (/^(off|desliga|desligar|nao|não)$/.test(arg)) {
-      dados.botLigado = false;
-      persistAgora();
+      require('../chaves').definir('atendimento', false);
       return (
         '🔕 *Atendimento DESLIGADO.*\n\n' +
         'As mensagens continuam chegando, mas ninguém é respondido sozinho — ' +
@@ -376,13 +378,14 @@ async function executar(texto, de = '') {
       );
     }
 
-    // Sem argumento: só informa. `botLigado` só existe depois de alguém ter
-    // usado o comando; antes disso vale a variável de ambiente.
-    const porComando = dados.botLigado === true || dados.botLigado === false;
-    const ligado = porComando ? dados.botLigado : require('../config').autoReply;
+    // Sem argumento: só informa — lendo de QUEM DECIDE, e não de um campo
+    // paralelo. Ler `dados.botLigado` aqui era o mesmo defeito visto de outro
+    // ângulo: esta linha podia dizer "LIGADO" com o bot calado.
+    const mexida = require('../chaves').foiMexida('atendimento');
+    const ligado = ponte.atendimentoLigado();
     return (
       `${ligado ? '✅ Atendimento LIGADO' : '🔕 Atendimento DESLIGADO'}\n` +
-      `_Definido ${porComando ? 'por *#atender*' : 'pela configuração do serviço'}._\n\n` +
+      `_Definido ${mexida ? 'por você, aqui ou no *#admin*' : 'pela configuração do serviço'}._\n\n` +
       `Use *#atender on* ou *#atender off* para mudar agora, sem deploy.`
     );
   }

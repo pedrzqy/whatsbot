@@ -881,7 +881,10 @@ const OP = '5541999999999';
   // Precisa mudar NA HORA, sem deploy: é o que serve quando o bot começa a
   // responder errado com cliente na linha às 22h de sábado.
   bloco("#atender liga e desliga o atendimento");
-  const estadoAnterior = estadoPonte.dados.botLigado;
+  const chavesMigra = require('./src/chaves');
+  const estadoAnterior = chavesMigra.foiMexida('atendimento')
+    ? chavesMigra.ligada('atendimento')
+    : null;
 
   await operador.executar('#atender on', OP);
   t('#atender on liga', ponteMod.atendimentoLigado() === true);
@@ -900,10 +903,73 @@ const OP = '5541999999999';
   t('e diz quem definiu',
     /Definido por/i.test(semArg) && semArg.includes('#atender'), semArg.split('\n')[1]);
 
-  // Sem comando nenhum, vale a env — undefined não pode virar "desligado".
-  delete estadoPonte.dados.botLigado;
+  // Sem comando nenhum, vale a env — "nunca mexeram nisso" não pode virar
+  // "desligado". Limpar é apagar a chave do painel, que agora é onde o
+  // #atender grava.
+  chavesMigra.definir('atendimento', null);
   t('sem comando, vale a configuração', ponteMod.atendimentoLigado() === true);
-  estadoPonte.dados.botLigado = estadoAnterior;
+
+  // ── O INTERRUPTOR DO PAINEL PRECISA MANDAR ────────────────
+  //
+  // O relato: "o 'pedir minha aprovação' está offline, e ainda sim pede".
+  //
+  // Eram dois lugares guardando o mesmo estado. O #auto gravava em
+  // `dados.modo`, o #admin gravava na chave do painel, e quem LIA olhava o
+  // `dados.modo` primeiro — então bastava usar o #auto uma vez para o
+  // interruptor do painel virar decoração pelo resto da vida. Ele mudava de
+  // símbolo, o log dizia "aprovacao = false", e cada envio continuava
+  // esperando o #ok. Não havia erro nenhum para investigar.
+  //
+  // O mesmo valia para o #atender contra o #admin 1.
+  bloco('o painel manda mesmo (o #auto e o #admin são o mesmo interruptor)');
+
+  await operador.executar('#auto off', OP);
+  t('#auto off deixa em copiloto', ponteMod.modoAtual() === 'copiloto', ponteMod.modoAtual());
+  chavesMigra.definir('aprovacao', false);
+  t('  e o painel consegue tirar de copiloto', ponteMod.modoAtual() === 'autopiloto',
+    ponteMod.modoAtual());
+  chavesMigra.definir('aprovacao', true);
+  t('  e consegue devolver', ponteMod.modoAtual() === 'copiloto', ponteMod.modoAtual());
+
+  // O caminho de volta: o #auto tem que enxergar o que o painel fez, senão os
+  // dois voltam a divergir por outro lado.
+  chavesMigra.definir('aprovacao', false);
+  const olhando = await operador.executar('#auto', OP);
+  t('  e o #auto mostra o que o painel decidiu', /Autopiloto/i.test(olhando),
+    olhando.split('\n')[0]);
+
+  // A escolha de quem usou o #auto ANTES desta versão não pode sumir: ela é
+  // movida para o painel na primeira leitura — mas SÓ quando ninguém tocou no
+  // interruptor. Se o operador já mexeu, é a escolha dele que vale: o campo
+  // antigo é justamente o que estava impedindo ela de valer, e migrar por cima
+  // faria o conserto chegar religando o que ele desligou.
+  chavesMigra.definir('aprovacao', false);
+  estadoPonte.dados.modo = 'copiloto';
+  t('o campo antigo não desfaz o que o painel diz', ponteMod.modoAtual() === 'autopiloto',
+    ponteMod.modoAtual());
+  t('  e mesmo assim ele some', estadoPonte.dados.modo === undefined,
+    String(estadoPonte.dados.modo));
+
+  chavesMigra.definir('aprovacao', null);
+  estadoPonte.dados.modo = 'copiloto';
+  t('sem ninguém ter mexido, a escolha antiga migra', ponteMod.modoAtual() === 'copiloto',
+    ponteMod.modoAtual());
+  t('  e o campo velho some', estadoPonte.dados.modo === undefined,
+    String(estadoPonte.dados.modo));
+  t('  e daí em diante o painel manda',
+    (chavesMigra.definir('aprovacao', false), ponteMod.modoAtual() === 'autopiloto'),
+    ponteMod.modoAtual());
+
+  // Mesma história do outro lado.
+  estadoPonte.dados.botLigado = false;
+  t('a escolha antiga do #atender migra também', ponteMod.atendimentoLigado() === false);
+  t('  e o campo velho some', estadoPonte.dados.botLigado === undefined,
+    String(estadoPonte.dados.botLigado));
+  chavesMigra.definir('atendimento', true);
+  t('  e o painel consegue religar', ponteMod.atendimentoLigado() === true);
+
+  chavesMigra.definir('aprovacao', null);
+  chavesMigra.definir('atendimento', estadoAnterior);
 
   bloco('#teste despausa o número do operador');
   const storeMod = require('./src/store');
