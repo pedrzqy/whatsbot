@@ -92,6 +92,66 @@ const CLI = '5541999998888';
   t('longo demais não vira número', vendas.paraWhatsApp('123456789012345') === null);
   t('estrangeiro não ganha 55', vendas.paraWhatsApp('351912345678') === null);
 
+  // ── O Pix na hora ──────────────────────────────────────────
+  //
+  // Relato do dono: "o sistema de mandar qr-code precisa ser imediato, não tem
+  // sentido ser 45 min depois".
+  //
+  // Quem fechava a compra PELA CONVERSA sempre recebeu o Pix na mesma resposta.
+  // Quem fazia o pedido no site caía na varredura de hora em hora, que só
+  // começa a olhar o pedido com DUAS HORAS de idade — ela foi escrita como
+  // cutucada em quem desistiu, e virou sem querer o único caminho de quem
+  // acabou de comprar.
+  const PROIBIDO_AQUI = require('./src/ponte/politica').vocabularioProibido();
+  const PIX_FALSO = '00020126BR-PIX-COPIA-E-COLA-1234';
+  const pendente = (over = {}) =>
+    pedido({
+      status: 'pending',
+      items: [{ product_name: 'Hollow Knight', quantity: 1, product_key: null }],
+      payment: { pix_qr_code: PIX_FALSO },
+      ...over,
+    });
+
+  bloco('pedido em aberto recebe o Pix na hora');
+
+  enviadas = [];
+  pedidoFalso = pendente({ order_number: 'ped-pix' });
+  await vendas.onEvento({ event: 'order.created', data: { order_number: 'ped-pix' } });
+
+  const aoCli = enviadas.filter((e) => e.para === CLI);
+  t('o cliente recebe na hora', aoCli.length === 2, `${aoCli.length} mensagem(ns)`);
+  t('  a primeira diz qual é o pedido', /ped-pix/i.test(aoCli[0]?.texto || ''),
+    aoCli[0]?.texto.split('\n')[1]);
+  // SOZINHO na segunda, sem texto em volta: é assim que ele é copiado de uma
+  // vez no celular. Texto colado junto faz a pessoa selecionar na mão e errar.
+  t('  e o Pix vai sozinho na segunda', aoCli[1]?.texto === PIX_FALSO, aoCli[1]?.texto);
+  t('  sem vocabulário proibido',
+    !PROIBIDO_AQUI.test(aoCli.map((e) => e.texto).join('\n')),
+    (aoCli.map((e) => e.texto).join('\n').match(PROIBIDO_AQUI) || ['limpo'])[0]);
+
+  bloco('o mesmo pedido não é cobrado duas vezes');
+  enviadas = [];
+  await vendas.onEvento({ event: 'order.created', data: { order_number: 'ped-pix' } });
+  t('nada é reenviado', enviadas.length === 0, JSON.stringify(enviadas.map((e) => e.para)));
+
+  // Os `case` de "pedido criado" são um palpite sobre como a loja nomeia o
+  // evento. Se ela usar outro nome, o defeito voltaria por uma porta diferente
+  // — e o cliente esperaria as duas horas de novo, sem nada no log parecendo
+  // errado.
+  bloco('nome de evento desconhecido não custa a venda');
+  enviadas = [];
+  pedidoFalso = pendente({ order_number: 'ped-pix2' });
+  await vendas.onEvento({ event: 'order.qualquer_coisa_nova', data: { order_number: 'ped-pix2' } });
+  t('o Pix sai mesmo assim', enviadas.filter((e) => e.para === CLI).length === 2,
+    `${enviadas.filter((e) => e.para === CLI).length} mensagem(ns)`);
+
+  bloco('quem já pagou não recebe cobrança');
+  enviadas = [];
+  pedidoFalso = pedido({ order_number: 'ped-pago', payment: { pix_qr_code: PIX_FALSO } });
+  await vendas.onEvento({ event: 'order.qualquer_coisa_nova', data: { order_number: 'ped-pago' } });
+  t('nada de Pix para pedido pago', !enviadas.some((e) => e.texto === PIX_FALSO),
+    JSON.stringify(enviadas.map((e) => e.texto?.slice(0, 20))));
+
   // ── order.paid ─────────────────────────────────────────────
   bloco('venda paga avisa operador e cliente');
 
@@ -106,6 +166,13 @@ const CLI = '5541999998888';
   t('com o telefone do cliente', aoOperador?.texto.includes('99999-8888'), aoOperador?.texto.split('\n')[3]);
   t('e o valor', aoOperador?.texto.includes('49.90') || aoOperador?.texto.includes('49,90'));
   t('e diz que a chave saiu', /chave em estoque/i.test(aoOperador?.texto || ''));
+  // O aviso de venda é a mensagem que o dono mais lê, e ela escapou da regra
+  // por meses: dizia "entrega automática", e "automática" é palavra barrada.
+  // A regra vale para o que chega NELE também — sai pelo mesmo número que fala
+  // com o cliente, e basta um encaminhamento para virar problema.
+  t('e sem vocabulário proibido',
+    !require('./src/ponte/politica').vocabularioProibido().test(aoOperador?.texto || ''),
+    (aoOperador?.texto.match(require('./src/ponte/politica').vocabularioProibido()) || ['limpo'])[0]);
   t('o cliente recebe confirmação', Boolean(aoCliente));
   t('pelo primeiro nome', aoCliente?.texto.startsWith('Maria'), aoCliente?.texto.split('\n')[0]);
   // Chave em estoque: a entrega chega em seguida pelo delivered, e um "estou

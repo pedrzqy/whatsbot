@@ -218,6 +218,52 @@ async function avisarOperador(texto, opts = {}) {
   }
 }
 
+// ── Pedido em aberto: o Pix vai AGORA ────────────────────────
+
+/**
+ * Manda o Pix no instante em que o pedido aparece, e não horas depois.
+ *
+ * O que existia era só a varredura de hora em hora (lembrarPixPendente), e ela
+ * começa a olhar o pedido com DUAS HORAS de idade. Isso foi desenhado como
+ * cutucada em quem desistiu — e virou, sem querer, o único caminho para quem
+ * fez o pedido no site: a pessoa gerava o Pix, fechava a página, e a primeira
+ * mensagem da loja chegava quando a vontade de comprar já tinha passado.
+ *
+ * Quem fecha a compra PELA CONVERSA nunca teve esse problema: ali o Pix sai na
+ * mesma resposta. A diferença não era decisão de ninguém, era um evento que não
+ * tinha tratamento.
+ *
+ * Em DUAS mensagens, e isso não é capricho: o Pix vai sozinho na segunda,
+ * sem texto em volta, porque é assim que ele é copiado de uma vez no celular.
+ * Texto colado junto faz a pessoa selecionar na mão e errar o código.
+ */
+async function mandarPixNaHora(pedido) {
+  if (pedido.pago) return;
+  const pix = pedido.pix;
+  if (!pix && !pedido.link_pagamento) return;
+
+  const numero = paraWhatsApp(pedido.telefone);
+  if (!numero) return; // sem telefone confiável não há a quem mandar
+
+  // Marca antes de mandar, como no resto do arquivo: falha de envio não pode
+  // virar duas cobranças. Uma perdida é melhor que uma repetida — e a varredura
+  // de duas horas ainda passa por aqui depois.
+  if (!marcar(pedido.codigo, 'pixNaHora')) return;
+
+  const nome = primeiroNome(pedido.nome);
+  await sender.send(
+    numero,
+    `${nome ? `Oi, ${nome}! ` : 'Oi! '}Recebi seu pedido 😊\n\n` +
+      `*${pedido.codigo}*${pedido.total ? ` — ${pedido.total}` : ''}\n\n` +
+      (pix
+        ? 'Te mando o Pix copia e cola na mensagem seguinte. Assim que o pagamento cair, eu te aviso por aqui.'
+        : `Para pagar: ${pedido.link_pagamento}\n\nAssim que cair, eu te aviso por aqui.`),
+  );
+
+  if (pix) await sender.send(numero, pix);
+  console.log(`[vendas] Pix mandado na hora — pedido ${pedido.codigo}`);
+}
+
 // ── order.paid ───────────────────────────────────────────────
 
 /**
@@ -252,7 +298,11 @@ async function notificarVenda(pedido) {
   } else if (semChave.length) {
     linhas.push('⚠️ *Sem chave em estoque* — a entrega é na mão.');
   } else if (comChave.length) {
-    linhas.push('✅ Chave em estoque — entrega automática.');
+    // "entrega automática" era o que estava escrito aqui, e "automática" é
+    // palavra barrada — sai pelo mesmo número comercial que fala com o cliente,
+    // e a regra vale também para o que chega em VOCÊ. O aviso não perdeu nada:
+    // o que interessa nesta linha é se sobra trabalho, e é isso que ela diz.
+    linhas.push('✅ Chave em estoque — não precisa preparar nada.');
   }
 
   linhas.push('', `_Pedido ${pedido.codigo}_`);
@@ -530,6 +580,14 @@ async function onEvento(evento) {
   persist();
 
   switch (nome) {
+    // Pedido nasceu esperando pagamento. Os três nomes porque a Nerix pode
+    // chamar de um jeito ou de outro, e descobrir qual é custaria uma venda.
+    case 'order.created':
+    case 'order.pending':
+    case 'order.awaiting_payment':
+      await mandarPixNaHora(pedido);
+      break;
+
     case 'order.paid':
     case 'order.approved':
       await notificarVenda(pedido);
@@ -555,6 +613,18 @@ async function onEvento(evento) {
     default:
       // Evento novo da Nerix não é erro: é aviso de que existe algo a tratar.
       console.log(`[vendas] evento sem tratamento: ${nome}`);
+
+      // E o nome desconhecido não pode custar a venda.
+      //
+      // Os três `case` acima são um palpite sobre como a loja chama "pedido
+      // criado". Se ela chamar de outra coisa, o pedido cairia aqui e a pessoa
+      // esperaria as duas horas da varredura de novo — o defeito consertado
+      // voltando por um nome diferente.
+      //
+      // Aqui a pergunta não é o nome do evento, é o estado do pedido: em
+      // aberto e com Pix, ele vai. A trava de uma vez só cuida do resto, e um
+      // evento de pedido já pago sai na primeira linha do mandarPixNaHora.
+      await mandarPixNaHora(pedido);
   }
 }
 
