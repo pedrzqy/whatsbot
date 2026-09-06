@@ -51,6 +51,11 @@ const sender = require('./src/sender');
 const store = require('./src/store');
 const ai = require('./src/ai');
 const chaves = require('./src/chaves');
+const nerix = require('./src/nerix');
+
+// A loja, dublada: o nome dela entra na saudação, e sem isto o teste sairia
+// para a rede de verdade num arquivo que promete rodar offline.
+nerix.getStore = async () => ({ name: 'Phaze Games' });
 
 // Um pixel PNG. É o que a Evolution devolveria como binário da foto.
 const PIXEL =
@@ -80,9 +85,18 @@ const sendReal = sender.send;
 // ultima mensagem de cada bloco deixaria o resto sem cobertura.
 const enviadas = [];
 const tudoQueSaiu = [];
+
+// Gancho para simular o mundo mudando NO MEIO de um envio.
+//
+// Na produção a fila é humanizada de propósito (espera, "digitando...",
+// espaçamento), então entre uma mensagem e a seguinte do mesmo bloco passam uns
+// 30 segundos -- tempo de sobra para outra mensagem do mesmo cliente ser
+// atendida em paralelo e mudar o estado dele. Aqui isso vira uma linha.
+let aoEnviar = null;
 sender.send = async (para, texto) => {
   enviadas.push({ para, texto: String(texto) });
   tudoQueSaiu.push({ para, texto: String(texto) });
+  if (aoEnviar) aoEnviar(para, String(texto));
 };
 
 // O que chegou ao modelo. `ai.reply` é o fim da linha do que este arquivo mede:
@@ -127,6 +141,45 @@ function webhookDe(numero, message, pushName = 'Cliente') {
 
   const CLI = '5541900007777';
   const jaSaudado = { greetedAt: Date.now(), lastSeen: Date.now(), paused: false };
+
+  // ── O MENU E A PAUSA ───────────────────────────────────────
+  //
+  // O relato veio com print: o cliente recebeu as boas-vindas, logo depois
+  // "Nosso suporte entrou no chat", e logo depois o menu de oito opções.
+  // Respondeu "5" e ninguém respondeu nunca mais.
+  //
+  // Não é um caminho errado, são DOIS ao mesmo tempo. Entre mandar a saudação e
+  // mandar o menu passam uns 30 segundos na fila humanizada, e nesse buraco a
+  // segunda mensagem do cliente foi atendida em paralelo, transferiu para o
+  // atendimento humano e gravou a pausa. O menu, já decidido, saiu por cima.
+  //
+  // É o pior tipo de mensagem que este bot pode mandar: um convite a responder
+  // que ele vai ignorar. O cliente digita a opção, cai na regra do silêncio
+  // (que existe porque tem gente atendendo) e conclui que quebrou.
+  bloco('o menu não sai para quem entrou em atendimento humano no meio');
+
+  const NOVO = '5541900006666';
+  aoEnviar = () => {
+    // O atendimento humano assume enquanto a saudação está saindo.
+    store.saveContact(NOVO, { paused: true });
+    aoEnviar = null;
+  };
+  await entregar(webhookDe(NOVO, { conversation: 'oi' }, 'Fulano'));
+  aoEnviar = null;
+
+  const paraONovo = enviadas.filter((e) => e.para === NOVO).map((e) => e.texto);
+  t('a saudação sai normalmente', paraONovo.length === 1, `${paraONovo.length} mensagem(ns)`);
+  t('  e o menu NÃO vem atrás', !paraONovo.some((x) => /\*1\.\* /.test(x)),
+    paraONovo.join(' | ').slice(0, 70));
+
+  // E o contrário continua valendo: sem pausa, o menu vem junto. Sem esta
+  // metade, a trava acima passaria mesmo se tivesse quebrado o menu inteiro.
+  const NOVO2 = '5541900005555';
+  await entregar(webhookDe(NOVO2, { conversation: 'oi' }, 'Beltrano'));
+  const paraONovo2 = enviadas.filter((e) => e.para === NOVO2).map((e) => e.texto);
+  t('sem pausa, o menu vem junto da saudação',
+    paraONovo2.some((x) => /\*1\.\* /.test(x)),
+    `${paraONovo2.length} mensagem(ns)`);
 
   // ── FOTO ───────────────────────────────────────────────────
   //

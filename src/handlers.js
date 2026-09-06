@@ -74,6 +74,33 @@ function extrairPedido(texto) {
  * senão quem recebe a lista perde o contexto que quem recebe o texto tem.
  */
 async function enviarMenu(from, nodeId, antes = '') {
+  // Relê a pausa AQUI, no instante de mandar, e não confia no que foi lido lá
+  // atrás.
+  //
+  // O relato veio com print: o cliente recebeu as boas-vindas, logo depois
+  // "Nosso suporte entrou no chat", e logo depois o menu de oito opções. Ele
+  // respondeu "5" e ninguém respondeu nunca mais.
+  //
+  // Não é um caminho errado, são DOIS caminhos ao mesmo tempo. A fila de envio
+  // é humanizada de propósito (espera, "digitando...", espaçamento), então
+  // entre mandar a saudação e mandar o menu passam uns 30 segundos. Nesse
+  // buraco a segunda mensagem do cliente foi atendida em paralelo, a IA
+  // transferiu para o atendimento humano e gravou a pausa — e o menu, que já
+  // tinha sido decidido, saiu por cima.
+  //
+  // O resultado é o pior tipo de mensagem que este bot pode mandar: um convite
+  // a responder que ele vai ignorar. O cliente digita a opção, cai na regra do
+  // silêncio (que existe porque tem gente atendendo) e conclui que quebrou.
+  //
+  // Aqui a decisão de mandar e o ato de mandar deixam de estar separados no
+  // tempo. Vale para todos os caminhos que mandam menu, que é o que a corrida
+  // pega — os que chamam depois de tirar da pausa não são afetados: eles
+  // gravam `paused: false` antes.
+  if (store.getContact(from)?.paused) {
+    console.log(`[menu] ${from} entrou em atendimento humano no meio — menu nao enviado`);
+    return;
+  }
+
   const corpo = menu.render(nodeId);
   const texto = antes ? `${antes}\n\n${corpo}` : corpo;
   await sender.send(from, texto, { list: menu.lista(nodeId, antes) });
