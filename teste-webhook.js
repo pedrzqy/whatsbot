@@ -14,7 +14,7 @@
  * ignorada.
  *
  * Faz uma requisição HTTP de verdade contra o app do Express. A Evolution e a
- * Anthropic são dublês; nada sai para a rede.
+ * IA são dublês; nada sai para a rede.
  */
 
 const os = require('os');
@@ -27,7 +27,7 @@ process.env.PONTE_DATA_DIR = DATA_TESTE;
 
 // A suíte roda offline. Vazio e não `delete`: o config chama dotenv, que relê o
 // .env e repõe qualquer chave ausente.
-process.env.ANTHROPIC_API_KEY = '';
+process.env.DEEPSEEK_API_KEY = '';
 for (const k of ['GEMINI_API_KEY', 'GROQ_FALLBACK_API_KEY', 'TRANSCRICAO_API_KEY']) {
   process.env[k] = '';
 }
@@ -86,7 +86,8 @@ sender.send = async (para, texto) => {
 };
 
 // O que chegou ao modelo. `ai.reply` é o fim da linha do que este arquivo mede:
-// se a foto chegou até aqui, chegou ao modelo (isso o teste-claude cobre).
+// se a foto chegou até aqui, chegou ao modelo (o que o modelo faz com ela é o
+// teste-deepseek que cobre).
 let vistoPelaIA = null;
 ai.reply = async (from, texto, pushName, extra) => {
   vistoPelaIA = { from, texto, extra };
@@ -130,8 +131,8 @@ function webhookDe(numero, message, pushName = 'Cliente') {
   // ── FOTO ───────────────────────────────────────────────────
   //
   // A imagem só é baixada quando alguém vai USÁ-LA: a ponte manda o print ao
-  // outro lado, e a IA enxerga. Baixar em toda foto que chega no atendimento
-  // normal seria pagar o download à toa.
+  // outro lado. Baixar em toda foto que chega no atendimento normal seria pagar
+  // o download à toa.
   bloco('foto do cliente');
 
   chaves.definir('ia', true);
@@ -147,10 +148,20 @@ function webhookDe(numero, message, pushName = 'Cliente') {
   // A legenda é o texto do cliente: sem ela, a foto chegaria sem pergunta.
   t('  a legenda vira a mensagem', /olha o erro/.test(vistoPelaIA?.texto || ''), vistoPelaIA?.texto);
 
-  // Foto SEM legenda ainda é mensagem — e agora o modelo pode olhar.
+  // Foto SEM legenda, com um cérebro que não enxerga imagem.
+  //
+  // Mandá-la ao modelo gastaria uma chamada para receber um chute educado sobre
+  // uma imagem que ninguém viu. O que vale é pedir o CÓDIGO do erro, que o
+  // telas.js resolve sozinho, sem modelo nenhum.
+  //
+  // Com LEGENDA é outro caso e continua indo para a IA (o teste logo acima): a
+  // pessoa escreveu uma pergunta, e ela merece resposta. Quando o modelo voltar
+  // a enxergar, esta trava se desliga sozinha (ai.veImagem).
   await entregar(webhookDe(CLI, { imageMessage: {} }));
-  t('foto sem legenda também chega', Boolean(vistoPelaIA?.extra?.imagemBase64),
-    vistoPelaIA ? 'chegou' : 'sumiu');
+  const soFoto = enviadas.filter((e) => e.para === CLI).map((e) => e.texto).join('\n');
+  t('foto sem legenda não gasta chamada de modelo', vistoPelaIA === null,
+    vistoPelaIA ? 'foi à IA' : 'não foi');
+  t('  e o bot pede o código do erro', /c[oó]digo do erro/i.test(soFoto), soFoto || '(nada)');
 
   // Com a conversa livre DESLIGADA, não paga o download para a IA.
   chaves.definir('ia', false);

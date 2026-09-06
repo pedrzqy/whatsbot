@@ -3,9 +3,10 @@
 /**
  * O cerebro do atendimento: monta o prompt, guarda o historico e chama o modelo.
  *
- * Quem fala com a API e o claude.js; aqui mora tudo que independe de QUAL
+ * Quem fala com a API e o deepseek.js; aqui mora tudo que independe de QUAL
  * modelo responde -- persona, historico por contato, laco de ferramentas, prazo
- * e teto por cliente.
+ * e teto por cliente. Foi essa separacao que fez a troca de cerebro caber em
+ * um commit.
  *
  * Uma camada so. Havia uma cascata de seis provedores compativeis com OpenAI
  * embaixo, e ela saiu: ver o comentario do chat().
@@ -18,16 +19,36 @@ const welcome = require('./welcome');
 const tools = require('./tools');
 const knowledge = require('./knowledge');
 const store = require('./store');
-const claude = require('./claude');
 const deepseek = require('./deepseek');
 const telas = require('./telas');
+
+/**
+ * Prazo do trabalho que ninguem esta esperando na tela (ver chat()).
+ *
+ * Um minuto, e nao os 25 segundos do atendimento: o analista le um mes de
+ * conversa de uma vez, e desistir no meio de uma entrada dessas joga fora o
+ * token que ja foi cobrado.
+ */
+const PRAZO_DE_BASTIDOR_MS = Number(process.env.LLM_DEADLINE_BASTIDOR_MS) || 60_000;
 
 // Uma camada so, e o menu embaixo. A cascata de seis provedores foi removida:
 // ver o comentario do chat().
 console.log(
   '[ai] cerebro:',
-  claude.disponivel() ? `Claude(${claude.MODELO})` : 'NENHUM (cai direto no menu)',
+  deepseek.temChave() ? `DeepSeek(${deepseek.MODELO})` : 'NENHUM (cai direto no menu)',
 );
+
+/**
+ * O cerebro de hoje enxerga foto?
+ *
+ * Existe porque quem precisa da resposta e o handlers, e a pergunta nao e sobre
+ * o handlers: e sobre qual modelo esta ligado. Deixar essa decisao la em cima
+ * significaria que trocar de modelo exigiria lembrar de mexer no handlers -- e
+ * a regra que so vale enquanto alguem lembra dela e a que ja falhou aqui.
+ */
+function veImagem() {
+  return Boolean(deepseek.VE_IMAGEM);
+}
 
 // ─── Histórico de conversa (por contato), persistido em arquivo ──────
 // Fica em data/histories.json (mesma pasta do store) → com volume montado em
@@ -273,9 +294,20 @@ async function buildSystemPrompt() {
     // não existe, e isso volta como reclamação.
     telas.paraOPrompt() + `\n\n` +
 
-    `FOTO: o cliente pode mandar print de tela (erro de ativação, tela de login, comprovante). Você ENXERGA a ` +
-    `imagem, leia o que está escrito nela e use, sem pedir para ele digitar o que já dá para ver. Se a foto ` +
-    `estiver ilegível ou não tiver a ver com a conversa, diga e peça outra. Nunca invente o que não conseguiu ler.\n\n` +
+    // FOTO: a instrução muda com o modelo, e ela PRECISA mudar junto.
+    //
+    // Dizer "você enxerga" para um modelo que não enxerga é o pior dos dois
+    // mundos: ele responde sobre a imagem mesmo assim, com confiança, inventando
+    // o que estaria escrito nela. O cliente printou a tela de erro e recebe um
+    // diagnóstico de uma tela que ninguém leu.
+    (veImagem()
+      ? `FOTO: o cliente pode mandar print de tela (erro de ativação, tela de login, comprovante). Você ENXERGA a ` +
+        `imagem, leia o que está escrito nela e use, sem pedir para ele digitar o que já dá para ver. Se a foto ` +
+        `estiver ilegível ou não tiver a ver com a conversa, diga e peça outra. Nunca invente o que não conseguiu ler.\n\n`
+      : `FOTO: o cliente pode mandar print de tela, e você NÃO consegue ver imagem nenhuma. Nunca diga o que ` +
+        `está na foto, nunca finja ter lido, e nunca peça para ele mandar outra: o problema não é a foto dele. ` +
+        `Peça o CÓDIGO DO ERRO que aparece na tela (algo tipo 2819-0042) ou uma frase do que apareceu, e com ` +
+        `isso você resolve pelas telas conhecidas acima. Agradeça a foto antes de pedir, ela não foi à toa.\n\n`) +
 
     `ÁUDIO: mensagem de voz do cliente chega aqui já em texto. Ela pode ter erro de transcrição, se a frase não ` +
     `fizer sentido, confirme o que ele quis dizer em vez de responder ao pé da letra. Responda sempre por escrito.\n\n` +
@@ -333,15 +365,21 @@ class PrazoEsgotado extends Error {
 }
 
 /**
- * Chama o Claude. E so ele.
+ * Chama o modelo. UM modelo.
  *
- * Havia uma CASCATA de seis provedores embaixo -- Gemini, Cerebras, Groq,
- * Mistral, Cohere, OpenRouter -- como rede de seguranca. Ela foi removida
- * porque na pratica era o contrario de uma rede: cada provedor fora do ar
- * custava ate 40 SEGUNDOS de "digitando..." antes de o proximo ser tentado, e o
- * log de producao mostrava dois deles ja mortos (Gemini 503, Cerebras 402 --
- * cota vencida). Com seis, o pior caso era o cliente esperando minutos para
- * receber a mesma coisa que o menu entrega instantaneamente.
+ * Havia uma CASCATA de seis provedores aqui -- Gemini, Cerebras, Groq, Mistral,
+ * Cohere, OpenRouter -- como rede de seguranca. Ela foi removida porque na
+ * pratica era o contrario de uma rede: cada provedor fora do ar custava ate 40
+ * SEGUNDOS de "digitando..." antes de o proximo ser tentado, e o log de producao
+ * mostrava dois deles ja mortos (Gemini 503, Cerebras 402 -- cota vencida). Com
+ * seis, o pior caso era o cliente esperando minutos para receber a mesma coisa
+ * que o menu entrega instantaneamente.
+ *
+ * Depois foi o Claude sozinho. Agora e o DeepSeek sozinho -- o dono trocou, e a
+ * regra que sobreviveu as duas trocas e a mesma: UMA camada de modelo, nunca
+ * duas. Botar o provedor antigo como reserva embaixo do novo seria a cascata
+ * voltando com dois em vez de seis, e o preco dela e cobrado em segundos de
+ * espera do cliente, nao em codigo.
  *
  * A rede de verdade e o MENU: ele responde na hora, nao custa token, nao
  * alucina e funciona com tudo fora do ar. Duas camadas, nao tres.
@@ -352,43 +390,27 @@ class PrazoEsgotado extends Error {
  * cheio de novo e o total voltaria a ser minutos.
  */
 async function chat(messages, opts = {}) {
-  const limite = opts.deadline || Date.now() + config.llm.deadlineMs;
+  // `opts.barato` nao escolhe mais provedor -- so existe um. O que ele sempre
+  // significou de verdade continua valendo, e agora vale PRAZO: "ninguem esta
+  // esperando isto na tela".
+  //
+  // Os 25 segundos existem por causa de quem olha o "digitando...". Uma analise
+  // de um mes de conversa nao tem ninguem olhando, e morrer no meio por um
+  // prazo pensado para outra coisa era jogar fora o token que ja foi gasto.
+  const limite = opts.deadline
+    || Date.now() + (opts.barato ? PRAZO_DE_BASTIDOR_MS : config.llm.deadlineMs);
 
-  // ── O trabalho de bastidor vai pelo barato ────────────────
-  //
-  // `opts.barato` é uma declaração de quem chama: "ninguém está esperando isto
-  // na tela, e o texto passa por uma pessoa antes de virar qualquer coisa".
-  // Hoje são três — o analista, a tradução do que o outro lado escreve, e a
-  // escolha da linha do repertório — e juntos eles são a maior parte do token
-  // que o bot gasta fora da conversa.
-  //
-  // A conversa com o CLIENTE nunca passa por aqui, e isso não é esquecimento.
-  // A cascata de seis provedores foi removida porque cada um fora do ar somava
-  // até 40s de "digitando..." (ver o comentário logo acima). Um provedor a mais
-  // no caminho do cliente seria o mesmo erro com outro nome.
-  //
-  // A escolha é por chamada e a queda é silenciosa: sem chave, sem saldo ou com
-  // o disjuntor aberto, cai no Claude e o desfecho é o mesmo de antes.
-  if (opts.barato && deepseek.disponivel() && require('./chaves').ligada('barato')) {
-    try {
-      return await deepseek.chat(messages, { ...opts, deadline: limite });
-    } catch (err) {
-      // Não vira erro do chamador: ele pediu um trabalho, não um provedor.
-      console.warn(`[ai] DeepSeek não deu conta (${err.message}) — indo pelo Claude`);
-    }
-  }
-
-  if (!claude.disponivel()) {
-    // Sem chave, nem tenta: falhar na hora leva o cliente ao menu em
-    // milissegundos, e o menu responde. Uma tentativa que vai falhar é só
-    // espera somada ao mesmo desfecho.
-    throw new Error('ANTHROPIC_API_KEY não configurada');
+  if (!deepseek.disponivel()) {
+    // Sem chave, sem saldo ou com o disjuntor aberto, nem tenta: falhar na hora
+    // leva o cliente ao menu em milissegundos, e o menu responde. Uma tentativa
+    // que vai falhar e so espera somada ao mesmo desfecho.
+    throw new Error('a IA nao esta disponivel (chave, saldo ou disjuntor)');
   }
 
   const resta = limite - Date.now();
   if (resta < 2000) throw new PrazoEsgotado();
 
-  return claude.chat(messages, { ...opts, deadline: limite });
+  return deepseek.chat(messages, { ...opts, deadline: limite });
 }
 
 /**
@@ -399,7 +421,7 @@ async function chat(messages, opts = {}) {
 /**
  * Quantas mensagens cada contato mandou para a IA na última hora.
  *
- * Existe um teto DIÁRIO global no claude.js, mas nenhum por cliente — e o
+ * Existe um teto DIÁRIO global no deepseek.js, mas nenhum por cliente — e o
  * global só percebe o estrago depois de 400 chamadas. Uma conversa normal tem
  * uns 5 turnos; 20 numa hora já é outra coisa: cliente preso em laço, alguém
  * testando em rajada, ou uma automação do outro lado respondendo sozinha.
@@ -448,25 +470,34 @@ async function reply(from, userText, pushName, extra = {}) {
   const system = await buildSystemPrompt();
   const history = getHistory(from);
 
-  // A foto do cliente entra no turno DELE, não como um dado à parte.
+  // A foto do cliente entra no turno DELE, não como um dado à parte — mas só
+  // quando existe alguém para olhar para ela.
   //
-  // Antes a imagem só existia para a ponte: o modelo nunca via nada. O cliente
-  // printava a tela de erro do Steam, a IA respondia no escuro e transferia
-  // para o operador — um atendimento inteiro gasto num dado que estava ali.
+  // O modelo de hoje não enxerga (ver veImagem). Quem trata a foto é o
+  // handlers, que pede o CÓDIGO do erro em vez de mandar oito opções de menu
+  // para quem acabou de printar uma tela. Isto aqui é a rede embaixo daquilo:
+  // se uma foto chegar mesmo assim, o que vai para o modelo é a MARCA de que
+  // ela existe, nunca os bytes. O caminho do base64 virando texto está fechado
+  // no deepseek.js também (achatarConteudo), e as duas travas são de propósito:
+  // uma foto de celular passa de 500 KB, e mandá-la como pergunta custa mais
+  // que um mês inteiro de conversa.
   //
-  // Formato OpenAI (`image_url` com data URI) porque é o do resto do arquivo: o
-  // claude.js converte na borda dele, e a cascata entende este formato direto.
+  // Formato OpenAI (`image_url` com data URI) porque é o do resto do arquivo, e
+  // é o que a API entende direto quando o modelo enxergar de novo.
   const marca = marcaDoCliente(contact?.name || pushName);
   const img = extra.imagemBase64;
-  const conteudoDoTurno = img
-    ? [
-        { type: 'text', text: marca + userText },
-        {
-          type: 'image_url',
-          image_url: { url: `data:${img.mimetype || 'image/jpeg'};base64,${img.base64}` },
-        },
-      ]
-    : marca + userText;
+  let conteudoDoTurno = marca + userText;
+  if (img && veImagem()) {
+    conteudoDoTurno = [
+      { type: 'text', text: marca + userText },
+      {
+        type: 'image_url',
+        image_url: { url: `data:${img.mimetype || 'image/jpeg'};base64,${img.base64}` },
+      },
+    ];
+  } else if (img) {
+    conteudoDoTurno = `${marca + userText}\n[a pessoa mandou uma foto, e eu não consigo ver imagem]`;
+  }
 
   const messages = [
     { role: 'system', content: system },
@@ -574,4 +605,4 @@ async function translate(text) {
   }
 }
 
-module.exports = { chat, reply, humanizeAnswer, translate, clearHistory, buildSystemPrompt };
+module.exports = { chat, reply, humanizeAnswer, translate, clearHistory, buildSystemPrompt, veImagem };

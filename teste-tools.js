@@ -12,17 +12,15 @@
 
 // A suite inteira roda SEM REDE, e isto e o que garante.
 //
-// Sem apagar a chave aqui, uma maquina com ANTHROPIC_API_KEY definida faria os
+// Sem apagar a chave aqui, uma maquina com DEEPSEEK_API_KEY definida faria os
 // testes chamarem a API DE VERDADE -- cobrada, lenta e dependente de internet.
-// E o esforco e fixado porque CLAUDE_EFFORT ja existe no ambiente de algumas
-// maquinas: o teste passava ou falhava conforme QUEM estava rodando, que e o
-// mesmo defeito do relogio que decidia o resultado do teste-ponte.
+// O teste passaria ou falharia conforme QUEM estava rodando, que e o mesmo
+// defeito do relogio que decidia o resultado do teste-ponte.
 // Vazio, e nao `delete`. O config.js chama dotenv, que RE-LE o .env e repoe
 // qualquer chave que nao esteja em process.env -- entao apagar aqui e ser
 // sobrescrito um require depois. Definida como string vazia, a chave existe
 // (dotenv nao mexe) e e falsy (nenhum provedor nasce).
-process.env.ANTHROPIC_API_KEY = '';
-process.env.BOT_CLAUDE_ESFORCO = 'low';
+process.env.DEEPSEEK_API_KEY = '';
 
 process.env.NERIX_API_KEY = 'teste';
 process.env.PONTE_OPERADOR_NUMERO = '5541999999999';
@@ -33,12 +31,12 @@ process.env.PONTE_DATA_DIR = require('path').join(require('os').tmpdir(), 'phaze
 //
 // A cascata de seis provedores foi removida -- ela custava ate 40s por provedor
 // fora do ar, e o log de producao mostrava dois ja mortos (503 e 402). Sobrou
-// uma camada so (Claude) e o menu embaixo, entao o que se testa aqui e o PRAZO:
-// que ele desiste na hora certa em vez de deixar o cliente esperando.
+// uma camada so e o menu embaixo, entao o que se testa aqui e o PRAZO: que ele
+// desiste na hora certa em vez de deixar o cliente esperando.
 const fs = require('fs');
 fs.rmSync(process.env.PONTE_DATA_DIR, { recursive: true, force: true });
 
-process.env.ANTHROPIC_API_KEY = 'chave-de-mentira';
+process.env.DEEPSEEK_API_KEY = 'chave-de-mentira';
 const chamadasAoModelo = [];
 const fetchReal = globalThis.fetch;
 globalThis.fetch = async (url, init) => {
@@ -872,8 +870,8 @@ nerix.checkPayment = async (codigo) => {
   t('  o erro sobe para o handlers cair no menu', Boolean(erroFalha), erroFalha?.name);
 
   // Sem chave nenhuma: falha na hora, sem nem abrir conexao.
-  const chaveAntes = process.env.ANTHROPIC_API_KEY;
-  process.env.ANTHROPIC_API_KEY = '';
+  const chaveAntes = process.env.DEEPSEEK_API_KEY;
+  process.env.DEEPSEEK_API_KEY = '';
   chamadasAoModelo.length = 0;
   let erroSemChave = null;
   try {
@@ -883,7 +881,7 @@ nerix.checkPayment = async (codigo) => {
   }
   t('sem chave nao vai a rede', chamadasAoModelo.length === 0, String(chamadasAoModelo.length));
   t('  e falha na hora', Boolean(erroSemChave), erroSemChave?.message);
-  process.env.ANTHROPIC_API_KEY = chaveAntes;
+  process.env.DEEPSEEK_API_KEY = chaveAntes;
 
   globalThis.fetch = fetchReal;
 

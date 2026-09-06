@@ -70,13 +70,23 @@ const CATALOGO = [
       'Desligada, quem responde é o menu numerado, com texto pronto.',
     padrao: () => config.iaLigada,
     risco: 'medio',
-    // Sem a chave da Anthropic TODA chamada morre no mesmo lugar, e o cliente
-    // recebe o menu de "não entendi" — exatamente o que ele receberia com esta
-    // função desligada. Require aqui dentro para o painel não carregar o SDK.
-    impedimento: () =>
-      require('./claude').disponivel()
-        ? null
-        : 'a chave da IA não está no servidor (ANTHROPIC_API_KEY)',
+    // Sem chave TODA chamada morre no mesmo lugar, e o cliente recebe o menu de
+    // "não entendi" — exatamente o que ele receberia com esta função desligada.
+    //
+    // Duas perguntas diferentes, e a segunda é a que o painel já errou antes.
+    // Sem chave é o caso óbvio. O caso que engana é a chave PRESENTE e a conta
+    // sem saldo: o painel mostraria ✅, toda resposta cairia no menu, e ninguém
+    // saberia por quê. Quem sabe disso é o disjuntor do deepseek.js; aqui só se
+    // pergunta.
+    impedimento: () => {
+      const ds = require('./deepseek');
+      if (!ds.temChave()) return 'a chave da IA não está no servidor (DEEPSEEK_API_KEY)';
+      if (!ds.disponivel()) {
+        return 'a IA falhou várias vezes seguidas e está parada. O motivo está no log ' +
+          '(o mais comum é a conta sem saldo). Enquanto isso quem responde é o menu';
+      }
+      return null;
+    },
   },
   {
     id: 'vender',
@@ -146,43 +156,15 @@ const CATALOGO = [
       'É a única coisa que fala com quem não puxou conversa. Mensagem em ' +
       'massa é como se perde o número do WhatsApp.',
   },
-  // Entrou no FIM da lista de propósito. A ordem é o número que ele digita, e
-  // ele decora a posição — inserir no meio faria o #admin 5 dele virar outra
-  // coisa da noite para o dia.
-  {
-    id: 'barato',
-    curto: 'Usa a IA barata no que ninguém vê',
-    nome: 'Economia nos bastidores',
-    explica:
-      'O trabalho de bastidor (a análise, a tradução do que o outro lado ' +
-      'escreve, a escolha da resposta pronta) passa a usar uma IA mais barata. ' +
-      'A conversa com o cliente NÃO muda: continua na mesma de sempre. ' +
-      'Desligado, tudo volta a rodar pela IA cara.',
-    padrao: () => config.baratoLigado,
-    // Nada aqui fala com cliente nem com o outro lado sem passar por você, e a
-    // queda é automática: sem saldo ou fora do ar, o trabalho sai pelo Claude
-    // igual. O pior caso é uma tradução um pouco pior no SEU alerta.
-    risco: 'baixo',
-    // Duas perguntas diferentes, e a segunda é a que o painel já errou antes.
-    //
-    // Sem chave é o caso óbvio. O caso que engana é a chave PRESENTE e a conta
-    // sem saldo: o painel mostraria ✅, o trabalho sairia todo pelo Claude, e a
-    // economia simplesmente não aconteceria — sem erro, sem log no WhatsApp,
-    // sem nada. É o mesmo desfecho da conversa livre ligada sem
-    // ANTHROPIC_API_KEY, que custou uma investigação inteira.
-    //
-    // O disjuntor do deepseek.js abre depois de três falhas seguidas, e é ele
-    // que sabe disso. Aqui só se pergunta.
-    impedimento: () => {
-      const ds = require('./deepseek');
-      if (!ds.temChave()) return 'a chave da IA barata não está no servidor (DEEPSEEK_API_KEY)';
-      if (!ds.disponivel()) {
-        return 'a IA barata falhou várias vezes seguidas e está parada. O motivo está no log ' +
-          '(o mais comum é a conta sem saldo). Enquanto isso o trabalho sai pela cara';
-      }
-      return null;
-    },
-  },
+  // SAIU DAQUI: "Economia nos bastidores".
+  //
+  // Ela escolhia entre a IA barata no bastidor e a cara no cliente. Agora é a
+  // mesma IA nos dois lados, então a chave não tinha mais o que escolher — e um
+  // interruptor que não muda nada é pior que interruptor nenhum: ele responde
+  // "✅ ligado" para uma pergunta que ninguém está mais fazendo.
+  //
+  // Ela era a ÚLTIMA da lista, então tirar não mexeu no número de nenhuma
+  // outra. Se um dia voltar um segundo modelo, ela volta aqui no fim.
 ];
 
 const porId = (id) => CATALOGO.find((c) => c.id === id) || null;

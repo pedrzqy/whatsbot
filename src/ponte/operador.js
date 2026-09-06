@@ -492,43 +492,32 @@ async function executar(texto, de = '') {
     // "Atendimento ligado", que fala de outra coisa — se a ponte está aceitando
     // pedido. Duas linhas com a mesma palavra e sentidos diferentes são piores
     // que nenhuma. E nada de nome de tecnologia: isto sai pelo número comercial.
-    const claude = require('../claude');
+    // Uma linha só, e não duas: agora é o MESMO modelo respondendo cliente e
+    // fazendo bastidor. Enquanto eram dois, uma linha falava de quem atende e
+    // outra de quanto se economizava atrás; com um, duas linhas seriam o mesmo
+    // número dito de dois jeitos.
+    const ds = require('../deepseek');
     if (!require('../config').iaLigada) {
       linhas.push('💬 Respostas — pelo menu, texto pronto');
-    } else if (!claude.disponivel()) {
-      linhas.push('💬 Respostas — conversa livre, na configuração reserva');
+    } else if (!ds.temChave()) {
+      linhas.push('💬 Respostas — pelo menu, a chave da conversa livre não está no servidor');
+      problemas.push('A conversa livre está ligada mas sem chave. Quem responde é o menu.');
+    } else if (!ds.disponivel()) {
+      linhas.push('💬 Respostas — *pelo menu*, a conversa livre está parada');
+      problemas.push('A conversa livre falhou várias vezes. O motivo mais comum é a conta sem saldo.');
     } else {
-      const u = claude.uso();
+      const u = ds.uso();
       linhas.push(
         `💬 Respostas — conversa livre · ${u.chamadas}/${u.teto} hoje` +
-          (u.cachePct === null ? '' : ` · ${u.cachePct}% reaproveitado`),
+          (u.entrada + u.saida ? ` · ${u.entrada + u.saida} tokens` : '') +
+          (u.cache ? ` · ${u.cache} reaproveitados` : ''),
       );
-      // Reaproveitamento baixo com volume real = alguma coisa mudou no começo
-      // do texto fixo e cada resposta passou a custar cheio.
-      if (u.chamadas >= 5 && u.cachePct !== null && u.cachePct < 40) {
+      // Perto do teto o desfecho é o cliente caindo no menu sem ninguém pedir,
+      // e descobrir isso pelo relato de um cliente é tarde demais.
+      if (u.chamadas >= u.teto * 0.8) {
         problemas.push(
-          'O atendimento está reaproveitando pouco texto e ficando mais caro que o previsto.',
-        );
-      }
-    }
-
-    // A IA barata do bastidor. Aparece só quando tem chave, e nunca zerada:
-    // "0 hoje" num dia sem análise nem tradução é o normal, e uma linha que
-    // aparece todo dia dizendo zero é a que ele para de ler.
-    //
-    // Existe porque o contador sem tela é contador morto — a mesma armadilha
-    // do interruptor decorativo. Sem esta linha, "quanto de crédito eu ponho?"
-    // não tem como ser respondido no mês que vem com número, só com estimativa.
-    const ds = require('../deepseek');
-    if (ds.temChave()) {
-      const b = ds.uso();
-      if (!ds.disponivel()) {
-        linhas.push('💸 Economia — *parada*, o trabalho está saindo pelo caro');
-        problemas.push('A IA barata falhou várias vezes. O motivo mais comum é a conta sem saldo.');
-      } else if (b.n) {
-        linhas.push(
-          `💸 Economia — ${b.n} bastidor(es) hoje · ${b.entrada + b.saida} tokens` +
-            (b.cache ? ` · ${b.cache} de cache` : ''),
+          `A conversa livre já usou ${u.chamadas} das ${u.teto} respostas do dia. ` +
+            'Passando disso, quem responde é o menu até amanhã.',
         );
       }
     }

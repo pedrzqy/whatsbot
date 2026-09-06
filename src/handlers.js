@@ -686,11 +686,28 @@ async function handleMessage(msg) {
     return;
   }
 
+  // FOTO SOZINHA, com um cérebro que não enxerga.
+  //
+  // O modelo de hoje é só texto (ai.veImagem()). Uma foto sem legenda não tem
+  // nada para ele responder: mandá-la assim gasta uma chamada para receber de
+  // volta um chute educado sobre uma imagem que ninguém viu.
+  //
+  // Com LEGENDA é outro caso e continua indo para a IA — a pessoa escreveu uma
+  // pergunta, e ela merece resposta. O prompt já avisa o modelo de que ele não
+  // enxerga e manda pedir o código do erro, então o desfecho é o mesmo quando o
+  // assunto é a tela, e melhor quando não é.
+  //
+  // Quando o modelo voltar a enxergar, esta trava se desliga sozinha.
+  if (!trimmed && (imagem || imagemBase64) && !ai.veImagem()) {
+    await pedirCodigoDoErro(from);
+    return;
+  }
+
   // IA só quando ligada de propósito (BOT_IA=true).
   try {
-    // A foto sem legenda é foto de verdade — só que agora o modelo a enxerga.
-    // Antes esta frase era mandada também para ÁUDIO, que não era extraído:
-    // a IA respondia sobre uma foto que não existia.
+    // A foto sem legenda é foto de verdade. Esta frase já foi mandada também
+    // para ÁUDIO, que não era extraído: a IA respondia sobre uma foto que não
+    // existia.
     const texto = trimmed || '(o cliente mandou uma foto sem escrever nada)';
     const answer = await ai.reply(from, texto, pushName, { imagem, imagemBase64 });
     await sender.send(from, answer);

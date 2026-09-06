@@ -24,7 +24,7 @@ process.env.PONTE_DATA_DIR = DATA_TESTE;
 
 // A suite inteira roda SEM REDE, e isto e o que garante.
 //
-// Sem apagar a chave aqui, uma maquina com ANTHROPIC_API_KEY definida faria os
+// Sem apagar a chave aqui, uma maquina com DEEPSEEK_API_KEY definida faria os
 // testes chamarem a API DE VERDADE -- cobrada, lenta e dependente de internet.
 // E o esforco e fixado porque CLAUDE_EFFORT ja existe no ambiente de algumas
 // maquinas: o teste passava ou falhava conforme QUEM estava rodando, que e o
@@ -33,8 +33,7 @@ process.env.PONTE_DATA_DIR = DATA_TESTE;
 // qualquer chave que nao esteja em process.env -- entao apagar aqui e ser
 // sobrescrito um require depois. Definida como string vazia, a chave existe
 // (dotenv nao mexe) e e falsy (nenhum provedor nasce).
-process.env.ANTHROPIC_API_KEY = '';
-process.env.BOT_CLAUDE_ESFORCO = 'low';
+process.env.DEEPSEEK_API_KEY = '';
 
 // E TODAS as outras chaves de LLM tambem, e nao so a da Anthropic.
 //
@@ -2047,7 +2046,7 @@ const OP = '5541999999999';
 
   // ── Teto por cliente na IA ─────────────────────────────────
   //
-  // Existe um teto DIÁRIO global no claude.js, mas ele só percebe o estrago
+  // Existe um teto DIÁRIO global no deepseek.js, mas ele só percebe o estrago
   // depois de 400 chamadas. Uma conversa normal tem ~5 turnos; 20 numa hora já
   // é outra coisa — cliente preso em laço ou alguém testando em rajada.
   bloco('teto de mensagens por cliente');
@@ -2372,7 +2371,7 @@ const OP = '5541999999999';
   //
   // O relato: ligou a conversa livre, mandou uma foto e recebeu "nao entendi,
   // escolhe uma opcao" -- o mesmo que receberia com ela DESLIGADA. A chave da
-  // Anthropic nao estava no servidor, entao toda chamada morria; e o painel
+  // do modelo nao estava no servidor, entao toda chamada morria; e o painel
   // dizia ✅ o tempo todo, mandando ele procurar bug no lugar errado.
   //
   // A chave mora no Environment, que e justamente o que este painel nao mexe.
@@ -2382,7 +2381,7 @@ const OP = '5541999999999';
   t('a conversa livre ligada sem chave nao aparece como ✅',
     /🚫 \*Conversa livre\*/.test(semChave),
     (semChave.split('\n').find((l) => /Conversa livre/.test(l)) || '(sumiu)'));
-  t('  e o painel diz o motivo', /ANTHROPIC_API_KEY/.test(semChave),
+  t('  e o painel diz o motivo', /DEEPSEEK_API_KEY/.test(semChave),
     (semChave.split('\n').find((l) => /ligada, mas/.test(l)) || '(nao disse)'));
 
   const detalheSemChave = await operador.executar('#admin 2', OP);
@@ -2395,7 +2394,7 @@ const OP = '5541999999999';
 
   // Com a chave no lugar, volta a ser um ✅ comum: o aviso nao pode virar
   // decoracao permanente, senao ele para de enxergar.
-  process.env.ANTHROPIC_API_KEY = 'chave-de-mentira';
+  process.env.DEEPSEEK_API_KEY = 'chave-de-mentira';
   const comChave = await operador.executar('#admin', OP);
   t('com a chave no lugar volta ao ✅', /✅ \*Conversa livre\*/.test(comChave),
     (comChave.split('\n').find((l) => /Conversa livre/.test(l)) || '(sumiu)'));
@@ -2403,13 +2402,13 @@ const OP = '5541999999999';
   //
   // Medindo o painel todo, este teste passava a falhar por causa de QUALQUER
   // outra chave que estivesse ligada-mas-parada — e passou mesmo, no dia em que
-  // a IA barata entrou como chave 9 sem DEEPSEEK_API_KEY no ambiente de teste.
+  // a IA barata entrou como chave 9 sem chave nenhuma no ambiente de teste.
   // O aviso dela estava certo; quem estava errado era a régua.
   const linhaDa = (painel, nome) => painel.split('\n').find((l) => l.includes(nome)) || '(sumiu)';
 
   t('  e sem o aviso sobrando', !/ligada, mas/.test(linhaDa(comChave, 'Conversa livre')),
     linhaDa(comChave, 'Conversa livre'));
-  process.env.ANTHROPIC_API_KEY = '';
+  process.env.DEEPSEEK_API_KEY = '';
 
   // Desligada, ninguem precisa ouvir que ela tambem nao rodaria: o ⛔ ja diz
   // tudo, e avisar dos dois jeitos e o que transforma aviso em ruido.

@@ -54,12 +54,6 @@ const config = {
   // BOT_IA=true religa, e aí ela volta a atender o que o menu não cobre.
   iaLigada: process.env.BOT_IA === 'true',
 
-  // A IA barata nos bastidores (deepseek.js). Nasce LIGADA, ao contrário da
-  // iaLigada acima, e a diferença é quem lê o que sai: aqui é sempre o
-  // operador, num alerta ou num arquivo, e nunca o cliente. Sem a
-  // DEEPSEEK_API_KEY isto não faz nada — o trabalho sai pelo Claude igual.
-  baratoLigado: process.env.BOT_IA_BARATA !== 'false',
-
   evolution: {
     url: (process.env.EVOLUTION_API_URL || 'http://localhost:8080').replace(/\/$/, ''),
     apiKey: required('EVOLUTION_API_KEY'),
@@ -129,7 +123,7 @@ const config = {
 
   // ── Teto de mensagens por cliente na IA ────────────────────────────
   //
-  // Existe um teto DIÁRIO global no claude.js, mas nenhum por cliente. Um
+  // Existe um teto DIÁRIO global no deepseek.js, mas nenhum por cliente. Um
   // cliente confuso em laço, ou alguém testando de propósito, consome sozinho:
   // são ~5 turnos por conversa normal, então 20 numa hora já é claramente outra
   // coisa. Estourado, ele cai no menu — que responde na hora e não custa nada.
