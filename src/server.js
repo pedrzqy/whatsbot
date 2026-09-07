@@ -179,11 +179,46 @@ app.post('/webhooks/evolution', async (req, res) => {
  * Webhook da Nerix — eventos de pedido (order.paid, order.delivered, ...).
  * Configure no painel da Nerix com ?secret=SEU_TOKEN.
  */
+// Dá para abrir no navegador e ver se o endereço existe.
+//
+// "Configurei tudo certinho e não chega" tem duas causas muito diferentes: a
+// loja não está chamando, ou está chamando e sendo recusada. Sem uma forma de
+// separar as duas, a investigação vira chute — e foi exatamente onde a de hoje
+// travou. Abrir a URL no navegador responde a primeira metade em dois segundos.
+//
+// Não revela nada: só diz que o caminho existe e se há um token configurado,
+// nunca qual é.
+app.get('/webhooks/nerix', (req, res) => {
+  res.type('text/plain').send(
+    'Webhook de vendas no ar.\n' +
+      `Token exigido: ${config.webhook.nerixSecret ? 'SIM' : 'NAO (aceita qualquer chamada)'}\n` +
+      'Se voce esta vendo isto no navegador, o endereco esta certo e alcancavel.\n',
+  );
+});
+
 app.post('/webhooks/nerix', async (req, res) => {
   const { secret } = req.query;
+
+  // A RECUSA PRECISA APARECER NO LOG.
+  //
+  // Ela devolvia 401 e ia embora calada. Do lado de fora o desfecho é idêntico
+  // ao de um webhook que nunca foi cadastrado: nenhuma venda avisada, nenhuma
+  // linha no log, nada para investigar. A armadilha mais provável é o token da
+  // URL e o do Environment serem coisas diferentes, e é justamente a que não
+  // deixava rastro.
   if (config.webhook.nerixSecret && secret !== config.webhook.nerixSecret) {
+    console.warn(
+      '[webhooks/nerix] RECUSADO: o token da URL nao bate com o NERIX_WEBHOOK_SECRET. ' +
+        `Veio ${secret ? `um token de ${String(secret).length} caracteres` : 'NENHUM token'}; ` +
+        `o servidor espera um de ${config.webhook.nerixSecret.length}. ` +
+        'Corrija na loja ou no Environment, os dois tem que ser iguais.',
+    );
     return res.status(401).json({ error: 'Assinatura inválida' });
   }
+
+  // E a ACEITAÇÃO também: sem esta linha, "chegou e eu ignorei o evento" fica
+  // igual a "não chegou". O nome do evento é o que diz qual dos dois é.
+  console.log(`[webhooks/nerix] recebido: ${req.body?.event || req.body?.type || 'evento sem nome'}`);
 
   res.status(200).send('OK'); // responde em < 5s conforme exigido
 
