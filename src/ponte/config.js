@@ -43,7 +43,21 @@ module.exports = {
   fila: {
     // Atendimento sem resposta do fornecedor é liberado para o próximo da fila.
     // Sem isso, um vendedor que ignora uma pergunta trava a fila para sempre.
-    timeoutMinutos: num(process.env.PONTE_TIMEOUT_MIN, 240),
+    //
+    // ERA 4 HORAS, e esse número não era só generoso: era o motivo de gente
+    // esperar uma hora sem entender. A fila é SERIAL, um por vez, então o
+    // timeout do atendimento ativo é o teto de espera de todo mundo atrás dele.
+    // Bastava o cliente da vez sumir depois de mandar foto e login para a fila
+    // inteira parar por quatro horas, sem nada no log parecendo errado.
+    //
+    // 20 minutos porque o outro lado responde em 31 SEGUNDOS na mediana (14
+    // dias de conversa medidos). Passou de 20, aquele atendimento não está
+    // esperando: está travado.
+    //
+    // A espera legítima longa — pedido feito 15h55, janela reabrindo 17h15 —
+    // NÃO é cortada por isto: quando a tarefa nasce agendada para a próxima
+    // abertura, o despachar empurra o `expiraEm` junto (ver ponte/index.js).
+    timeoutMinutos: num(process.env.PONTE_TIMEOUT_MIN, 20),
     // Idas e vindas antes de o operador assumir. Passou disso, provavelmente travou.
     maxTurnos: num(process.env.PONTE_MAX_TURNOS, 6),
   },

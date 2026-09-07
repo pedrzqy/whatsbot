@@ -363,6 +363,58 @@ const depoisDoMenu = recepcao.avaliar(CLI_MENU, '', 'tela-menu.jpg');
 t('  e a foto seguinte entra no fluxo', depoisDoMenu.acao === 'responder', depoisDoMenu.acao);
 t('  pedindo o login', /login\/usu/i.test(depoisDoMenu.mensagem || ''), depoisDoMenu.mensagem);
 
+// ── Fila ocupada trava na ENTRADA ──────────────────────────
+//
+// O bloqueio já existia, só que no fim: o cliente juntava foto e login e a
+// primeira notícia da fila vinha depois de todo o trabalho feito. Aí esperava
+// calado — e com o timeout de 4 horas que a fila tinha, essa espera chegou a
+// uma hora sem nenhuma atualização.
+bloco('recepção — fila ocupada avisa antes de pedir qualquer coisa');
+estadoPonte.dados.atendimentos.length = 0;
+delete estadoPonte.dados.pendentes;
+
+const OCUPANTE = '5541900001111';
+const NA_ESPERA = '5541900002222';
+// Montado à mão, e não por `fila.entrar`, porque este trecho roda fora de
+// função async — o `entrar` devolve promessa por causa do lock da fila. É a
+// mesma forma que ele cria.
+estadoPonte.dados.atendimentos.push({
+  id: 9001,
+  from: OCUPANTE,
+  nome: 'Quem chegou antes',
+  estado: 'ativo',
+  posicao: 1,
+  turnos: 0,
+  criadoEm: Date.now(),
+  iniciadoEm: Date.now(),
+  expiraEm: Date.now() + 600000,
+  historico: [],
+  imagemPendente: null,
+});
+
+const barrado = recepcao.iniciarFluxo(NA_ESPERA);
+t('avisa que tem gente na frente', /na sua frente/i.test(barrado.mensagem || ''), barrado.mensagem);
+t('  e NÃO pede a foto ainda', !/foto da tela do console/i.test(barrado.mensagem || ''));
+t('  nem manda imagem à toa', !barrado.exemplo, String(barrado.exemplo));
+t('  e diz que não precisa mandar nada', /não precisa mandar nada/i.test(barrado.mensagem || ''));
+t('  ele fica na lista de espera', recepcao.esperandoVez().includes(NA_ESPERA));
+
+// Quem JÁ está na fila com dados entregues não vira o próprio concorrente.
+t('quem já está na fila não conta a si mesmo', recepcao.quantosNaFrente(OCUPANTE) === 0,
+  String(recepcao.quantosNaFrente(OCUPANTE)));
+
+// Liberou: é a vez dele, e agora sim vem o passo 1.
+const chamado = recepcao.chamarProximoDaEspera();
+t('quando libera, o próximo é chamado', chamado?.from === NA_ESPERA, String(chamado?.from));
+t('  dizendo que chegou a vez', /chegou sua vez/i.test(chamado?.mensagem || ''), chamado?.mensagem);
+t('  agora sim pedindo a foto', /foto da tela do console/i.test(chamado?.mensagem || ''));
+t('  com a imagem junto', chamado?.exemplo === 'console', String(chamado?.exemplo));
+t('  e ele sai da espera', !recepcao.esperandoVez().includes(NA_ESPERA));
+t('  sem sobrar ninguém para chamar', recepcao.chamarProximoDaEspera() === null);
+
+estadoPonte.dados.atendimentos.length = 0;
+delete estadoPonte.dados.pendentes;
+
 // ── O prazo é dito em voz alta ─────────────────────────────
 //
 // Ele expirava calado: o cliente ia buscar o console, voltava 12 minutos

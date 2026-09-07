@@ -360,6 +360,21 @@ Use *#responder* e escreva em português que eu traduzo.`,
   dados.tarefas.push(tarefa);
   if (!respondendo) atendimento.imagemPendente = null;
 
+  // A ESPERA PELA JANELA NÃO CONTA CONTRA O ATENDIMENTO.
+  //
+  // O timeout da fila caiu para 20 minutos, e ele mede uma coisa só: quanto
+  // tempo o atendimento ficou parado sem o outro lado responder. Um pedido
+  // feito às 15h55 nasce agendado para as 17h15 — ele não está travado, está
+  // esperando a hora, e morreria aos 16h15 levando junto um cliente que fez
+  // tudo certo.
+  //
+  // O relógio só começa quando a tarefa pode sair. `Math.max` porque um
+  // atendimento que já tinha prazo maior não pode encolher aqui.
+  if (tarefa.agendadaPara > Date.now()) {
+    const teto = tarefa.agendadaPara + cfg.fila.timeoutMinutos * 60 * 1000;
+    atendimento.expiraEm = Math.max(atendimento.expiraEm || 0, teto);
+  }
+
   // O lado do cliente no histórico. Sem os dois lados, o contexto que o
   // tradutor recebe é meia conversa — e meia conversa às vezes é pior que
   // nenhuma, porque parece completa.
@@ -949,9 +964,35 @@ async function encerrarComEntrega(atendimento) {
 }
 
 /** Depois que a fila anda, despacha a vez do próximo. */
+/**
+ * Chama o primeiro de quem está parado na entrada esperando vaga.
+ *
+ * O `require` é preguiçoso porque a recepcao.js chama de volta o fila.js, e
+ * carregar tudo no topo amarraria os três num nó só para uma chamada que
+ * acontece uma vez por atendimento encerrado.
+ */
+async function chamarQuemEsperava() {
+  const chamado = require('./recepcao').chamarProximoDaEspera();
+  if (!chamado) return;
+  await sender.send(chamado.from, chamado.mensagem, require('../exemplo').opcoes(chamado.exemplo));
+}
+
 async function promoverProximo() {
   const at = fila.ativo();
-  if (!at || !at.usuario) return;
+
+  // FILA VAZIA: é a vez de quem foi barrado na ENTRADA.
+  //
+  // Hoje existem duas filas, e esta função só conhecia uma. A do fila.js é de
+  // quem já entregou foto e login; a outra é de quem pediu código, ouviu "tem 2
+  // na sua frente" e não mandou nada ainda — de propósito, para não fazer o
+  // trabalho antes da hora.
+  //
+  // Sem esta chamada, essa segunda fila não andava sozinha: o cliente esperava
+  // um chamado que nunca vinha. O `concluir` já promove o próximo da primeira
+  // fila, então `ativo()` só é nulo quando ela esvaziou de verdade.
+  if (!at) return chamarQuemEsperava();
+
+  if (!at.usuario) return;
 
   // Já é a vez dele e o envio já está em pé: não há nada a promover.
   //

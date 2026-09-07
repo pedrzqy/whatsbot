@@ -108,29 +108,6 @@ async function enviarMenu(from, nodeId, antes = '') {
 }
 
 /**
- * As opções de envio para a imagem de exemplo que a recepção pediu.
- *
- * A instrução vai NA LEGENDA da imagem, e não numa mensagem separada. São duas
- * coisas que só funcionam juntas: o texto diz o que fazer, a imagem diz qual
- * tela é. Separadas, chegam com dezenas de segundos de distância pela fila
- * humanizada, e a pessoa responde à primeira antes de a segunda existir.
- *
- * Sem o arquivo no disco, `exemplo.*` devolve null e sai só o texto — que é o
- * que existia antes. O sender também cai sozinho para texto se a mídia for
- * recusada, então nenhum caminho aqui deixa o cliente sem instrução.
- */
-function opcoesDoExemplo(qual) {
-  const imagens = {
-    console: [exemplo.telaDoConsole, 'tela-do-console.jpg'],
-    login: [exemplo.primeiroLogin, 'primeiro-login.jpg'],
-  };
-  const escolha = imagens[qual];
-  if (!escolha) return {};
-  const bytes = escolha[0]();
-  return bytes ? { image: bytes, fileName: escolha[1] } : {};
-}
-
-/**
  * Cliente pediu um jogo pelo nome.
  *
  * Procura na loja ANTES de encaminhar. Se o jogo já está no catálogo, mandar o
@@ -300,7 +277,7 @@ async function acaoDoMenu(acao, { from, pushName }) {
     store.saveContact(from, { menuNode: null });
     const inicio = recepcao.iniciarFluxo(from);
     if (inicio.acao === 'responder') {
-      await sender.send(from, inicio.mensagem, opcoesDoExemplo(inicio.exemplo));
+      await sender.send(from, inicio.mensagem, exemplo.opcoes(inicio.exemplo));
     }
     return true;
   }
@@ -451,7 +428,7 @@ async function handleMessage(msg) {
 
     if (r.acao === 'responder') {
       store.saveContact(from, { lastSeen: Date.now(), name: pushName || store.getContact(from)?.name });
-      await sender.send(from, r.mensagem, opcoesDoExemplo(r.exemplo));
+      await sender.send(from, r.mensagem, exemplo.opcoes(r.exemplo));
       return;
     }
 

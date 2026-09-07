@@ -34,6 +34,7 @@
 const codigo = require('./codigo');
 const cfg = require('./config');
 const janela = require('./janela');
+const fila = require('./fila');
 const marca = require('./marca');
 const { dados, persist, emTeste } = require('./estado');
 
@@ -53,12 +54,26 @@ function pendentes() {
   return dados.pendentes;
 }
 
+/**
+ * Quem está esperando vaga vive mais.
+ *
+ * Os 10 minutos medem outra coisa: quanto tempo uma METADE do pedido (a foto
+ * sem o login, ou o contrário) espera pela outra. Quem foi barrado na entrada
+ * não está devendo nada — está na fila, e a fila pode andar devagar. Apagá-lo
+ * aos 10 minutos seria perder justamente quem obedeceu e ficou esperando.
+ *
+ * Duas horas cobre uns seis atendimentos à frente com o timeout de 20 minutos.
+ * Passou disso, provavelmente ele já resolveu de outro jeito.
+ */
+const VALIDADE_ESPERA_MS = 2 * 60 * 60 * 1000;
+
 function limparVencidos() {
   const p = pendentes();
   const agora = Date.now();
   let mudou = false;
   for (const [from, item] of Object.entries(p)) {
-    if (agora - item.em > VALIDADE_MS) {
+    const teto = item.etapa === 'esperando_vez' ? VALIDADE_ESPERA_MS : VALIDADE_MS;
+    if (agora - item.em > teto) {
       delete p[from];
       mudou = true;
     }
@@ -126,11 +141,37 @@ const MINUTOS = Math.round(VALIDADE_MS / 60000);
 //
 // Dizer o prazo não faz ninguém andar mais rápido, mas transforma "o bot me
 // ignorou" em "passou do tempo, mando de novo" — e a segunda frase tem saída.
+const CORPO_PEDE_FOTO =
+  '1️⃣ *Foto da tela do console*, na página que está pedindo o código.\n\n' +
+  `_Tem ${MINUTOS} minutos para mandar. Se passar, é só escrever *preciso do código* que a gente recomeça._`;
+
 const MSG_PEDE_FOTO = marca.abertura(
-  'Vou pegar seu código! Preciso de *2 coisas* 👇\n\n' +
-    '1️⃣ *Foto da tela do console*, na página que está pedindo o código.\n\n' +
-    `_Tem ${MINUTOS} minutos para mandar. Se passar, é só escrever *preciso do código* que a gente recomeça._`,
+  `Vou pegar seu código! Preciso de *2 coisas* 👇\n\n${CORPO_PEDE_FOTO}`,
 );
+
+/** O mesmo passo 1, para quem estava na espera e acabou de ser chamado. */
+const MSG_SUA_VEZ = marca.abertura(
+  `Chegou sua vez! 🎉 Preciso de *2 coisas* 👇\n\n${CORPO_PEDE_FOTO}`,
+);
+
+/**
+ * A fila está ocupada: avisa e NÃO pede nada ainda.
+ *
+ * Antes o cliente fazia o caminho inteiro — buscava o console, tirava a foto,
+ * achava o login — e só no fim descobria que tinha gente na frente. Aí esperava
+ * calado, às vezes uma hora, com o trabalho todo já feito. Trabalho gasto antes
+ * da hora é o que faz a espera doer.
+ *
+ * Dizendo antes, ele decide: espera tranquilo ou volta depois. E quando a vez
+ * chegar o bot puxa a conversa, então ele não precisa ficar olhando o celular.
+ */
+const msgEspera = (aFrente) =>
+  marca.abertura(
+    'Você está na fila do código ⏳\n\n' +
+      `Tem *${aFrente} ${aFrente === 1 ? 'pessoa' : 'pessoas'}* na sua frente.\n\n` +
+      'Assim que chegar sua vez eu te chamo aqui e a gente resolve na hora. ' +
+      'Não precisa mandar nada agora 👍',
+  );
 
 // SEMPRE O PRIMEIRO LOGIN, e isso precisa estar escrito.
 //
@@ -302,6 +343,61 @@ function avaliar(from, texto, imagem) {
   return { acao: 'ignorar' };
 }
 
+/** Quem pediu código e está parado na entrada, do mais antigo para o mais novo. */
+function esperandoVez() {
+  const p = pendentes();
+  return Object.keys(p)
+    .filter((f) => p[f].etapa === 'esperando_vez')
+    .sort((a, b) => (p[a].em || 0) - (p[b].em || 0));
+}
+
+/**
+ * Quantos estão na frente deste cliente agora.
+ *
+ * Soma as duas filas, porque hoje existem duas: a de quem já entregou foto e
+ * login (fila.js) e a de quem foi barrado na entrada e ainda não entregou nada.
+ * Para quem espera, as duas são a mesma fila — e um número que ignora metade
+ * dela é pior que número nenhum.
+ */
+function quantosNaFrente(from) {
+  // Quem JÁ está na fila com dados entregues não conta a si mesmo: ele voltou
+  // para perguntar, não para pedir de novo. Sem isto, perguntar "e o meu?"
+  // faria o cliente virar o próprio concorrente e receber "tem 1 na frente".
+  if (fila.doCliente(from)) return 0;
+
+  const s = fila.situacao();
+  const naFila = (s.ativo ? 1 : 0) + (s.aguardando?.length || 0);
+
+  const p = pendentes();
+  const meu = p[from]?.em || Date.now();
+  const antesDeMim = esperandoVez().filter(
+    (f) => f !== from && (p[f]?.em || 0) < meu,
+  ).length;
+
+  return naFila + antesDeMim;
+}
+
+/**
+ * Chama o primeiro da espera, se houver.
+ *
+ * Quem chama é o `promoverProximo` do ponte/index.js, depois de todo
+ * encerramento — o mesmo gancho que já avisava "chegou sua vez" para quem
+ * estava na fila com dados entregues. Aqui é a outra metade: quem foi barrado
+ * na entrada e nunca chegou a mandar nada.
+ *
+ * @returns {{from:string, mensagem:string, exemplo:string|null}|null}
+ */
+function chamarProximoDaEspera() {
+  if (!cfg.ativa) return null;
+  limparVencidos();
+  const [from] = esperandoVez();
+  if (!from) return null;
+
+  const r = fazerResponder(from)('foto', MSG_SUA_VEZ, { etapa: 'foto' });
+  console.log(`[ponte/recepcao] ${from} saiu da espera — pedindo a foto`);
+  return { from, mensagem: r.mensagem, exemplo: r.exemplo };
+}
+
 /**
  * Grava o passo em que o cliente está e devolve a resposta pronta.
  *
@@ -343,6 +439,27 @@ function abrir(from, responder, guardado) {
     if (repetiuAgora(guardado, 'usuario')) return { acao: 'ignorar' };
     return responder('usuario', MSG_PEDE_USUARIO, { etapa: 'usuario' });
   }
+
+  // FILA OCUPADA: avisa e trava AQUI, antes de pedir qualquer coisa.
+  //
+  // O bloqueio existia, só que no fim: o cliente juntava foto e login, e a
+  // primeira notícia da fila vinha depois de todo o trabalho feito. Aí ele
+  // esperava calado — e, com o timeout de 4 horas que a fila tinha, essa espera
+  // chegou a uma hora sem nenhuma atualização.
+  //
+  // Travar na entrada custa o mesmo e informa antes. Quem já está na fila com
+  // dados entregues não passa por aqui: o `doCliente` reconhece e deixa seguir,
+  // senão quem voltasse para perguntar viraria seu próprio concorrente.
+  const aFrente = quantosNaFrente(from);
+  if (aFrente > 0) {
+    if (repetiuAgora(guardado, 'espera')) return { acao: 'ignorar' };
+    return responder('espera', msgEspera(aFrente), {
+      usuario: null,
+      imagem: null,
+      etapa: 'esperando_vez',
+    });
+  }
+
   if (repetiuAgora(guardado, 'foto')) return { acao: 'ignorar' };
 
   // HORÁRIO só quando está mesmo fora do ar.
@@ -395,9 +512,26 @@ function emEspera() {
   return Object.entries(pendentes()).map(([from, i]) => ({
     from,
     tem: i.usuario ? 'usuário' : i.imagem ? 'foto' : 'nada',
-    esperando: i.etapa === 'foto' ? 'a foto' : i.etapa === 'usuario' ? 'o usuário' : null,
+    // `esperando_vez` entra aqui porque senão o #fila mostraria metade da fila.
+    // Quem foi barrado na entrada não aparecia em lugar nenhum: nem no fila.js
+    // (não entregou dados) nem aqui, e o operador via uma fila menor do que a
+    // que existe.
+    esperando:
+      i.etapa === 'foto'
+        ? 'a foto'
+        : i.etapa === 'usuario'
+          ? 'o usuário'
+          : i.etapa === 'esperando_vez'
+            ? 'a vez dele'
+            : null,
     desde: i.em,
   }));
 }
 
-module.exports = { avaliar, abrirJanela, iniciarFluxo, emEspera, pedeCodigo, VALIDADE_MS };
+module.exports = {
+  avaliar, abrirJanela, iniciarFluxo, emEspera, pedeCodigo, VALIDADE_MS,
+  // A outra metade da fila: quem foi barrado na entrada e ainda nao entregou
+  // nada. Quem chama e o promoverProximo do index.js, no mesmo gancho que ja
+  // avisava a vez de quem esta na fila.
+  chamarProximoDaEspera, esperandoVez, quantosNaFrente,
+};

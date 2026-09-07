@@ -61,4 +61,27 @@ const telaDoConsole = () => carregar('tela-do-console.jpg');
  */
 const primeiroLogin = () => carregar('primeiro-login.jpg');
 
-module.exports = { telaDoConsole, primeiroLogin };
+/**
+ * As opções de envio da imagem que a recepção pediu, pelo nome.
+ *
+ * A instrução vai NA LEGENDA da imagem, e não numa mensagem separada. São duas
+ * coisas que só funcionam juntas: o texto diz o que fazer, a imagem diz qual
+ * tela é. Separadas, chegam com dezenas de segundos de distância pela fila
+ * humanizada, e a pessoa responde à primeira antes de a segunda existir.
+ *
+ * Mora aqui, e não no handlers, porque dois lugares mandam essas instruções: o
+ * handlers (quando o cliente escreve) e a ponte (quando chega a vez de quem
+ * estava esperando). A regra de qual imagem vai com qual passo é uma só.
+ */
+function opcoes(qual) {
+  const imagens = {
+    console: [telaDoConsole, 'tela-do-console.jpg'],
+    login: [primeiroLogin, 'primeiro-login.jpg'],
+  };
+  const escolha = imagens[qual];
+  if (!escolha) return {};
+  const bytes = escolha[0]();
+  return bytes ? { image: bytes, fileName: escolha[1] } : {};
+}
+
+module.exports = { telaDoConsole, primeiroLogin, opcoes };
