@@ -72,6 +72,13 @@ const config = {
     groupUrl: process.env.STORE_GROUP_URL || 'https://chat.whatsapp.com/KxQ7jybE7fL4N31C7kpKYp',
     // Site onde o cliente resgata o código de verificação da conta (ao entrar).
     codeUrl: process.env.STORE_CODE_URL || 'https://codigons.online/',
+    // Vídeo de como entrar na conta, baixar e jogar. SÓ NINTENDO.
+    //
+    // A regra do "só Nintendo" é a mesma do codeUrl logo acima, e pelo mesmo
+    // motivo: mandar para quem comprou Steam é mandar um passo a passo de outro
+    // aparelho. O cliente segue, não bate com a tela dele, e volta achando que
+    // recebeu a coisa errada — um problema criado por uma ajuda.
+    tutorialUrl: process.env.STORE_TUTORIAL_URL || 'https://www.youtube.com/watch?v=vXrt8z6yqmw',
   },
 
   // ── O modelo ───────────────────────────────────────────

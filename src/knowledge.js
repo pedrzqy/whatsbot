@@ -31,9 +31,20 @@ module.exports = {
   // (quando ligada por BOT_IA=true) continuaria oferecendo PlayStation, porque
   // o prompt monta a lista de plataformas a partir deste arquivo.
 
+  // O TUTORIAL fica NESTE fato e em nenhum outro.
+  //
+  // Ele mostra a tela do Switch: entrar na conta, baixar, jogar. Mandar para
+  // quem comprou Steam é entregar um passo a passo de outro aparelho — a pessoa
+  // segue, nada bate com a tela dela, e volta achando que recebeu a coisa
+  // errada. É um problema criado por uma ajuda.
+  //
+  // Mesma regra do site do código de verificação (config.store.codeUrl), e a
+  // separação vale aqui porque este arquivo é lido em dois lugares: vai
+  // literalmente para o menu e entra nos FATOS do prompt da IA.
   plataforma_nintendo:
     'Nintendo Switch: jogo 100% ORIGINAL, com garantia VITALÍCIA. Você baixa e joga no seu próprio console, ' +
-    'sem interrupção nenhuma. Simples e tranquilo.',
+    'sem interrupção nenhuma. Simples e tranquilo. ' +
+    `Passo a passo de como entrar e baixar: ${require('./config').store.tutorialUrl}`,
 
   plataforma_steam:
     'Steam entregue em conta, pronto pra jogar. Garantia de 30 dias. 100% original.',

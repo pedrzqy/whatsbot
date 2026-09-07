@@ -229,6 +229,7 @@ async function buildSystemPrompt() {
   const siteUrl = config.store.url;
   const groupUrl = config.store.groupUrl;
   const codeUrl = config.store.codeUrl;
+  const tutorialUrl = config.store.tutorialUrl;
 
   return (
     `Você é vendedor(a) da loja "${storeName}" (jogos digitais p/ Nintendo Switch e Steam), no WhatsApp.` +
@@ -443,6 +444,10 @@ async function buildSystemPrompt() {
     `pedido de reembolso ou troca): aí sim colete NOME e SOBRENOME e transfira com falar_com_atendente.\n` +
     `Transferir é para PROBLEMA, não para pergunta. Aceite o código do jeito que o cliente mandar (não exija ` +
     `formato). Nunca peça senha/cartão. Nunca invente status: só diga o que veio da ferramenta.\n` +
+    (tutorialUrl ? `TUTORIAL EM VÍDEO (SÓ para NINTENDO): ${tutorialUrl} mostra como entrar na conta, baixar e ` +
+      `jogar. Mande quando o cliente perguntar como usar, como entrar, como baixar, ou quando ele parecer perdido ` +
+      `depois de receber o login. É um vídeo curto, ofereça com naturalidade, não como manual. NUNCA mande para ` +
+      `quem comprou STEAM: é a tela do Switch, e ele volta achando que recebeu a coisa errada.\n` : '') +
     (codeUrl ? `CÓDIGO DE VERIFICAÇÃO (SÓ para jogos de NINTENDO): se for jogo de NINTENDO e ao entrar na conta ` +
       `pedirem um código de verificação, oriente o cliente a pegar o código em ${codeUrl} (copia de lá e usa pra ` +
       `entrar), com naturalidade. Se NÃO for Nintendo (Steam), NÃO mande esse site nem cite ele.\n` : '') + `\n` +

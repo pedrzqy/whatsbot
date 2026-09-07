@@ -553,10 +553,29 @@ const AUTOMACAO = politica.vocabularioProibido();
 // olhava este arquivo, porque a régua sempre foi apontada para as mensagens
 // PRONTAS, e esta é uma fonte de mensagem que ninguém escreve à mão.
 bloco('o que a IA sabe da loja não pode ter palavra barrada');
-for (const [chave, texto] of Object.entries(require('./src/knowledge'))) {
+const saber = require('./src/knowledge');
+for (const [chave, texto] of Object.entries(saber)) {
   const achou = (String(texto).match(AUTOMACAO) || [])[0];
   t(`knowledge.${chave}`, !achou, achou || 'limpo');
 }
+
+// ── O tutorial é SÓ de Nintendo ────────────────────────────
+//
+// O vídeo mostra a tela do Switch: entrar na conta, baixar, jogar. Mandar para
+// quem comprou Steam é entregar um passo a passo de outro aparelho. A pessoa
+// segue, nada bate com a tela dela, e volta achando que recebeu a coisa errada.
+// É um problema criado por uma ajuda, e é o tipo que ninguém liga ao tutorial.
+//
+// Mesma regra do site do código de verificação, e a separação precisa de teste
+// porque os dois fatos moram lado a lado no mesmo arquivo.
+bloco('o tutorial em vídeo não vaza para quem comprou Steam');
+t('o fato de Nintendo tem o tutorial', /youtube\.com/.test(saber.plataforma_nintendo),
+  saber.plataforma_nintendo.slice(-45));
+t('o de Steam NÃO tem', !/youtube\.com|tutorial/i.test(saber.plataforma_steam),
+  saber.plataforma_steam);
+t('e nenhum outro fato carrega o link',
+  Object.entries(saber).filter(([, v]) => /youtube\.com/.test(String(v))).length === 1,
+  Object.entries(saber).filter(([, v]) => /youtube\.com/.test(String(v))).map(([k]) => k).join(','));
 
 // NUNCA dizer ao cliente que o pedido dele vai para outra pessoa.
 //
