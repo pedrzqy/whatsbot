@@ -322,7 +322,7 @@ t('não pede o usuário ainda', !/login\/usu/i.test(r2.mensagem || ''));
 // A FOTO DE EXEMPLO vai junto. "Manda a foto da tela do console" é claro para
 // quem já sabe qual tela é; para o resto vem a caixa do jogo, a tela inicial ou
 // o menu de contas, e o pedido volta pela metade.
-t('  e a foto de exemplo vai junto', r2.comExemplo === true, String(r2.comExemplo));
+t('  e a foto da tela do console vai junto', r2.exemplo === 'console', String(r2.exemplo));
 // O HORÁRIO não aparece dentro do expediente. Ele já apareceu aqui, colado no
 // pedido da foto, e o cliente lia como se estivesse fechado NAQUELE instante:
 // parava de mandar a foto, ou perguntava se ia esperar duas horas.
@@ -334,14 +334,66 @@ r2 = recepcao.avaliar(CLI4, '', 'tela.jpg');
 t('a foto agora tem resposta', r2.acao === 'responder', r2.acao);
 t('e pede o login/usuário', /login\/usu/i.test(r2.mensagem || ''), r2.mensagem);
 t('avisa para não mandar senha', /senha/i.test(r2.mensagem || ''));
-// Já mandou a foto: pedir de novo com exemplo seria mandar a pessoa refazer o
-// que ela acabou de fazer.
-t('  e o exemplo NÃO vem de novo', !r2.comExemplo, String(r2.comExemplo));
+// Agora a imagem muda com a etapa: no login vale a que mostra QUAL login é o
+// certo, porque quem comprou várias vezes tem vários e manda o último.
+t('  e agora a imagem é a do login', r2.exemplo === 'login', String(r2.exemplo));
+t('  dizendo que é o PRIMEIRO login', /primeiro login/i.test(r2.mensagem || ''), r2.mensagem);
 
 r2 = recepcao.avaliar(CLI4, 'rsd32', null);
 t('o usuário fecha o fluxo', r2.acao === 'pedir', r2.acao);
 t('com o usuário certo', r2.usuario === 'rsd32', r2.usuario);
 t('e a foto do passo 1', r2.imagem === 'tela.jpg', r2.imagem);
+
+// ── O menu abre o fluxo sem frase mágica ───────────────────
+//
+// Quem toca em "Preciso de um código de segurança" JÁ DISSE o que quer. Pedir
+// que ele escreva "preciso do código" era a mesma pergunta duas vezes — e ainda
+// de um jeito que dá para errar, porque a frase tinha que passar pelo
+// reconhecedor e quem escreve "queria o codgio" ficava de fora.
+bloco('recepção — o menu abre o fluxo direto');
+const CLI_MENU = '5541966669999';
+const pelaOpcao = recepcao.iniciarFluxo(CLI_MENU);
+t('a opção do menu já responde', pelaOpcao.acao === 'responder', pelaOpcao.acao);
+t('  com o mesmo passo 1 da frase', /foto da tela do console/i.test(pelaOpcao.mensagem || ''),
+  pelaOpcao.mensagem);
+t('  e a imagem junto', pelaOpcao.exemplo === 'console', String(pelaOpcao.exemplo));
+// E o estado fica gravado: a foto seguinte tem que ser reconhecida como a do
+// passo 1, senão o menu abriria um fluxo que não continua.
+const depoisDoMenu = recepcao.avaliar(CLI_MENU, '', 'tela-menu.jpg');
+t('  e a foto seguinte entra no fluxo', depoisDoMenu.acao === 'responder', depoisDoMenu.acao);
+t('  pedindo o login', /login\/usu/i.test(depoisDoMenu.mensagem || ''), depoisDoMenu.mensagem);
+
+// ── O prazo é dito em voz alta ─────────────────────────────
+//
+// Ele expirava calado: o cliente ia buscar o console, voltava 12 minutos
+// depois, e a metade guardada tinha sumido sem nada explicando por quê.
+t('o passo 1 avisa o prazo', /10 minutos/.test(pelaOpcao.mensagem || ''), pelaOpcao.mensagem);
+t('  e diz como recomeçar', /preciso do código/i.test(pelaOpcao.mensagem || ''));
+
+// ── Dois erros de login e alguém assume ────────────────────
+//
+// O "não entendi o usuário" repetia sem fim. Quem errou duas vezes não vai
+// acertar na terceira: vai errar de novo, cansar e sumir, levando junto uma
+// venda já paga.
+bloco('recepção — dois erros de login chamam gente');
+const CLI_ERRA = '5541966668888';
+recepcao.iniciarFluxo(CLI_ERRA);
+recepcao.avaliar(CLI_ERRA, '', 'tela-erra.jpg');
+const erro1 = recepcao.avaliar(CLI_ERRA, 'nao sei qual e', null);
+t('o 1º erro ainda explica', erro1.acao === 'responder', erro1.acao);
+t('  com a imagem do login', erro1.exemplo === 'login', String(erro1.exemplo));
+const erro2 = recepcao.avaliar(CLI_ERRA, 'cade o login', null);
+t('o 2º erro chama gente', erro2.acao === 'humano', erro2.acao);
+t('  e o motivo diz o que travou', /login/i.test(erro2.motivo || ''), erro2.motivo);
+t('  e conta que a foto já está aqui', /foto/i.test(erro2.motivo || ''), erro2.motivo);
+// Mesma coisa mandada duas vezes seguidas é o caso mais claro de alguém
+// travado, e era justamente o que o anti-repetição engolia.
+const CLI_ERRA2 = '5541966667777';
+recepcao.iniciarFluxo(CLI_ERRA2);
+recepcao.avaliar(CLI_ERRA2, '', 'tela-erra2.jpg');
+recepcao.avaliar(CLI_ERRA2, 'como assim', null);
+t('repetir o mesmo erro também chama gente',
+  recepcao.avaliar(CLI_ERRA2, 'como assim', null).acao === 'humano');
 
 bloco('fluxo guiado — usuário sem dígito');
 // Fora do fluxo "joaozinho" é ignorado; dentro dele o bot ACABOU de pedir o

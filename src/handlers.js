@@ -108,6 +108,29 @@ async function enviarMenu(from, nodeId, antes = '') {
 }
 
 /**
+ * As opções de envio para a imagem de exemplo que a recepção pediu.
+ *
+ * A instrução vai NA LEGENDA da imagem, e não numa mensagem separada. São duas
+ * coisas que só funcionam juntas: o texto diz o que fazer, a imagem diz qual
+ * tela é. Separadas, chegam com dezenas de segundos de distância pela fila
+ * humanizada, e a pessoa responde à primeira antes de a segunda existir.
+ *
+ * Sem o arquivo no disco, `exemplo.*` devolve null e sai só o texto — que é o
+ * que existia antes. O sender também cai sozinho para texto se a mídia for
+ * recusada, então nenhum caminho aqui deixa o cliente sem instrução.
+ */
+function opcoesDoExemplo(qual) {
+  const imagens = {
+    console: [exemplo.telaDoConsole, 'tela-do-console.jpg'],
+    login: [exemplo.primeiroLogin, 'primeiro-login.jpg'],
+  };
+  const escolha = imagens[qual];
+  if (!escolha) return {};
+  const bytes = escolha[0]();
+  return bytes ? { image: bytes, fileName: escolha[1] } : {};
+}
+
+/**
  * Cliente pediu um jogo pelo nome.
  *
  * Procura na loja ANTES de encaminhar. Se o jogo já está no catálogo, mandar o
@@ -263,23 +286,22 @@ async function acaoDoMenu(acao, { from, pushName }) {
   }
 
   if (acao === 'codigo') {
-    // Não chama a ponte aqui: quem detecta o pedido de código é a recepcao.js,
-    // sem IA, e ela já conduz o passo a passo (foto → usuário). Aqui só se
-    // manda o cliente começar esse fluxo do jeito que a recepção reconhece.
-    store.saveContact(from, { menuNode: null });
-    // A frase sozinha na linha, e não no meio da frase.
+    // COMEÇA O FLUXO AQUI MESMO, em vez de pedir uma frase mágica.
     //
-    // Ela é o gatilho que abre o passo a passo, e o cliente precisa copiar ou
-    // digitar exatamente isso. Escondida no meio de um parágrafo, ele lê a
-    // mensagem inteira, entende que é para "pedir o código" e escreve outra
-    // coisa qualquer.
-    await sender.send(
-      from,
-      '🔑 Beleza! Para eu começar, me manda:\n\n' +
-        '*preciso do código*\n\n' +
-        '_Se você já mandou a foto da tela, ela está guardada aqui — é só ' +
-        'mandar essa mensagem que eu sigo de onde parou._',
-    );
+    // Antes esta opção respondia "me manda a mensagem *preciso do código*". Mas
+    // quem tocou em "Preciso de um código de segurança" JÁ DISSE o que quer —
+    // pedir de novo é fazer a mesma pergunta duas vezes, e ainda de um jeito
+    // que dá para errar: a frase tinha que passar pelo reconhecedor, e quem
+    // escreve "queria o codgio" ficava de fora.
+    //
+    // Quem conduz continua sendo a recepcao.js, sem IA: ela é dona do passo a
+    // passo inteiro (foto → login), do prazo e do aviso de horário. O menu só
+    // abre a porta que a frase abria.
+    store.saveContact(from, { menuNode: null });
+    const inicio = recepcao.iniciarFluxo(from);
+    if (inicio.acao === 'responder') {
+      await sender.send(from, inicio.mensagem, opcoesDoExemplo(inicio.exemplo));
+    }
     return true;
   }
 
@@ -429,21 +451,29 @@ async function handleMessage(msg) {
 
     if (r.acao === 'responder') {
       store.saveContact(from, { lastSeen: Date.now(), name: pushName || store.getContact(from)?.name });
+      await sender.send(from, r.mensagem, opcoesDoExemplo(r.exemplo));
+      return;
+    }
 
-      // A instrução vai NA LEGENDA da foto de exemplo, e não numa mensagem
-      // separada. São duas coisas que só funcionam juntas: o texto diz o que
-      // fazer, a foto diz qual é a tela. Separadas, chegam com segundos de
-      // distância pela fila humanizada e a pessoa responde à primeira antes de
-      // a segunda existir.
-      //
-      // Sem o arquivo no disco, `telaDoConsole()` devolve null e sai só o texto
-      // — que é o que existia antes. O sender também cai para texto sozinho se
-      // a mídia for recusada.
-      const exemploFoto = r.comExemplo ? exemplo.telaDoConsole() : null;
+    // ERROU O LOGIN VEZES DEMAIS: alguém de verdade assume.
+    //
+    // O "não entendi o usuário" repetia sem fim. Quem errou duas vezes não vai
+    // acertar na terceira — vai errar de novo, cansar e sumir, levando junto
+    // uma venda já paga. E a foto dele costuma estar guardada: o operador olha,
+    // vê o login na tela e resolve em dez segundos.
+    //
+    // O cliente ouve a MESMA frase do handoff normal. Para ele não existem dois
+    // tipos de transferência, e inventar um segundo texto aqui seria só mais
+    // uma coisa para manter igual.
+    if (r.acao === 'humano') {
+      store.saveContact(from, { paused: true, menuNode: null, modoIA: false });
+      const nome = store.getContact(from)?.name || pushName || 'cliente';
+      await ponte.alertarHandoff({ nome, from, motivo: r.motivo });
+      console.log(`[handoff] ${from} -> operador (${r.motivo})`);
       await sender.send(
         from,
-        r.mensagem,
-        exemploFoto ? { image: exemploFoto, fileName: 'tela-do-console.jpg' } : {},
+        '👤 Nosso *suporte* entrou no chat e vai continuar com você por aqui.\n\n' +
+          '_Quando quiser voltar ao menu, é só digitar *#inicio*._',
       );
       return;
     }

@@ -47,4 +47,18 @@ function carregar(arquivo) {
  */
 const telaDoConsole = () => carregar('tela-do-console.jpg');
 
-module.exports = { telaDoConsole };
+/**
+ * Onde está o login, e QUAL login é.
+ *
+ * "Manda o login da conta" tem uma ambiguidade que só aparece do lado de lá:
+ * quem já comprou mais de uma vez tem vários logins no histórico da conversa, e
+ * manda o último — que é o mais fácil de achar rolando para cima, e o errado.
+ * O que vale é sempre o PRIMEIRO recebido.
+ *
+ * Explicar isso por escrito não funciona ("primeiro" em relação a quê?). A
+ * imagem mostra as três formas em que a entrega já chegou nesta loja, com o
+ * login circulado em cada uma.
+ */
+const primeiroLogin = () => carregar('primeiro-login.jpg');
+
+module.exports = { telaDoConsole, primeiroLogin };
