@@ -50,6 +50,11 @@ const NODES = {
       { label: 'Qual é o prazo de envio?', topic: 'prazo_envio' },
       { label: 'Como funcionam os jogos de *Nintendo Switch*?', topic: 'plataforma_nintendo' },
       { label: 'Como funcionam os jogos de *Steam*?', topic: 'plataforma_steam' },
+      // Entrou aqui, e não no fim, porque é a pergunta que mais aparece e a que
+      // mais trava a compra. Enterrada embaixo de "formas de pagamento", quem
+      // está com medo desiste antes de achar, ou toca em "falar com atendente"
+      // e vira trabalho seu para uma resposta que já está pronta.
+      { label: 'Tem risco de *banimento*?', topic: 'banimento' },
       { label: 'Qual é o prazo de garantia?', topic: 'garantia' },
       { label: 'Quais são as formas de pagamento?', topic: 'pagamento' },
       { label: 'Posso trocar ou devolver o jogo?', topic: 'troca' },

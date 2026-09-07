@@ -26,6 +26,24 @@ module.exports = {
 
   restricoes: 'Não alterar senha/dados da conta recebida nem repassar a terceiros.',
 
+  // A PERGUNTA QUE MAIS TRAVA VENDA, segundo o dono.
+  //
+  // Ela é medo, não curiosidade, e medo não se responde com adjetivo. A ordem
+  // aqui é de propósito: primeiro o que dá para verificar (mais de um ano, zero
+  // casos), depois o MECANISMO (é o mesmo que um perfil novo, nada muda no
+  // console dele), e por último a prova que não depende da nossa palavra.
+  //
+  // O grupo é o argumento mais forte que a loja tem e é o único que o cliente
+  // pode conferir sozinho, agora, sem falar com a gente. Por isso ele fecha a
+  // resposta em vez de abrir: quem ainda estiver com medo depois de ler tem
+  // para onde ir, e quem já se convenceu não precisa sair da conversa.
+  banimento:
+    'Risco zero de banimento no seu console. Estamos há mais de 1 ano no mercado e não tivemos ' +
+    'um caso sequer. Na prática é o mesmo que adicionar um perfil novo no seu console: nada muda ' +
+    'no que já é seu. Quem aparece dizendo que tomou ban nunca consegue mostrar que foi por isso. ' +
+    'E você não precisa acreditar só na minha palavra: nosso grupo é aberto, tem mais de 600 clientes, ' +
+    `e é lá que eles contam a compra, o que acharam e qualquer problema que tenham tido: ${require('./config').store.groupUrl}`,
+
   // PlayStation saiu do catálogo (17/08/2026). O fato foi removido de
   // propósito, e não só escondido do menu: enquanto ele existisse aqui, a IA
   // (quando ligada por BOT_IA=true) continuaria oferecendo PlayStation, porque

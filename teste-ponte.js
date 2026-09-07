@@ -568,6 +568,27 @@ for (const [chave, texto] of Object.entries(saber)) {
 //
 // Mesma regra do site do código de verificação, e a separação precisa de teste
 // porque os dois fatos moram lado a lado no mesmo arquivo.
+// ── Banimento: a resposta é do dono, não do modelo ─────────
+//
+// É a objeção que mais trava venda, e a única em que o cliente está com MEDO
+// em vez de dúvida. Ela precisa existir por escrito nos dois caminhos: no menu
+// (que responde sem modelo nenhum) e nos FATOS do prompt (para a IA não
+// reconstruir o argumento sozinha, que é como promessa improvisada nasce).
+bloco('a resposta sobre banimento está pronta nos dois caminhos');
+const menuMod = require('./src/menu');
+t('o menu de dúvidas tem a opção', /banimento/i.test(menuMod.render('duvidas') || ''),
+  (menuMod.render('duvidas') || '').split('\n').find((l) => /banimento/i.test(l)));
+const respostaBan = menuMod.resposta('banimento') || '';
+t('  e ela responde sem modelo', respostaBan.length > 100, `${respostaBan.length} caracteres`);
+t('  com o tempo de mercado', /1 ano/.test(respostaBan));
+t('  com a comparação do perfil novo', /perfil novo/i.test(respostaBan));
+t('  e com o grupo como prova', /chat\.whatsapp\.com/.test(respostaBan));
+// UM link de grupo no projeto inteiro. Dois é um deles ficando velho, e o
+// velho leva o cliente para um grupo morto bem quando ele foi conferir se dá
+// para confiar.
+t('o grupo vem da config, não escrito à mão',
+  respostaBan.includes(require('./src/config').store.groupUrl));
+
 bloco('o tutorial em vídeo não vaza para quem comprou Steam');
 t('o fato de Nintendo tem o tutorial', /youtube\.com/.test(saber.plataforma_nintendo),
   saber.plataforma_nintendo.slice(-45));

@@ -250,6 +250,13 @@ async function buildSystemPrompt() {
     `- Entrega: ${knowledge.prazo_envio}\n` +
     `- Garantia: ${knowledge.garantia}\n` +
     `- Pagamento: ${knowledge.pagamento} Troca: ${knowledge.troca}\n` +
+    // BANIMENTO vai no prompt inteiro, sem resumir.
+    //
+    // É a objeção que mais trava venda, e é a única em que o cliente está com
+    // MEDO em vez de dúvida. Resumir aqui deixaria o modelo reconstruir o
+    // argumento sozinho, e argumento reconstruído sobre risco vira promessa
+    // improvisada. Este texto é do dono, palavra por palavra.
+    `- Banimento (a pergunta que mais aparece): ${knowledge.banimento}\n` +
     `- Nintendo: ${knowledge.plataforma_nintendo}\n` +
     `- Steam: ${knowledge.plataforma_steam}\n\n` +
 

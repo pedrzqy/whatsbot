@@ -69,7 +69,16 @@ const config = {
     // URL do site oficial (as compras são feitas apenas por lá).
     url: process.env.STORE_URL || 'https://phazegames.com',
     // Grupo do WhatsApp (convidar o cliente).
-    groupUrl: process.env.STORE_GROUP_URL || 'https://chat.whatsapp.com/KxQ7jybE7fL4N31C7kpKYp',
+    //
+    // Ele deixou de ser só um convite e virou PROVA: é o argumento central da
+    // resposta sobre banimento (knowledge.banimento). Um grupo aberto, com mais
+    // de 600 pessoas contando a compra e os problemas, é verificável — e
+    // verificável vence qualquer adjetivo que a gente escreva sobre si mesmo.
+    //
+    // Por isso mora aqui e em nenhum outro lugar: dois links soltos pelo código
+    // é um deles ficando velho, e o velho leva o cliente para um grupo morto
+    // bem no momento em que ele foi conferir se dá para confiar.
+    groupUrl: process.env.STORE_GROUP_URL || 'https://chat.whatsapp.com/Il0t5LvgRCpEY8acgoefe5',
     // Site onde o cliente resgata o código de verificação da conta (ao entrar).
     codeUrl: process.env.STORE_CODE_URL || 'https://codigons.online/',
     // Vídeo de como entrar na conta, baixar e jogar. SÓ NINTENDO.
