@@ -620,6 +620,11 @@ async function execute(name, args = {}, ctx = {}) {
     }
 
     if (name === 'criar_pedido') {
+      // A trava do interruptor mora dentro do criarPedido (ver lá em cima):
+      // desligado, ele devolve `venda_desligada` com a instrução de mandar o
+      // link. Repetir a checagem aqui daria DUAS respostas diferentes para a
+      // mesma pergunta, e a de fora venceria a que tem teste.
+      //
       // `await` obrigatório, e não é estilo: devolver a promessa direto faz o
       // `try` sair ANTES de ela rejeitar, e o catch lá embaixo — que é quem
       // transforma a falha em "manda o link do site" — nunca roda. O erro subia
