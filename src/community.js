@@ -373,42 +373,22 @@ async function tick() {
   }
 }
 
-// ─── FASE 2: responder no grupo quando marcarem o bot (@) ou usarem gatilho ──
-let lastGroupReplyAt = 0;
-
-/**
- * Trata uma mensagem recebida no grupo da comunidade (chamado pelo server só p/ grupos).
- * Só responde se: replies ligados, é o NOSSO grupo, e o bot foi marcado (@) OU citaram o gatilho.
- * @param {{groupJid:string, participant:string, text:string, pushName?:string, mentionedJids?:string[]}} m
- */
-async function handleGroupMessage(m) {
-  if (!cfg.replyEnabled || !cfg.groupJid) return;
-  if (!m || m.groupJid !== cfg.groupJid) return; // só o grupo da comunidade
-  const text = (m.text || '').trim();
-  if (!text) return;
-
-  const mentioned = cfg.botNumber && (m.mentionedJids || []).some((j) => String(j).replace(/\D/g, '').startsWith(cfg.botNumber));
-  const lower = text.toLowerCase();
-  const triggered = cfg.trigger && lower.includes(cfg.trigger);
-  if (!mentioned && !triggered) return; // só responde se chamarem o bot
-
-  const now = Date.now();
-  if (now - lastGroupReplyAt < cfg.replyCooldownMs) return; // anti-spam (cooldown)
-  lastGroupReplyAt = now;
-
-  // Remove a menção/gatilho do texto pra deixar só a pergunta.
-  let question = text.replace(new RegExp(`@?${cfg.trigger}`, 'ig'), '').replace(/@\d+/g, '').trim();
-  if (!question) question = text;
-
-  try {
-    const key = m.participant || m.groupJid; // histórico por membro
-    const answer = await ai.reply(key, question, m.pushName);
-    await publish(answer); // respeita dry-run; publica no grupo
-    console.log(`[community] respondeu no grupo (${m.participant || '?'})`);
-  } catch (err) {
-    console.error('[community] erro ao responder no grupo:', err.response?.data || err.message);
-  }
-}
+// ─── O BOT NAO RESPONDE NO GRUPO. NUNCA. ────────────────────
+//
+// Aqui existia o caminho inverso: mensagem do grupo entrava, ia para a IA, e a
+// resposta era publicada la. Ficava atras de COMMUNITY_REPLY_ENABLED, desligado
+// por padrao.
+//
+// O dono fechou a questao: as unicas mensagens que saem para o grupo sao os
+// anuncios que este arquivo agenda. Conversa e no privado.
+//
+// Um interruptor desligado nao implementa "nunca" -- implementa "ate alguem
+// ligar", e quem ligar daqui a seis meses nao vai saber que existia uma regra.
+// Por isso o caminho saiu inteiro, junto com COMMUNITY_REPLY_ENABLED,
+// COMMUNITY_TRIGGER, COMMUNITY_BOT_NUMBER e o cooldown que so ele usava.
+//
+// O que sobrou e so saida: tick() publica, e ninguem le o grupo. O server nem
+// entrega mais mensagem de grupo para ca.
 
 function start() {
   if (!cfg.enabled) { console.log('[community] desligada (COMMUNITY_ENABLED != true)'); return; }
@@ -444,4 +424,4 @@ function start() {
 
 function stop() { if (timer) { clearInterval(timer); timer = null; } }
 
-module.exports = { start, stop, tick, handleGroupMessage, genBestSellers, genPromo, genCoupon, genNews, genReviews, genAvaliacao };
+module.exports = { start, stop, tick, genBestSellers, genPromo, genCoupon, genNews, genReviews, genAvaliacao };

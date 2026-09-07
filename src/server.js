@@ -78,20 +78,23 @@ app.post('/webhooks/evolution', async (req, res) => {
       message.templateButtonReplyMessage?.selectedId ||
       '';
 
-    // GRUPOS: o agente de comunidade (Fase 2) decide se responde. Ele só age se as
-    // respostas estiverem ligadas e for o grupo certo; senão, ignora. (Por padrão a
-    // Evolution nem entrega msgs de grupo — groupsIgnore=true.) O fluxo 1-a-1 fica intacto.
-    if (/@g\.us$/i.test(remoteJid)) {
-      const ctx = message.extendedTextMessage?.contextInfo || {};
-      await community.handleGroupMessage({
-        groupJid: remoteJid,
-        participant: (key.participant || '').replace('@s.whatsapp.net', ''),
-        text,
-        pushName: data.pushName,
-        mentionedJids: ctx.mentionedJid || [],
-      });
-      return;
-    }
+    // GRUPO: o bot NÃO responde. Nunca.
+    //
+    // As únicas mensagens que saem para o grupo são os anúncios que o
+    // community.js agenda. Conversa é no privado, e essa é a regra do dono.
+    //
+    // Aqui havia um desvio para o `handleGroupMessage`, que lia a mensagem e
+    // podia responder no grupo se COMMUNITY_REPLY_ENABLED estivesse ligado. O
+    // caminho saiu inteiro: um interruptor desligado implementa "até alguém
+    // ligar", não "nunca", e quem ligasse daqui a seis meses não saberia que
+    // existia uma regra.
+    //
+    // O `return` fica, e é ele que garante o resto: sem esta linha, mensagem de
+    // grupo cairia no fluxo 1-a-1 logo abaixo e a IA responderia lá dentro
+    // achando que era conversa privada. (Por padrão a Evolution nem entrega
+    // mensagem de grupo, `groupsIgnore=true`, mas isso é configuração de outro
+    // serviço e não é onde uma regra desta deve morar.)
+    if (/@g\.us$/i.test(remoteJid)) return;
 
     // IMAGEM (só no 1-a-1, depois do desvio de grupos): a Evolution entrega
     // apenas os metadados no webhook e o binário é baixado sob demanda.

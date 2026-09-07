@@ -142,6 +142,28 @@ function webhookDe(numero, message, pushName = 'Cliente') {
   const CLI = '5541900007777';
   const jaSaudado = { greetedAt: Date.now(), lastSeen: Date.now(), paused: false };
 
+  // ── GRUPO: O BOT NÃO RESPONDE. NUNCA. ──────────────────────
+  //
+  // As únicas mensagens que saem para o grupo são os anúncios que o
+  // community.js agenda. Existia um caminho inverso, atrás de uma variável de
+  // ambiente desligada — e um interruptor desligado implementa "até alguém
+  // ligar", não "nunca".
+  //
+  // O teste manda a mensagem mais tentadora possível: uma pergunta de venda,
+  // com o gatilho antigo dentro. Se algum caminho voltar, ela é a que passa.
+  bloco('mensagem de grupo não recebe resposta nenhuma');
+
+  const GRUPO = '120363424094017221@g.us';
+  await entregar({
+    data: {
+      key: { remoteJid: GRUPO, fromMe: false, participant: '5541900004444@s.whatsapp.net' },
+      message: { conversation: 'phaze, quanto custa o mario kart? quero comprar agora' },
+      pushName: 'Alguém do grupo',
+    },
+  });
+  t('nada é enviado', enviadas.length === 0, JSON.stringify(enviadas.map((e) => e.para)));
+  t('  e a IA nem é chamada', vistoPelaIA === null, vistoPelaIA ? 'foi chamada' : 'não foi');
+
   // ── O MENU E A PAUSA ───────────────────────────────────────
   //
   // O relato veio com print: o cliente recebeu as boas-vindas, logo depois
