@@ -6,8 +6,14 @@
  */
 
 module.exports = {
+  // "automática" saiu daqui, e a palavra não é detalhe.
+  //
+  // Este arquivo é a MEMÓRIA da IA sobre a loja: o que está escrito aqui entra
+  // no prompt e sai reescrito na conversa com o cliente. Uma palavra barrada
+  // aqui não vaza uma vez — vaza toda vez que alguém pergunta o prazo, com a
+  // naturalidade de quem aprendeu que pode falar assim.
   prazo_envio:
-    'Entrega digital e automática após o pagamento, normalmente em até 30 min. Pix cai na hora; ' +
+    'Entrega digital, normalmente em até 30 min depois do pagamento. Pix cai na hora; ' +
     'os dados chegam no WhatsApp e no e-mail da compra.',
 
   garantia:

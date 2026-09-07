@@ -542,6 +542,22 @@ const PROIBIDO = /fornecedor|taobao|chin[êe]s|vendedor|parceiro/i;
 // lastIndex entre chamadas e alterna true/false na mesma entrada.
 const AUTOMACAO = politica.vocabularioProibido();
 
+// ── A MEMÓRIA DA IA TAMBÉM PASSA PELA RÉGUA ────────────────
+//
+// O knowledge.js é o que a IA sabe sobre a loja: entra no prompt e sai
+// reescrito na conversa com o cliente. Uma palavra barrada ali não vaza uma
+// vez — vaza toda vez que alguém faz aquela pergunta, com a naturalidade de
+// quem aprendeu que pode falar assim.
+//
+// Estava lá: "Entrega digital e automática após o pagamento". Nenhum teste
+// olhava este arquivo, porque a régua sempre foi apontada para as mensagens
+// PRONTAS, e esta é uma fonte de mensagem que ninguém escreve à mão.
+bloco('o que a IA sabe da loja não pode ter palavra barrada');
+for (const [chave, texto] of Object.entries(require('./src/knowledge'))) {
+  const achou = (String(texto).match(AUTOMACAO) || [])[0];
+  t(`knowledge.${chave}`, !achou, achou || 'limpo');
+}
+
 // NUNCA dizer ao cliente que o pedido dele vai para outra pessoa.
 //
 // Não basta não escrever "fornecedor": "vou encaminhar", "vamos solicitar",
