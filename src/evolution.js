@@ -66,6 +66,31 @@ async function estadoInstancia(opts = {}) {
 }
 
 /**
+ * Pede um código de pareamento novo para reconectar o número.
+ *
+ * Quando o WhatsApp cai, o bot fica mudo e NÃO consegue avisar ninguém: o único
+ * canal que ele tem é justamente o que caiu. E o painel da Evolution mora num
+ * endereço interno do Easypanel, que o navegador de fora não resolve.
+ *
+ * Sobrava o console do container, digitando um comando comprido no celular. É
+ * o pior momento possível para exigir isso de alguém: a loja está parada.
+ *
+ * @returns {Promise<{pairingCode:string|null, qrBase64:string|null}>}
+ */
+async function conectarInstancia(opts = {}) {
+  const instance = opts.instance || config.evolution.instance;
+  const { data } = await http.get(`/instance/connect/${instance}`);
+  // `base64` às vezes já vem como data URI e às vezes cru, dependendo da versão
+  // da Evolution. Normalizar aqui evita uma imagem quebrada na única tela que
+  // alguém abre no meio de um problema.
+  const bruto = data?.base64 || data?.qrcode?.base64 || null;
+  return {
+    pairingCode: data?.pairingCode || data?.qrcode?.pairingCode || null,
+    qrBase64: bruto && !bruto.startsWith('data:') ? `data:image/png;base64,${bruto}` : bruto,
+  };
+}
+
+/**
  * Envia um menu como LISTA nativa do WhatsApp.
  *
  * Lista e não botão: o WhatsApp aceita no máximo 3 botões de resposta, e o
@@ -136,5 +161,6 @@ module.exports = {
   sendMedia,
   sendList,
   estadoInstancia,
+  conectarInstancia,
   getBase64FromMediaMessage,
 };

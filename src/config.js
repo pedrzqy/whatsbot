@@ -118,6 +118,16 @@ const config = {
     nerixSecret: process.env.NERIX_WEBHOOK_SECRET || '',
   },
 
+  // Token da tela de reconectar o WhatsApp (/conectar).
+  //
+  // VAZIO DESLIGA A ROTA, e esse é o padrão certo: a tela devolve um código de
+  // pareamento, e quem tem um código de pareamento liga o WhatsApp DELE no
+  // número da loja. É tomada de conta, não é bisbilhotar.
+  //
+  // Sem o token configurado a rota responde 404, como se não existisse. Quem
+  // precisar dela liga de propósito, sabendo o que está abrindo.
+  adminToken: process.env.ADMIN_TOKEN || '',
+
   // ── Quando existe GENTE do outro lado ──────────────────────────────
   //
   // O bot atende 24h e continua atendendo — isso não muda. O que muda é o que

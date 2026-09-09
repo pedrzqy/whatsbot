@@ -37,6 +37,7 @@ process.env.PONTE_OPERADOR_NUMERO = '5541999999999';
 process.env.PONTE_BRACO_KEY = 'teste';
 process.env.PONTE_ATIVA = 'true';
 process.env.BOT_AUTOREPLY = 'true';
+process.env.ADMIN_TOKEN = 'token-de-teste';
 
 let falhas = 0;
 const t = (nome, ok, extra = '') => {
@@ -141,6 +142,38 @@ function webhookDe(numero, message, pushName = 'Cliente') {
 
   const CLI = '5541900007777';
   const jaSaudado = { greetedAt: Date.now(), lastSeen: Date.now(), paused: false };
+
+  // ── A TELA DE RECONECTAR ───────────────────────────────────
+  //
+  // Quando o numero cai, o bot fica mudo e nao consegue avisar ninguem: o unico
+  // canal que ele tem e justamente o que caiu. Esta tela e a saida, e o que ela
+  // devolve e um codigo de pareamento -- quem tem um deles liga o PROPRIO
+  // WhatsApp no numero da loja. Por isso os tres casos abaixo importam mais que
+  // o conteudo da pagina.
+  bloco('a tela de reconectar so abre com o token certo');
+
+  const base = `http://127.0.0.1:${servidor.address().port}`;
+  const semToken = await fetch(`${base}/conectar`);
+  t('sem token, recusa', semToken.status === 401, String(semToken.status));
+  const tokenErrado = await fetch(`${base}/conectar?token=chutei`);
+  t('com token errado, recusa', tokenErrado.status === 401, String(tokenErrado.status));
+
+  // Com o token certo ela chama a Evolution. O duble responde como a de verdade.
+  evolution.estadoInstancia = async () => 'close';
+  evolution.conectarInstancia = async () => ({ pairingCode: 'WXYZ-1234', qrBase64: null });
+  const certo = await fetch(`${base}/conectar?token=token-de-teste`);
+  const html = await certo.text();
+  t('com o token certo, abre', certo.status === 200, String(certo.status));
+  t('  e mostra o codigo de pareamento', /WXYZ-1234/.test(html), html.slice(0, 60));
+  t('  sem vazar a chave da Evolution', !html.includes(process.env.EVOLUTION_API_KEY));
+
+  // Ja conectado nao gera codigo novo: gerar um a toa e deixar um pareamento
+  // valido rolando por ai sem ninguem precisar dele.
+  evolution.estadoInstancia = async () => 'open';
+  let pediuCodigo = false;
+  evolution.conectarInstancia = async () => { pediuCodigo = true; return {}; };
+  const jaOk = await fetch(`${base}/conectar?token=token-de-teste`);
+  t('conectado nao gera codigo novo', pediuCodigo === false && /Ja esta conectado/.test(await jaOk.text()));
 
   // ── GRUPO: O BOT NÃO RESPONDE. NUNCA. ──────────────────────
   //

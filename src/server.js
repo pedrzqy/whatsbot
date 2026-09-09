@@ -179,6 +179,78 @@ app.post('/webhooks/evolution', async (req, res) => {
  * Webhook da Nerix — eventos de pedido (order.paid, order.delivered, ...).
  * Configure no painel da Nerix com ?secret=SEU_TOKEN.
  */
+/**
+ * A tela de reconectar o WhatsApp, para abrir no navegador do celular.
+ *
+ * QUANDO O NÚMERO CAI, o bot fica mudo e não consegue avisar ninguém: o único
+ * canal que ele tem é justamente o que caiu. E o painel da Evolution mora num
+ * endereço interno do Easypanel (`servico_evolution-api:8080`), que só resolve
+ * de dentro da rede dos containers — o navegador de fora dá erro de DNS.
+ *
+ * Sobrava abrir o console do container e digitar um comando comprido, no
+ * celular, com a loja parada. É o pior momento possível para exigir isso.
+ *
+ * Este endereço o dono salva nos favoritos uma vez. Nos próximos tombos são
+ * dois toques.
+ *
+ * PROTEGIDA DE VERDADE, e não por hábito: o que ela devolve é um código de
+ * pareamento, e quem tem um código de pareamento liga o PRÓPRIO WhatsApp no
+ * número da loja. Sem `ADMIN_TOKEN` configurado ela responde 404, como se não
+ * existisse.
+ */
+app.get('/conectar', async (req, res) => {
+  if (!config.adminToken) return res.status(404).send('Não encontrado');
+
+  if (req.query.token !== config.adminToken) {
+    console.warn('[conectar] tentativa com token errado');
+    return res.status(401).send('Token inválido');
+  }
+
+  const pagina = (corpo) =>
+    res.type('html').send(
+      '<meta name="viewport" content="width=device-width,initial-scale=1">' +
+        '<style>body{font-family:system-ui;background:#111;color:#eee;text-align:center;padding:24px}' +
+        'h1{font-size:18px;font-weight:600}code{font-size:34px;letter-spacing:3px;display:block;' +
+        'margin:18px 0;color:#7ef}img{max-width:min(88vw,360px);background:#fff;padding:10px;border-radius:8px}' +
+        'p{color:#aaa;font-size:14px;line-height:1.5}</style>' +
+        corpo,
+    );
+
+  try {
+    const estado = await evolution.estadoInstancia().catch(() => '');
+    if (estado === 'open') {
+      return pagina('<h1>✅ Ja esta conectado</h1><p>Nao precisa fazer nada.</p>');
+    }
+
+    const { pairingCode, qrBase64 } = await evolution.conectarInstancia();
+    console.log('[conectar] codigo de pareamento gerado');
+
+    // O código vem PRIMEIRO, e o QR embaixo: quem abre isto está no celular, e
+    // no celular não dá para apontar a câmera para a própria tela.
+    return pagina(
+      '<h1>Conectar o WhatsApp</h1>' +
+        (pairingCode
+          ? `<p>No celular: WhatsApp, Dispositivos conectados, Conectar com numero de telefone. ` +
+            `Digite:</p><code>${pairingCode}</code>`
+          : '<p>Esta versao nao devolveu codigo. Use o QR abaixo.</p>') +
+        (qrBase64 ? `<p>Ou aponte a camera de outro aparelho:</p><img src="${qrBase64}">` : '') +
+        '<p>Expira rapido. Se falhar, recarregue esta pagina para gerar outro.</p>',
+    );
+  } catch (err) {
+    // O motivo REAL na tela, e não "algo deu errado". Quem abre isto está
+    // resolvendo um problema, e a mensagem é a única pista que ele tem.
+    const motivo = err.response?.status
+      ? `A Evolution respondeu ${err.response.status}.`
+      : `Nao consegui falar com a Evolution: ${err.code || err.message}.`;
+    console.error('[conectar] falhou:', err.response?.status || err.message);
+    return pagina(
+      `<h1>Nao deu para gerar o codigo</h1><p>${motivo}</p>` +
+        '<p>Confira se o servico da Evolution esta no ar e se a EVOLUTION_API_KEY do whatsbot ' +
+        'e igual a AUTHENTICATION_API_KEY dela.</p>',
+    );
+  }
+});
+
 // Dá para abrir no navegador e ver se o endereço existe.
 //
 // "Configurei tudo certinho e não chega" tem duas causas muito diferentes: a
