@@ -145,6 +145,29 @@ const CLI = '5541999998888';
   t('o Pix sai mesmo assim', enviadas.filter((e) => e.para === CLI).length === 2,
     `${enviadas.filter((e) => e.para === CLI).length} mensagem(ns)`);
 
+  // ── Nome de evento desconhecido, pedido PAGO ───────────────
+  //
+  // A loja aprovou uma venda de verdade e nada aconteceu. O nome que chegou não
+  // era nenhum dos que estavam escritos no switch, e o caminho de sobra só
+  // sabia mandar Pix — que desiste na primeira linha quando o pedido já está
+  // pago. O aviso nao saia, e o log dizia so "evento sem tratamento", que
+  // parece informacao e nao parece problema.
+  bloco('venda aprovada avisa mesmo com nome de evento desconhecido');
+
+  enviadas = [];
+  pedidoFalso = pedido({ order_number: 'nome-estranho' });
+  await vendas.onEvento({ event: 'venda.aprovada', data: { order_number: 'nome-estranho' } });
+  const avisoOp = enviadas.find((e) => e.para === OP);
+  t('o operador é avisado do mesmo jeito', Boolean(avisoOp), JSON.stringify(enviadas.map((e) => e.para)));
+  t('  com o valor da venda', /49[.,]9/.test(avisoOp?.texto || ''), avisoOp?.texto.split('\n')[0]);
+  t('o cliente recebe a confirmação', enviadas.some((e) => e.para === CLI));
+
+  // E não repete quando o evento com o nome certo chegar logo depois.
+  enviadas = [];
+  await vendas.onEvento({ event: 'order.paid', data: { order_number: 'nome-estranho' } });
+  t('  e o evento certo depois não repete nada', enviadas.length === 0,
+    JSON.stringify(enviadas.map((e) => e.para)));
+
   bloco('quem já pagou não recebe cobrança');
   enviadas = [];
   pedidoFalso = pedido({ order_number: 'ped-pago', payment: { pix_qr_code: PIX_FALSO } });

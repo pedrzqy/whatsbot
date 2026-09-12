@@ -645,20 +645,30 @@ async function onEvento(evento) {
       break;
 
     default:
-      // Evento novo da Nerix não é erro: é aviso de que existe algo a tratar.
-      console.log(`[vendas] evento sem tratamento: ${nome}`);
+      // NOME DESCONHECIDO NÃO PODE CUSTAR UMA VENDA.
+      //
+      // Todos os `case` acima são palpite sobre como a loja nomeia as coisas.
+      // Ela aprovou uma venda de verdade e nada aconteceu, porque o nome que
+      // chegou não era nenhum dos que estão escritos ali — e aqui embaixo só
+      // rodava o envio de Pix, que desiste na primeira linha quando o pedido já
+      // está pago. O aviso simplesmente não saía, e o log dizia só "evento sem
+      // tratamento", que parece informação e não parece problema.
+      //
+      // Agora quem decide é o ESTADO do pedido, que não depende de nomenclatura
+      // nenhuma: pago recebe o tratamento de pago, em aberto recebe o Pix. As
+      // travas de "uma vez só" cuidam de tudo o mais, então chamar os três em
+      // sequência é seguro mesmo quando o evento certo chegar logo depois.
+      console.log(`[vendas] evento sem tratamento: ${nome} — decidindo pelo estado do pedido`);
 
-      // E o nome desconhecido não pode custar a venda.
-      //
-      // Os três `case` acima são um palpite sobre como a loja chama "pedido
-      // criado". Se ela chamar de outra coisa, o pedido cairia aqui e a pessoa
-      // esperaria as duas horas da varredura de novo — o defeito consertado
-      // voltando por um nome diferente.
-      //
-      // Aqui a pergunta não é o nome do evento, é o estado do pedido: em
-      // aberto e com Pix, ele vai. A trava de uma vez só cuida do resto, e um
-      // evento de pedido já pago sai na primeira linha do mandarPixNaHora.
-      await mandarPixNaHora(pedido);
+      if (pedido.pago) {
+        await notificarVenda(pedido);
+        await avisarPagamentoAoCliente(pedido);
+        // A chave só sai se já existir no pedido; se ainda não saiu, esta
+        // chamada não faz nada e o evento de entrega resolve depois.
+        await entregarChaves(pedido);
+      } else {
+        await mandarPixNaHora(pedido);
+      }
   }
 }
 
