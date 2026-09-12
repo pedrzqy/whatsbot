@@ -277,6 +277,45 @@ const CLI = '5541999998888';
     enviadas = [];
     await vendas.lembrarPixPendente();
     t('e ninguém é cutucado duas vezes', enviadas.length === 0, JSON.stringify(enviadas.map((e) => e.para)));
+
+    // ── A ENXURRADA ──────────────────────────────────────────
+    //
+    // Relato com print: quatro mensagens seguidas para o mesmo cliente, todas
+    // iguais menos pelo código. A trava de "não repetir" era por PEDIDO, e ele
+    // tinha quatro em aberto.
+    //
+    // E não eram quatro compras: eram quatro tentativas da mesma, os valores se
+    // repetiam dois a dois. Do lado de lá aquilo não parece cobrança, parece
+    // defeito, e chega quando a pessoa ainda está decidindo.
+    const antonio = '11959460592';
+    listaFalsa = [
+      { order_number: 'tent-1', status: 'pending', total: 136.92, created_at: horas(5), customer_phone: antonio, customer_name: 'Antonio Silva' },
+      { order_number: 'tent-2', status: 'pending', total: 143.99, created_at: horas(4), customer_phone: antonio, customer_name: 'Antonio Silva' },
+      { order_number: 'tent-3', status: 'pending', total: 143.99, created_at: horas(3), customer_phone: antonio, customer_name: 'Antonio Silva' },
+      { order_number: 'tent-4', status: 'pending', total: 136.92, created_at: horas(2.5), customer_phone: antonio, customer_name: 'Antonio Silva' },
+    ];
+    enviadas = [];
+    await vendas.lembrarPixPendente();
+    t('quatro tentativas viram UMA mensagem', enviadas.length === 1, `${enviadas.length} mensagem(ns)`);
+    t('  falando do pedido mais recente', /tent-4/.test(enviadas[0]?.texto || ''),
+      (enviadas[0]?.texto || '').split('\n')[2]);
+
+    // Os outros três não podem voltar um a um nas próximas voltas: seria a
+    // mesma enxurrada, só que espalhada por quatro horas.
+    enviadas = [];
+    await vendas.lembrarPixPendente();
+    t('  e os outros não voltam depois', enviadas.length === 0,
+      JSON.stringify(enviadas.map((e) => e.texto?.slice(0, 30))));
+
+    // Duas pessoas diferentes continuam recebendo uma cada: o agrupamento não
+    // pode virar "uma mensagem por varredura".
+    listaFalsa = [
+      { order_number: 'p1', status: 'pending', total: 10, created_at: horas(5), customer_phone: '41988880001', customer_name: 'Um' },
+      { order_number: 'p2', status: 'pending', total: 20, created_at: horas(5), customer_phone: '41988880002', customer_name: 'Dois' },
+    ];
+    enviadas = [];
+    await vendas.lembrarPixPendente();
+    t('duas pessoas recebem uma cada', enviadas.length === 2, `${enviadas.length} mensagem(ns)`);
   } else {
     t('fora do horário civil não cutuca ninguém', enviadas.length === 0, `${horaBRT}h BRT`);
   }

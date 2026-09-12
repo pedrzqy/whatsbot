@@ -513,20 +513,54 @@ async function lembrarPixPendente() {
   let mandados = 0;
   const agora = Date.now();
 
+  // UMA MENSAGEM POR PESSOA, e não por pedido.
+  //
+  // O laço mandava uma cutucada para cada pedido em aberto, e a trava de "não
+  // repetir" era por CÓDIGO. Quem tentou fechar quatro vezes tinha quatro
+  // pedidos parados, então recebeu quatro mensagens seguidas, todas iguais
+  // menos pelo código.
+  //
+  // E não eram quatro compras: eram quatro tentativas da mesma. Os valores se
+  // repetiam dois a dois. Do lado de lá isso não parece cobrança, parece
+  // defeito, e chega num momento em que a pessoa ainda está decidindo.
+  //
+  // Agrupar por telefone é o conserto, e ele também responde "e se ele tiver
+  // dois pedidos de verdade?": a mensagem fala do MAIS RECENTE, que é o que a
+  // pessoa tentou por último, e os outros são marcados junto para não voltarem
+  // um a um na próxima volta.
+  const porPessoa = new Map();
+
   for (const cru of lista) {
     const fmt = formatOrder(cru);
     if (fmt.pago) continue; // o status da lista pode estar velho
 
-    const idade = agora - new Date(cru.created_at || 0).getTime();
+    const criadoEm = new Date(cru.created_at || 0).getTime();
+    const idade = agora - criadoEm;
     if (!(idade > PIX_MIN_MS && idade < PIX_MAX_MS)) continue;
 
     const numero = paraWhatsApp(cru.customer_phone || cru.customer?.phone);
     if (!numero) continue;
     if (jaFeito(fmt.codigo, 'lembradoPix')) continue;
 
-    // Marca antes de mandar: falha de envio não pode virar duas cutucadas na
-    // próxima volta. Uma cobrança perdida é melhor que uma repetida.
-    if (!marcar(fmt.codigo, 'lembradoPix')) continue;
+    const grupo = porPessoa.get(numero) || { itens: [] };
+    grupo.itens.push({ cru, fmt, criadoEm });
+    porPessoa.set(numero, grupo);
+  }
+
+  for (const [numero, grupo] of porPessoa) {
+    // O mais recente é o que ela tentou por último, e o único que interessa.
+    grupo.itens.sort((a, b) => b.criadoEm - a.criadoEm);
+    const { cru, fmt } = grupo.itens[0];
+
+    // Marca TODOS antes de mandar. Os outros pedidos da mesma pessoa não podem
+    // virar mensagem na volta seguinte, senão a enxurrada só fica mais lenta.
+    // E marcar antes de enviar é a regra do arquivo: falha de envio vira uma
+    // cobrança perdida, nunca uma repetida.
+    let primeiro = false;
+    for (const item of grupo.itens) {
+      if (marcar(item.fmt.codigo, 'lembradoPix')) primeiro = true;
+    }
+    if (!primeiro) continue;
 
     const nome = primeiroNome(cru.customer_name || cru.customer?.name);
     const linhas = [

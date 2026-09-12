@@ -268,8 +268,17 @@ function formatOrder(p) {
 
   const pago = ['paid', 'approved', 'completed', 'delivered'].includes(bruto);
 
+  const codigo = p.order_number || p.code || p.id;
+  const pix = pago ? undefined : acharPix(p);
+  const link = pago ? undefined : acharLink(p);
+
+  // Em aberto e sem como pagar e o caso que passava calado, e e o que quebra os
+  // dois caminhos de cobranca de uma vez. Avisa UMA vez por leitura, com os
+  // nomes dos campos que vieram.
+  if (!pago && !pix && !link) avisarFaltaPagamento(p, codigo);
+
   return {
-    codigo: p.order_number || p.code || p.id,
+    codigo,
     status: STATUS[bruto] || bruto || 'desconhecido',
     status_bruto: bruto || null,
     total: brl(p.total ?? p.amount),
@@ -279,17 +288,77 @@ function formatOrder(p) {
     // Link de pagamento SÓ enquanto falta pagar. Mandar "pague aqui" para quem
     // já pagou faz o cliente achar que a compra não passou e, na pior das
     // hipóteses, pagar de novo.
-    link_pagamento: pago ? undefined : p.payment_url || p.checkout_url || undefined,
+    link_pagamento: link,
 
     // Pix copia-e-cola, também só enquanto falta pagar.
     //
-    // Vem em p.payment.pix_qr_code (confirmado num pedido real). É a resposta
-    // direta para "não consegui pagar" / "perdi o código do Pix", sem o
-    // cliente ter que voltar ao site. O _base64 do mesmo objeto é a IMAGEM do
-    // QR, com 8 mil caracteres — fora daqui de propósito: estouraria o
-    // contexto do modelo e ele não tem como mandar imagem por este caminho.
-    pix_copia_e_cola: pago ? undefined : p.payment?.pix_qr_code || p.payment?.qr_code || undefined,
+    // É a resposta direta para "não consegui pagar" / "perdi o código do Pix",
+    // sem o cliente ter que voltar ao site. O _base64 do mesmo objeto é a
+    // IMAGEM do QR, com 8 mil caracteres — fora daqui de propósito: estouraria
+    // o contexto do modelo e ele não tem como mandar imagem por este caminho.
+    pix_copia_e_cola: pix,
   };
+}
+
+// ── Onde mora o Pix, e o que fazer quando não mora em lugar nenhum ──
+//
+// Só `p.payment.pix_qr_code` era procurado, confirmado num pedido real. Mas
+// pedido de verdade chegou SEM esse campo, e o efeito não foi um erro: foi
+// silêncio. A cutucada de pagamento saiu com o código e o valor e NENHUMA forma
+// de pagar, e o envio imediato (vendas.mandarPixNaHora) desistiu na primeira
+// linha, porque ele checa exatamente isto antes de falar.
+//
+// Daí o relato "está demorando 45 minutos": o caminho rápido não disparava, e o
+// que chegava era a varredura de duas horas, também sem o Pix.
+//
+// A lista cobre as formas que essas APIs costumam usar. Onde ela falhar, o
+// `avisarFaltaPagamento` diz QUAIS campos vieram, e a próxima correção deixa de
+// ser chute.
+const CAMINHOS_PIX = [
+  (p) => p.payment?.pix_qr_code,
+  (p) => p.payment?.qr_code,
+  (p) => p.payment?.pix?.qr_code,
+  (p) => p.payment?.pix?.copia_e_cola,
+  (p) => p.payment?.emv,
+  (p) => p.pix_qr_code,
+  (p) => p.qr_code,
+  (p) => p.pix?.qr_code,
+];
+
+const CAMINHOS_LINK = [
+  (p) => p.payment_url,
+  (p) => p.checkout_url,
+  (p) => p.payment?.url,
+  (p) => p.payment?.payment_url,
+  (p) => p.payment?.checkout_url,
+  (p) => p.payment_link,
+];
+
+const primeiroQueVier = (p, caminhos) => {
+  for (const ler of caminhos) {
+    let v;
+    try { v = ler(p); } catch { v = null; }
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return undefined;
+};
+
+const acharPix = (p) => primeiroQueVier(p, CAMINHOS_PIX);
+const acharLink = (p) => primeiroQueVier(p, CAMINHOS_LINK);
+
+/**
+ * Pedido em aberto e sem como pagar: diz QUAIS campos vieram.
+ *
+ * Só os NOMES, nunca os valores: o payload tem dado de cliente, e o log do
+ * painel não é lugar para isso. Os nomes bastam para achar onde o Pix se mudou.
+ */
+function avisarFaltaPagamento(p, codigo) {
+  const topo = Object.keys(p || {}).join(',');
+  const dentro = Object.keys(p?.payment || {}).join(',') || '(sem objeto payment)';
+  console.warn(
+    `[pedido] ${codigo} esta em aberto e nao achei Pix nem link de pagamento. ` +
+      `Campos no topo: ${topo} | dentro de payment: ${dentro}`,
+  );
 }
 
 // ─── Fechar a compra na conversa ─────────────────────────────────────
