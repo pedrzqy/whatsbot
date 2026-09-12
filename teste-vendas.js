@@ -152,6 +152,31 @@ const CLI = '5541999998888';
   // sabia mandar Pix — que desiste na primeira linha quando o pedido já está
   // pago. O aviso nao saia, e o log dizia so "evento sem tratamento", que
   // parece informacao e nao parece problema.
+  // ── status x payment_status ────────────────────────────────
+  //
+  // A Nerix separa o status do PEDIDO (pending, completed, cancelled,
+  // delivered) do status do PAGAMENTO (pending, paid, refunded). Um pedido
+  // recém-pago chega com `status: "pending"` e `payment_status: "paid"`, e
+  // lendo o primeiro ele era considerado NÃO PAGO.
+  //
+  // O estrago é calado: cobrança e link de pagamento voltam para quem já pagou,
+  // e alguns pagam de novo.
+  bloco('pedido pago com status ainda pendente é lido como pago');
+  const formatOrder = require('./src/tools').formatOrder;
+  const recemPago = formatOrder({
+    order_number: 'NX-2001',
+    status: 'pending',
+    payment_status: 'paid',
+    total: '59.80',
+    items: [],
+  });
+  t('payment_status manda', recemPago.pago === true, JSON.stringify(recemPago.status));
+  t('  e não oferece pagamento a quem já pagou',
+    !recemPago.pix_copia_e_cola && !recemPago.link_pagamento);
+  // E o contrário continua valendo: estornado não é pago.
+  t('estornado não vira pago',
+    formatOrder({ order_number: 'x', status: 'pending', payment_status: 'refunded' }).pago === false);
+
   bloco('venda aprovada avisa mesmo com nome de evento desconhecido');
 
   enviadas = [];

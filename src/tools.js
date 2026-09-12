@@ -266,7 +266,20 @@ function formatOrder(p) {
     return item;
   });
 
-  const pago = ['paid', 'approved', 'completed', 'delivered'].includes(bruto);
+  // PAGO vem de DOIS campos, e quem manda é o payment_status.
+  //
+  // A Nerix separa `status` (o do pedido: pending, completed, cancelled,
+  // delivered) de `payment_status` (o do pagamento: pending, paid, refunded).
+  // Lendo `status` primeiro, um pedido recém-pago — `status: "pending"` com
+  // `payment_status: "paid"` — era lido como NÃO PAGO.
+  //
+  // O estrago disso é calado e caro: o link de pagamento e o Pix voltam a
+  // aparecer para quem já pagou, e a varredura de cobrança continua achando
+  // que o pedido está em aberto. Cliente que já pagou recebendo cobrança é o
+  // pior desfecho possível, porque alguns pagam de novo.
+  const PAGOS = ['paid', 'approved', 'completed', 'delivered'];
+  const pago =
+    PAGOS.includes(String(p.payment_status || '').toLowerCase()) || PAGOS.includes(bruto);
 
   const codigo = p.order_number || p.code || p.id;
   const pix = pago ? undefined : acharPix(p);
