@@ -279,12 +279,17 @@ app.post('/webhooks/nerix', async (req, res) => {
   // URL e o do Environment serem coisas diferentes, e é justamente a que não
   // deixava rastro.
   if (config.webhook.nerixSecret && secret !== config.webhook.nerixSecret) {
+    const detalhe =
+      `${secret ? `veio um token de ${String(secret).length} caracteres` : 'nao veio token nenhum'}, ` +
+      `e o servidor espera um de ${config.webhook.nerixSecret.length}`;
     console.warn(
-      '[webhooks/nerix] RECUSADO: o token da URL nao bate com o NERIX_WEBHOOK_SECRET. ' +
-        `Veio ${secret ? `um token de ${String(secret).length} caracteres` : 'NENHUM token'}; ` +
-        `o servidor espera um de ${config.webhook.nerixSecret.length}. ` +
+      `[webhooks/nerix] RECUSADO: o token da URL nao bate com o NERIX_WEBHOOK_SECRET (${detalhe}). ` +
         'Corrija na loja ou no Environment, os dois tem que ser iguais.',
     );
+    // Guarda para o #status. O log do painel é o lugar mais difícil de olhar
+    // para quem opera do celular, e esta é exatamente a informação que separa
+    // "a loja não está chamando" de "a loja chamou e eu recusei".
+    vendas.registrarRecusaWebhook(detalhe);
     return res.status(401).json({ error: 'Assinatura inválida' });
   }
 

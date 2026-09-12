@@ -707,6 +707,18 @@ module.exports = {
   paraWhatsApp,
   /** Quando chegou o último evento da loja. 0 = nunca chegou nenhum. */
   ultimoEventoEm: () => dados.ultimoEventoEm || 0,
+
+  // A RECUSA também precisa aparecer no #status, e não só no log.
+  //
+  // Sem ela, "a loja não está chamando" e "a loja chamou e eu recusei" são a
+  // mesma tela: nenhum evento recebido. São problemas opostos — um se conserta
+  // na loja, o outro no Environment — e a diferença estava só no log do painel,
+  // que é o lugar mais difícil de olhar justamente para quem opera do celular.
+  registrarRecusaWebhook: (motivo) => {
+    dados.ultimaRecusaWebhook = { em: Date.now(), motivo: String(motivo || '').slice(0, 120) };
+    persist();
+  },
+  ultimaRecusaWebhook: () => dados.ultimaRecusaWebhook || null,
   carregar,
   avisarOperador,
   jaFeito,

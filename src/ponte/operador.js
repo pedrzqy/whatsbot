@@ -451,7 +451,21 @@ async function executar(texto, de = '') {
     // 3) Avisos de venda. A pergunta real é "o webhook está cadastrado?", e a
     //    única prova disso é ter chegado algum evento algum dia.
     const ultimoEvento = vendas.ultimoEventoEm();
-    if (!ultimoEvento) {
+    // A RECUSA vem antes, porque ela responde uma pergunta diferente.
+    //
+    // "Nenhum evento recebido" era a mesma tela para dois problemas opostos: a
+    // loja não está chamando (conserta-se na loja) e a loja chamou e o token
+    // não bateu (conserta-se no Environment). A diferença só existia no log do
+    // painel, que é justamente onde é mais difícil olhar do celular.
+    const recusa = vendas.ultimaRecusaWebhook();
+    if (recusa && (!ultimoEvento || recusa.em > ultimoEvento)) {
+      linhas.push(`🚫 Aviso de venda *recusado* há ${min(Date.now() - recusa.em)} min`);
+      problemas.push(
+        'A loja está chamando, mas o token não bate: ' + recusa.motivo + '. ' +
+          'O valor do NERIX_WEBHOOK_SECRET tem que ser igual ao que está depois do ?secret= ' +
+          'na URL cadastrada na loja.',
+      );
+    } else if (!ultimoEvento) {
       linhas.push('⚠️ Avisos de venda — nenhum recebido ainda');
       problemas.push(
         'Se você já vendeu depois da última atualização, o aviso de venda não ' +
