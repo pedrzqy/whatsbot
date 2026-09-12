@@ -466,11 +466,27 @@ async function executar(texto, de = '') {
           'na URL cadastrada na loja.',
       );
     } else if (!ultimoEvento) {
-      linhas.push('⚠️ Avisos de venda — nenhum recebido ainda');
-      problemas.push(
-        'Se você já vendeu depois da última atualização, o aviso de venda não ' +
-          'está ligado no painel da loja.',
-      );
+      // A loja CHAMOU, o token passou, e mesmo assim nada foi contado.
+      //
+      // Este é o caso que consumiu uma investigação inteira: a loja mostrava
+      // "200 Success" e esta linha dizia "nenhum recebido". As duas verdadeiras
+      // — o 200 sai antes do processamento. O que faltava era saber O QUE
+      // chegou, e isso só existia no log.
+      const chamada = vendas.ultimaChamadaWebhook();
+      if (chamada) {
+        linhas.push(`⚠️ Aviso de venda chegou há ${min(Date.now() - chamada.em)} min, mas não virou nada`);
+        problemas.push(
+          `A loja mandou "${chamada.evento}"` +
+            (chamada.pedido ? ` do pedido ${chamada.pedido}` : ', SEM número de pedido') +
+            `. Campos que vieram: ${chamada.campos || '(nenhum)'}. Manda isto para o Claude.`,
+        );
+      } else {
+        linhas.push('⚠️ Avisos de venda — nenhum recebido ainda');
+        problemas.push(
+          'Se você já vendeu depois da última atualização, o aviso de venda não ' +
+            'está ligado no painel da loja.',
+        );
+      }
     } else {
       // Em horas depois de 90 min: "último há 2880 min" é um número que
       // ninguém converte de cabeça no meio do atendimento.

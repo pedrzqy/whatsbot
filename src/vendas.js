@@ -729,6 +729,22 @@ module.exports = {
     persist();
   },
   ultimaRecusaWebhook: () => dados.ultimaRecusaWebhook || null,
+
+  // O QUE CHEGOU, mesmo quando não virou nada.
+  //
+  // A loja mostra 200 Success e o #status diz "nenhum aviso recebido". As duas
+  // coisas são verdade: o 200 sai ANTES do processamento, então ele só prova
+  // que a requisição entrou. Se o evento é descartado depois, o buraco entre as
+  // duas telas não tem nada dentro.
+  //
+  // Aqui fica o que a loja mandou de verdade: o nome do evento e os campos que
+  // vieram. Só os NOMES dos campos, nunca os valores, porque o payload tem dado
+  // de cliente.
+  registrarChamadaWebhook: (info) => {
+    dados.ultimaChamadaWebhook = { em: Date.now(), ...info };
+    persist();
+  },
+  ultimaChamadaWebhook: () => dados.ultimaChamadaWebhook || null,
   carregar,
   avisarOperador,
   jaFeito,

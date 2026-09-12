@@ -295,7 +295,20 @@ app.post('/webhooks/nerix', async (req, res) => {
 
   // E a ACEITAÇÃO também: sem esta linha, "chegou e eu ignorei o evento" fica
   // igual a "não chegou". O nome do evento é o que diz qual dos dois é.
-  console.log(`[webhooks/nerix] recebido: ${req.body?.event || req.body?.type || 'evento sem nome'}`);
+  const nomeDoEvento = req.body?.event || req.body?.type || 'evento sem nome';
+  const dadosDoEvento = req.body?.data || {};
+  console.log(
+    `[webhooks/nerix] recebido: ${nomeDoEvento} | campos em data: ${Object.keys(dadosDoEvento).join(',') || '(vazio)'}`,
+  );
+
+  // Guarda para o #status, porque o 200 que a loja vê sai ANTES disto e não
+  // prova nada sobre o que aconteceu depois. Só os NOMES dos campos: o payload
+  // tem dado de cliente e isto vai parar numa mensagem de WhatsApp.
+  vendas.registrarChamadaWebhook({
+    evento: String(nomeDoEvento).slice(0, 40),
+    pedido: dadosDoEvento.order_number || dadosDoEvento.code || dadosDoEvento.id || null,
+    campos: Object.keys(dadosDoEvento).join(',').slice(0, 200),
+  });
 
   res.status(200).send('OK'); // responde em < 5s conforme exigido
 
